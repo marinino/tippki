@@ -25,19 +25,22 @@ function leagueAverages(matches: Match[]): { avgHomeGoals: number; avgAwayGoals:
 const LEARNING_RATE = 0.0005;
 const ITERATIONS = 500;
 
+function pickReferenceTeam(matches: Match[]): string {
+  const matchCounts = new Map<string, number>();
+  for (const m of matches) {
+    matchCounts.set(m.homeTeam, (matchCounts.get(m.homeTeam) ?? 0) + 1);
+    matchCounts.set(m.awayTeam, (matchCounts.get(m.awayTeam) ?? 0) + 1);
+  }
+  return [...matchCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
 function fitPoissonModel(
   matches: Match[],
   avgHomeGoals: number,
-  avgAwayGoals: number
+  avgAwayGoals: number,
+  referenceTeam: string
 ): Map<string, TeamStrength> {
   const teamNames = [...new Set(matches.flatMap((m) => [m.homeTeam, m.awayTeam]))];
-
-  const matchCounts = new Map(teamNames.map((t) => [t, 0]));
-  for (const m of matches) {
-    matchCounts.set(m.homeTeam, matchCounts.get(m.homeTeam)! + 1);
-    matchCounts.set(m.awayTeam, matchCounts.get(m.awayTeam)! + 1);
-  }
-  const referenceTeam = [...matchCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 
   const attack = new Map(teamNames.map((t) => [t, 0]));
   const defense = new Map(teamNames.map((t) => [t, 0]));
@@ -108,10 +111,74 @@ function computePromotedTeamDefault(teams: Map<string, TeamStrength>): TeamStren
   };
 }
 
+// Gewicht der letzten, vorletzten, ... Saison. Was fuer ein Team unbelegt bleibt
+// (fehlende Saison oder das Reststueck bis 100%) faellt an promotedTeamDefault.
+const SEASON_RECENCY_WEIGHTS = [0.6, 0.3, 0.05, 0.02, 0.02, 0.01];
+
+function fitPerSeasonModels(
+  matches: Match[],
+  seasonsNewestFirst: string[],
+  referenceTeam: string
+): Map<string, Map<string, TeamStrength>> {
+  const perSeason = new Map<string, Map<string, TeamStrength>>();
+
+  for (const season of seasonsNewestFirst) {
+    const seasonMatches = matches.filter((m) => m.season === season);
+    const { avgHomeGoals, avgAwayGoals } = leagueAverages(seasonMatches);
+    perSeason.set(season, fitPoissonModel(seasonMatches, avgHomeGoals, avgAwayGoals, referenceTeam));
+  }
+
+  return perSeason;
+}
+
+function applyRecencyWeighting(
+  allTeamNames: string[],
+  seasonsNewestFirst: string[],
+  perSeasonTeams: Map<string, Map<string, TeamStrength>>,
+  promotedTeamDefault: TeamStrength
+): Map<string, TeamStrength> {
+  const weighted = new Map<string, TeamStrength>();
+
+  for (const team of allTeamNames) {
+    let attack = 0;
+    let defense = 0;
+    let usedWeight = 0;
+
+    seasonsNewestFirst.forEach((season, rank) => {
+      const seasonStrength = perSeasonTeams.get(season)!.get(team);
+      const weight = SEASON_RECENCY_WEIGHTS[rank] ?? 0;
+      if (seasonStrength) {
+        attack += weight * seasonStrength.attack;
+        defense += weight * seasonStrength.defense;
+        usedWeight += weight;
+      }
+    });
+
+    const defaultWeight = 1 - usedWeight;
+    attack += defaultWeight * promotedTeamDefault.attack;
+    defense += defaultWeight * promotedTeamDefault.defense;
+
+    weighted.set(team, { attack, defense });
+  }
+
+  return weighted;
+}
+
 export function buildLeagueModel(matches: Match[]): LeagueModel {
   const { avgHomeGoals, avgAwayGoals } = leagueAverages(matches);
-  const teams = fitPoissonModel(matches, avgHomeGoals, avgAwayGoals);
-  const promotedTeamDefault = computePromotedTeamDefault(teams);
+  const referenceTeam = pickReferenceTeam(matches);
+
+  const fullFitTeams = fitPoissonModel(matches, avgHomeGoals, avgAwayGoals, referenceTeam);
+  const promotedTeamDefault = computePromotedTeamDefault(fullFitTeams);
+
+  const seasonsNewestFirst = [...new Set(matches.map((m) => m.season))].sort().reverse();
+  const perSeasonTeams = fitPerSeasonModels(matches, seasonsNewestFirst, referenceTeam);
+  const teams = applyRecencyWeighting(
+    [...fullFitTeams.keys()],
+    seasonsNewestFirst,
+    perSeasonTeams,
+    promotedTeamDefault
+  );
 
   return { avgHomeGoals, avgAwayGoals, teams, promotedTeamDefault };
 }
