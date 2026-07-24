@@ -16,6 +16,16 @@ export interface Match {
 
 const DATA_DIR = join(__dirname, "..", "..", "data");
 
+// football-data.co.uk-Dateinamen wie "2021" oder "9394" sind zwei zweistellige
+// Jahres-Suffixe hintereinander. Als reiner String sortiert "9394" faelschlich NACH
+// "2021" (weil '9' > '2'). Wir normalisieren auf das vierstellige Startjahr der
+// Saison (z.B. "1993", "2020"), das sortiert sowohl chronologisch als auch als String korrekt.
+function normalizeSeasonCode(rawCode: string): string {
+  const startSuffix = Number(rawCode.slice(0, 2));
+  const startYear = startSuffix >= 50 ? 1900 + startSuffix : 2000 + startSuffix;
+  return String(startYear);
+}
+
 function parseCsvFile(filePath: string, season: string): Match[] {
   const raw = readFileSync(filePath, "utf-8");
   const rows: Record<string, string>[] = parse(raw, {
@@ -41,7 +51,7 @@ export function loadAllMatches(): Match[] {
   const matches: Match[] = [];
 
   for (const file of files) {
-    const season = file.replace("D1_", "").replace(".csv", "");
+    const season = normalizeSeasonCode(file.replace("D1_", "").replace(".csv", ""));
     matches.push(...parseCsvFile(join(DATA_DIR, file), season));
   }
 

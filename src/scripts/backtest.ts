@@ -3,7 +3,7 @@ import { buildLeagueModel } from "../model/teamStrength";
 import { predictMatch } from "../model/predictMatch";
 
 // Nur Saisons, vor denen es genug Trainingsdaten gibt (mind. 3 vorherige Saisons).
-const TEST_SEASONS = ["2324", "2425", "2526"];
+const TEST_SEASONS = ["2023", "2024", "2025"];
 
 const allMatches = loadAllMatches();
 

@@ -2,7 +2,7 @@ import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictMatch } from "../../../model/predictMatch";
 
-const TEST_SEASONS = ["2324", "2425", "2526"];
+const TEST_SEASONS = ["2023", "2024", "2025"];
 
 export async function GET() {
   const allMatches = loadAllMatches();
