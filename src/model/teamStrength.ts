@@ -97,7 +97,7 @@ export function poissonLogLikelihood(
   return logLikelihood;
 }
 
-const WEAKEST_TEAM_COUNT = 4;
+const WEAKEST_TEAM_COUNT = 8;
 
 function computePromotedTeamDefault(teams: Map<string, TeamStrength>): TeamStrength {
   // Qualitaet = attack - defense: hoher Angriffswert und niedriger (guter) Abwehrwert sind gut.

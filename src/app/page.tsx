@@ -15,14 +15,19 @@ interface Prediction {
   awayIsEstimated: boolean;
 }
 
-interface BacktestResult {
-  testSeason: string;
+interface SeasonBacktest {
+  season: string;
   trainMatchCount: number;
   evaluated: number;
-  correctOutcome: number;
-  correctScore: number;
   tendencyAccuracy: number;
   exactScoreAccuracy: number;
+}
+
+interface BacktestResult {
+  perSeason: SeasonBacktest[];
+  totalEvaluated: number;
+  totalTendencyAccuracy: number;
+  totalExactScoreAccuracy: number;
 }
 
 function pct(x: number): string {
@@ -87,23 +92,28 @@ export default function Home() {
       </section>
 
       <section style={{ marginTop: "2rem" }}>
-        <h2>Backtest (Saison 2025/26)</h2>
+        <h2>Backtest (letzte 3 Saisons)</h2>
         <button onClick={runBacktest} disabled={backtestLoading}>
           {backtestLoading ? "Läuft..." : "Backtest starten"}
         </button>
         {backtest && (
-          <ul>
-            <li>Trainingsspiele: {backtest.trainMatchCount}</li>
-            <li>Testspiele: {backtest.evaluated}</li>
-            <li>
-              Trefferquote Tendenz: {backtest.correctOutcome}/{backtest.evaluated} ={" "}
-              {pct(backtest.tendencyAccuracy)}
-            </li>
-            <li>
-              Trefferquote exaktes Ergebnis: {backtest.correctScore}/{backtest.evaluated} ={" "}
-              {pct(backtest.exactScoreAccuracy)}
-            </li>
-          </ul>
+          <>
+            <ul>
+              {backtest.perSeason.map((s) => (
+                <li key={s.season}>
+                  Saison {s.season} ({s.trainMatchCount} Trainingsspiele, {s.evaluated} Testspiele):
+                  Tendenz {pct(s.tendencyAccuracy)}, Exakt {pct(s.exactScoreAccuracy)}
+                </li>
+              ))}
+            </ul>
+            <p>
+              <strong>
+                Gesamt über {backtest.perSeason.length} Saisons ({backtest.totalEvaluated} Spiele):
+                Tendenz {pct(backtest.totalTendencyAccuracy)}, Exakt{" "}
+                {pct(backtest.totalExactScoreAccuracy)}
+              </strong>
+            </p>
+          </>
         )}
       </section>
     </main>

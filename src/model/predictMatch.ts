@@ -26,7 +26,7 @@ const MAX_GOALS = 10;
 
 // Dixon-Coles-Korrektur: in echten Daten kommen 0:0, 1:0, 0:1 und 1:1 etwas anders
 // vor, als die (vereinfachende) Annahme unabhaengiger Heim-/Auswaertstore vorhersagt.
-const RHO = -0.1;
+const RHO = -0.15;
 
 function dixonColesTau(h: number, a: number, lambdaHome: number, lambdaAway: number): number {
   if (h === 0 && a === 0) return 1 - lambdaHome * lambdaAway * RHO;
@@ -35,6 +35,10 @@ function dixonColesTau(h: number, a: number, lambdaHome: number, lambdaAway: num
   if (h === 1 && a === 1) return 1 - RHO;
   return 1;
 }
+
+// Genereller Bonus fuer JEDES Unentschieden (0:0, 1:1, 2:2, ...), nicht nur die
+// von dixonColesTau abgedeckten Faelle. 1 = kein Effekt.
+const DRAW_BOOST = 1.2;
 
 export function predictMatch(
   model: LeagueModel,
@@ -62,7 +66,8 @@ export function predictMatch(
       const prob =
         poissonProbability(expectedHomeGoals, h) *
         poissonProbability(expectedAwayGoals, a) *
-        dixonColesTau(h, a, expectedHomeGoals, expectedAwayGoals);
+        dixonColesTau(h, a, expectedHomeGoals, expectedAwayGoals) *
+        (h === a ? DRAW_BOOST : 1);
       scoreProbabilities.set(`${h}:${a}`, prob);
       totalProb += prob;
     }
