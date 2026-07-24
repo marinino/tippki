@@ -1,5 +1,11 @@
 [
-  { "homeTeam": "Bayern Munich", "awayTeam": "RB Leipzig" },
-  { "homeTeam": "Dortmund", "awayTeam": "Stuttgart" },
-  { "homeTeam": "Leverkusen", "awayTeam": "Ein Frankfurt" }
+  { "homeTeam": "Bayern Munich", "awayTeam": "Stuttgart" },
+  { "homeTeam": "Dortmund", "awayTeam": "Hamburg" },
+  { "homeTeam": "RB Leipzig", "awayTeam": "M'gladbach" },
+  { "homeTeam": "Freiburg", "awayTeam": "Werder Bremen" },
+  { "homeTeam": "Augsburg", "awayTeam": "Schalke 04" },
+  { "homeTeam": "Mainz", "awayTeam": "Paderborn" },
+  { "homeTeam": "Union Berlin", "awayTeam": "Ein Frankfurt" },
+  { "homeTeam": "FC Koln", "awayTeam": "Hoffenheim" },
+  { "homeTeam": "Elversberg", "awayTeam": "Leverkusen" }
 ]

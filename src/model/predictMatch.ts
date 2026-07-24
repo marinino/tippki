@@ -8,6 +8,8 @@ export interface MatchPrediction {
   drawProb: number;
   awayWinProb: number;
   mostLikelyScore: string;
+  homeIsEstimated: boolean;
+  awayIsEstimated: boolean;
 }
 
 function poissonProbability(lambda: number, k: number): number {
@@ -27,11 +29,10 @@ export function predictMatch(
   homeTeam: string,
   awayTeam: string
 ): MatchPrediction {
-  const home = model.teams.get(homeTeam);
-  const away = model.teams.get(awayTeam);
-  if (!home || !away) {
-    throw new Error(`Unbekanntes Team: ${!home ? homeTeam : awayTeam}`);
-  }
+  const homeIsEstimated = !model.teams.has(homeTeam);
+  const awayIsEstimated = !model.teams.has(awayTeam);
+  const home = model.teams.get(homeTeam) ?? model.promotedTeamDefault;
+  const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
 
   const expectedHomeGoals = model.avgHomeGoals * home.attackHome * away.defenseAway;
   const expectedAwayGoals = model.avgAwayGoals * away.attackAway * home.defenseHome;
@@ -68,5 +69,7 @@ export function predictMatch(
     drawProb,
     awayWinProb,
     mostLikelyScore,
+    homeIsEstimated,
+    awayIsEstimated,
   };
 }

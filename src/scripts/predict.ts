@@ -17,15 +17,11 @@ const matches = loadAllMatches();
 const model = buildLeagueModel(matches);
 
 for (const { homeTeam, awayTeam } of fixtures) {
-  if (!model.teams.has(homeTeam) || !model.teams.has(awayTeam)) {
-    console.log(
-      `${homeTeam} vs ${awayTeam}\n  -> übersprungen: keine historischen Daten für ${!model.teams.has(homeTeam) ? homeTeam : awayTeam} (z.B. gerade aufgestiegen)\n`
-    );
-    continue;
-  }
-
   const prediction = predictMatch(model, homeTeam, awayTeam);
-  console.log(`${homeTeam} vs ${awayTeam}`);
+  const homeLabel = prediction.homeIsEstimated ? `${homeTeam} (geschätzt, Aufsteiger?)` : homeTeam;
+  const awayLabel = prediction.awayIsEstimated ? `${awayTeam} (geschätzt, Aufsteiger?)` : awayTeam;
+
+  console.log(`${homeLabel} vs ${awayLabel}`);
   console.log(
     `  erwartete Tore: ${prediction.expectedHomeGoals.toFixed(2)} : ${prediction.expectedAwayGoals.toFixed(2)}`
   );

@@ -15,10 +15,6 @@ let correctScore = 0;
 let evaluated = 0;
 
 for (const match of testMatches) {
-  if (!model.teams.has(match.homeTeam) || !model.teams.has(match.awayTeam)) {
-    continue;
-  }
-
   const prediction = predictMatch(model, match.homeTeam, match.awayTeam);
 
   const actualOutcome =
