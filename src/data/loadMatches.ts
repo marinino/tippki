@@ -1,6 +1,9 @@
 import { parse } from "csv-parse/sync";
 import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface Match {
   date: string;
