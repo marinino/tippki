@@ -24,6 +24,18 @@ function factorial(n: number): number {
 
 const MAX_GOALS = 10;
 
+// Dixon-Coles-Korrektur: in echten Daten kommen 0:0, 1:0, 0:1 und 1:1 etwas anders
+// vor, als die (vereinfachende) Annahme unabhaengiger Heim-/Auswaertstore vorhersagt.
+const RHO = -0.1;
+
+function dixonColesTau(h: number, a: number, lambdaHome: number, lambdaAway: number): number {
+  if (h === 0 && a === 0) return 1 - lambdaHome * lambdaAway * RHO;
+  if (h === 0 && a === 1) return 1 + lambdaHome * RHO;
+  if (h === 1 && a === 0) return 1 + lambdaAway * RHO;
+  if (h === 1 && a === 1) return 1 - RHO;
+  return 1;
+}
+
 export function predictMatch(
   model: LeagueModel,
   homeTeam: string,
@@ -44,20 +56,30 @@ export function predictMatch(
   let mostLikelyScore = "0:0";
   let mostLikelyProb = -1;
 
+  let totalProb = 0;
   for (let h = 0; h <= MAX_GOALS; h++) {
     for (let a = 0; a <= MAX_GOALS; a++) {
       const prob =
-        poissonProbability(expectedHomeGoals, h) * poissonProbability(expectedAwayGoals, a);
+        poissonProbability(expectedHomeGoals, h) *
+        poissonProbability(expectedAwayGoals, a) *
+        dixonColesTau(h, a, expectedHomeGoals, expectedAwayGoals);
       scoreProbabilities.set(`${h}:${a}`, prob);
+      totalProb += prob;
+    }
+  }
 
-      if (h > a) homeWinProb += prob;
-      else if (h === a) drawProb += prob;
-      else awayWinProb += prob;
+  for (const [score, prob] of scoreProbabilities) {
+    const normalizedProb = prob / totalProb;
+    scoreProbabilities.set(score, normalizedProb);
 
-      if (prob > mostLikelyProb) {
-        mostLikelyProb = prob;
-        mostLikelyScore = `${h}:${a}`;
-      }
+    const [h, a] = score.split(":").map(Number);
+    if (h > a) homeWinProb += normalizedProb;
+    else if (h === a) drawProb += normalizedProb;
+    else awayWinProb += normalizedProb;
+
+    if (normalizedProb > mostLikelyProb) {
+      mostLikelyProb = normalizedProb;
+      mostLikelyScore = score;
     }
   }
 
