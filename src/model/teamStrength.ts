@@ -1,10 +1,8 @@
 import { Match } from "../data/loadMatches";
 
 export interface TeamStrength {
-  attackHome: number;
-  defenseHome: number;
-  attackAway: number;
-  defenseAway: number;
+  attack: number;
+  defense: number;
 }
 
 export interface LeagueModel {
@@ -24,87 +22,96 @@ function leagueAverages(matches: Match[]): { avgHomeGoals: number; avgAwayGoals:
   };
 }
 
-function computeTeamStrength(
+const LEARNING_RATE = 0.0005;
+const ITERATIONS = 500;
+
+function fitPoissonModel(
   matches: Match[],
-  team: string,
   avgHomeGoals: number,
   avgAwayGoals: number
-): TeamStrength {
-  const homeMatches = matches.filter((m) => m.homeTeam === team);
-  const awayMatches = matches.filter((m) => m.awayTeam === team);
+): Map<string, TeamStrength> {
+  const teamNames = [...new Set(matches.flatMap((m) => [m.homeTeam, m.awayTeam]))];
 
-  const goalsScoredHome = homeMatches.reduce((sum, m) => sum + m.homeGoals, 0);
-  const goalsConcededHome = homeMatches.reduce((sum, m) => sum + m.awayGoals, 0);
-  const goalsScoredAway = awayMatches.reduce((sum, m) => sum + m.awayGoals, 0);
-  const goalsConcededAway = awayMatches.reduce((sum, m) => sum + m.homeGoals, 0);
-
-  return {
-    attackHome: goalsScoredHome / homeMatches.length / avgHomeGoals,
-    defenseHome: goalsConcededHome / homeMatches.length / avgAwayGoals,
-    attackAway: goalsScoredAway / awayMatches.length / avgAwayGoals,
-    defenseAway: goalsConcededAway / awayMatches.length / avgHomeGoals,
-  };
-}
-
-function findPromotedTeamDebuts(matches: Match[]): { team: string; season: string }[] {
-  const teamsBySeason = new Map<string, Set<string>>();
+  const matchCounts = new Map(teamNames.map((t) => [t, 0]));
   for (const m of matches) {
-    if (!teamsBySeason.has(m.season)) teamsBySeason.set(m.season, new Set());
-    teamsBySeason.get(m.season)!.add(m.homeTeam);
-    teamsBySeason.get(m.season)!.add(m.awayTeam);
+    matchCounts.set(m.homeTeam, matchCounts.get(m.homeTeam)! + 1);
+    matchCounts.set(m.awayTeam, matchCounts.get(m.awayTeam)! + 1);
   }
+  const referenceTeam = [...matchCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 
-  const seasons = [...teamsBySeason.keys()].sort();
-  const debuts: { team: string; season: string }[] = [];
+  const attack = new Map(teamNames.map((t) => [t, 0]));
+  const defense = new Map(teamNames.map((t) => [t, 0]));
 
-  for (let i = 1; i < seasons.length; i++) {
-    const previousTeams = teamsBySeason.get(seasons[i - 1])!;
-    const currentTeams = teamsBySeason.get(seasons[i])!;
-    for (const team of currentTeams) {
-      if (!previousTeams.has(team)) {
-        debuts.push({ team, season: seasons[i] });
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    const attackGrad = new Map(teamNames.map((t) => [t, 0]));
+    const defenseGrad = new Map(teamNames.map((t) => [t, 0]));
+
+    for (const m of matches) {
+      const lambdaHome =
+        avgHomeGoals * Math.exp(attack.get(m.homeTeam)!) * Math.exp(defense.get(m.awayTeam)!);
+      const lambdaAway =
+        avgAwayGoals * Math.exp(attack.get(m.awayTeam)!) * Math.exp(defense.get(m.homeTeam)!);
+
+      const homeResidual = m.homeGoals - lambdaHome;
+      const awayResidual = m.awayGoals - lambdaAway;
+
+      attackGrad.set(m.homeTeam, attackGrad.get(m.homeTeam)! + homeResidual);
+      defenseGrad.set(m.awayTeam, defenseGrad.get(m.awayTeam)! + homeResidual);
+      attackGrad.set(m.awayTeam, attackGrad.get(m.awayTeam)! + awayResidual);
+      defenseGrad.set(m.homeTeam, defenseGrad.get(m.homeTeam)! + awayResidual);
+    }
+
+    for (const team of teamNames) {
+      if (team !== referenceTeam) {
+        attack.set(team, attack.get(team)! + LEARNING_RATE * attackGrad.get(team)!);
       }
+      defense.set(team, defense.get(team)! + LEARNING_RATE * defenseGrad.get(team)!);
     }
   }
 
-  return debuts;
+  const result = new Map<string, TeamStrength>();
+  for (const team of teamNames) {
+    result.set(team, { attack: attack.get(team)!, defense: defense.get(team)! });
+  }
+  return result;
 }
 
-function computePromotedTeamDefault(matches: Match[]): TeamStrength {
-  const debuts = findPromotedTeamDebuts(matches);
+export function poissonLogLikelihood(
+  matches: Match[],
+  teams: Map<string, TeamStrength>,
+  avgHomeGoals: number,
+  avgAwayGoals: number
+): number {
+  let logLikelihood = 0;
+  for (const m of matches) {
+    const home = teams.get(m.homeTeam)!;
+    const away = teams.get(m.awayTeam)!;
+    const lambdaHome = avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense);
+    const lambdaAway = avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense);
+    logLikelihood += -lambdaHome + m.homeGoals * Math.log(lambdaHome);
+    logLikelihood += -lambdaAway + m.awayGoals * Math.log(lambdaAway);
+  }
+  return logLikelihood;
+}
 
-  const profiles = debuts.map(({ team, season }) => {
-    const seasonMatches = matches.filter((m) => m.season === season);
-    const { avgHomeGoals, avgAwayGoals } = leagueAverages(seasonMatches);
-    return computeTeamStrength(seasonMatches, team, avgHomeGoals, avgAwayGoals);
-  });
+const WEAKEST_TEAM_COUNT = 4;
 
-  const average = (key: keyof TeamStrength) =>
-    profiles.reduce((sum, p) => sum + p[key], 0) / profiles.length;
+function computePromotedTeamDefault(teams: Map<string, TeamStrength>): TeamStrength {
+  // Qualitaet = attack - defense: hoher Angriffswert und niedriger (guter) Abwehrwert sind gut.
+  const weakest = [...teams.values()]
+    .sort((a, b) => a.attack - a.defense - (b.attack - b.defense))
+    .slice(0, WEAKEST_TEAM_COUNT);
 
   return {
-    attackHome: average("attackHome"),
-    defenseHome: average("defenseHome"),
-    attackAway: average("attackAway"),
-    defenseAway: average("defenseAway"),
+    attack: weakest.reduce((sum, t) => sum + t.attack, 0) / weakest.length,
+    defense: weakest.reduce((sum, t) => sum + t.defense, 0) / weakest.length,
   };
 }
 
 export function buildLeagueModel(matches: Match[]): LeagueModel {
   const { avgHomeGoals, avgAwayGoals } = leagueAverages(matches);
-
-  const teamNames = new Set<string>();
-  for (const m of matches) {
-    teamNames.add(m.homeTeam);
-    teamNames.add(m.awayTeam);
-  }
-
-  const teams = new Map<string, TeamStrength>();
-  for (const team of teamNames) {
-    teams.set(team, computeTeamStrength(matches, team, avgHomeGoals, avgAwayGoals));
-  }
-
-  const promotedTeamDefault = computePromotedTeamDefault(matches);
+  const teams = fitPoissonModel(matches, avgHomeGoals, avgAwayGoals);
+  const promotedTeamDefault = computePromotedTeamDefault(teams);
 
   return { avgHomeGoals, avgAwayGoals, teams, promotedTeamDefault };
 }

@@ -34,8 +34,8 @@ export function predictMatch(
   const home = model.teams.get(homeTeam) ?? model.promotedTeamDefault;
   const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
 
-  const expectedHomeGoals = model.avgHomeGoals * home.attackHome * away.defenseAway;
-  const expectedAwayGoals = model.avgAwayGoals * away.attackAway * home.defenseHome;
+  const expectedHomeGoals = model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense);
+  const expectedAwayGoals = model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense);
 
   const scoreProbabilities = new Map<string, number>();
   let homeWinProb = 0;
