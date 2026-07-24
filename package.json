@@ -1,0 +1,32 @@
+{
+  "name": "tippki",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "load-matches": "tsx src/scripts/loadMatches.ts",
+    "backtest": "tsx src/scripts/backtest.ts",
+    "predict": "tsx src/scripts/predict.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marinino/tippki.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/marinino/tippki/issues"
+  },
+  "homepage": "https://github.com/marinino/tippki#readme",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.1"
+  }
+}
