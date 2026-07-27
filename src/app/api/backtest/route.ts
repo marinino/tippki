@@ -1,11 +1,13 @@
-import { loadAllMatches } from "../../../data/loadMatches";
+import { loadAllMatches, parseMatchDate } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictMatch } from "../../../model/predictMatch";
+import { computeRecentForm, sortByDate } from "../../../model/recentForm";
 
 const TEST_SEASONS = ["2023", "2024", "2025"];
 
 export async function GET() {
   const allMatches = loadAllMatches();
+  const allMatchesSortedByDate = sortByDate(allMatches);
 
   const perSeason = [];
   let totalCorrectOutcome = 0;
@@ -23,7 +25,10 @@ export async function GET() {
     let evaluated = 0;
 
     for (const match of testMatches) {
-      const prediction = predictMatch(model, match.homeTeam, match.awayTeam);
+      const matchDate = parseMatchDate(match.date);
+      const homeForm = computeRecentForm(allMatchesSortedByDate, match.homeTeam, matchDate);
+      const awayForm = computeRecentForm(allMatchesSortedByDate, match.awayTeam, matchDate);
+      const prediction = predictMatch(model, match.homeTeam, match.awayTeam, homeForm, awayForm);
 
       const actualOutcome =
         match.homeGoals > match.awayGoals ? "H" : match.homeGoals === match.awayGoals ? "D" : "A";

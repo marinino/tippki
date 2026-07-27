@@ -16,6 +16,13 @@ export interface Match {
 
 const DATA_DIR = join(__dirname, "..", "..", "data");
 
+// football-data.co.uk-Datumsformat ist tt/mm/jjjj (oder tt/mm/jj bei alten Dateien).
+export function parseMatchDate(date: string): Date {
+  const [day, month, yearRaw] = date.split("/").map(Number);
+  const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+  return new Date(year, month - 1, day);
+}
+
 // football-data.co.uk-Dateinamen wie "2021" oder "9394" sind zwei zweistellige
 // Jahres-Suffixe hintereinander. Als reiner String sortiert "9394" faelschlich NACH
 // "2021" (weil '9' > '2'). Wir normalisieren auf das vierstellige Startjahr der

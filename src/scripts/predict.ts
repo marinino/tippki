@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { loadAllMatches } from "../data/loadMatches";
 import { buildLeagueModel } from "../model/teamStrength";
 import { predictMatch } from "../model/predictMatch";
+import { computeRecentForm, sortByDate } from "../model/recentForm";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_PATH = join(__dirname, "..", "..", "data", "fixtures.json");
@@ -16,10 +17,14 @@ interface Fixture {
 const fixtures: Fixture[] = JSON.parse(readFileSync(FIXTURES_PATH, "utf-8"));
 
 const matches = loadAllMatches();
+const matchesSortedByDate = sortByDate(matches);
 const model = buildLeagueModel(matches);
+const now = new Date();
 
 for (const { homeTeam, awayTeam } of fixtures) {
-  const prediction = predictMatch(model, homeTeam, awayTeam);
+  const homeForm = computeRecentForm(matchesSortedByDate, homeTeam, now);
+  const awayForm = computeRecentForm(matchesSortedByDate, awayTeam, now);
+  const prediction = predictMatch(model, homeTeam, awayTeam, homeForm, awayForm);
   const homeLabel = prediction.homeIsEstimated ? `${homeTeam} (geschätzt, Aufsteiger?)` : homeTeam;
   const awayLabel = prediction.awayIsEstimated ? `${awayTeam} (geschätzt, Aufsteiger?)` : awayTeam;
 

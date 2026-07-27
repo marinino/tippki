@@ -1,4 +1,5 @@
 import { LeagueModel } from "./teamStrength";
+import { FORM_WEIGHT } from "./recentForm";
 
 export interface MatchPrediction {
   expectedHomeGoals: number;
@@ -43,15 +44,21 @@ const DRAW_BOOST = 1.2;
 export function predictMatch(
   model: LeagueModel,
   homeTeam: string,
-  awayTeam: string
+  awayTeam: string,
+  // Formkurve (durchschnittliche Tordifferenz der letzten Spiele) je Team, optional.
+  // 0 = kein Formeffekt, z.B. wenn keine Datumsangabe fuer die Berechnung vorliegt.
+  homeForm: number = 0,
+  awayForm: number = 0
 ): MatchPrediction {
   const homeIsEstimated = !model.teams.has(homeTeam);
   const awayIsEstimated = !model.teams.has(awayTeam);
   const home = model.teams.get(homeTeam) ?? model.promotedTeamDefault;
   const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
 
-  const expectedHomeGoals = model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense);
-  const expectedAwayGoals = model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense);
+  const expectedHomeGoals =
+    model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense) * Math.exp(FORM_WEIGHT * homeForm);
+  const expectedAwayGoals =
+    model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense) * Math.exp(FORM_WEIGHT * awayForm);
 
   const scoreProbabilities = new Map<string, number>();
   let homeWinProb = 0;
