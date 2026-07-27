@@ -1,5 +1,5 @@
 import { LeagueModel } from "./teamStrength";
-import { FORM_WEIGHT } from "./recentForm";
+import { XG_FORM_WEIGHT } from "./xgForm";
 
 export interface MatchPrediction {
   expectedHomeGoals: number;
@@ -45,8 +45,8 @@ export function predictMatch(
   model: LeagueModel,
   homeTeam: string,
   awayTeam: string,
-  // Formkurve (durchschnittliche Tordifferenz der letzten Spiele) je Team, optional.
-  // 0 = kein Formeffekt, z.B. wenn keine Datumsangabe fuer die Berechnung vorliegt.
+  // xG-Formkurve (durchschnittliche xG-Differenz der letzten Spiele) je Team, optional.
+  // 0 = kein Formeffekt, z.B. wenn kein Teamname-Mapping oder keine Historie existiert.
   homeForm: number = 0,
   awayForm: number = 0
 ): MatchPrediction {
@@ -56,9 +56,9 @@ export function predictMatch(
   const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
 
   const expectedHomeGoals =
-    model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense) * Math.exp(FORM_WEIGHT * homeForm);
+    model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense) * Math.exp(XG_FORM_WEIGHT * homeForm);
   const expectedAwayGoals =
-    model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense) * Math.exp(FORM_WEIGHT * awayForm);
+    model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense) * Math.exp(XG_FORM_WEIGHT * awayForm);
 
   const scoreProbabilities = new Map<string, number>();
   let homeWinProb = 0;

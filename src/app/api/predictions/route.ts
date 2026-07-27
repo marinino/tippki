@@ -3,7 +3,7 @@ import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictMatch } from "../../../model/predictMatch";
-import { computeRecentForm, sortByDate } from "../../../model/recentForm";
+import { computeXgForm } from "../../../model/xgForm";
 
 interface Fixture {
   homeTeam: string;
@@ -15,13 +15,12 @@ export async function GET() {
   const fixtures: Fixture[] = JSON.parse(readFileSync(fixturesPath, "utf-8"));
 
   const matches = loadAllMatches();
-  const matchesSortedByDate = sortByDate(matches);
   const model = buildLeagueModel(matches);
   const now = new Date();
 
   const predictions = fixtures.map(({ homeTeam, awayTeam }) => {
-    const homeForm = computeRecentForm(matchesSortedByDate, homeTeam, now);
-    const awayForm = computeRecentForm(matchesSortedByDate, awayTeam, now);
+    const homeForm = computeXgForm(homeTeam, now);
+    const awayForm = computeXgForm(awayTeam, now);
     const prediction = predictMatch(model, homeTeam, awayTeam, homeForm, awayForm);
     return {
       homeTeam,
