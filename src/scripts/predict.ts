@@ -12,17 +12,24 @@ const FIXTURES_PATH = join(__dirname, "..", "..", "data", "fixtures.json");
 interface Fixture {
   homeTeam: string;
   awayTeam: string;
+  date: string;
+  matchday: number;
 }
 
-const fixtures: Fixture[] = JSON.parse(readFileSync(FIXTURES_PATH, "utf-8"));
+const allFixtures: Fixture[] = JSON.parse(readFileSync(FIXTURES_PATH, "utf-8"));
+
+const now = new Date();
+const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
+const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
+const fixtures = upcoming.filter((f) => f.matchday === nextMatchday);
 
 const matches = loadAllMatches();
 const model = buildLeagueModel(matches);
-const now = new Date();
 
-for (const { homeTeam, awayTeam } of fixtures) {
-  const homeForm = computeXgForm(homeTeam, now);
-  const awayForm = computeXgForm(awayTeam, now);
+for (const { homeTeam, awayTeam, date } of fixtures) {
+  const matchDate = new Date(date);
+  const homeForm = computeXgForm(homeTeam, matchDate);
+  const awayForm = computeXgForm(awayTeam, matchDate);
   const prediction = predictMatch(model, homeTeam, awayTeam, homeForm, awayForm);
   const homeLabel = prediction.homeIsEstimated ? `${homeTeam} (geschätzt, Aufsteiger?)` : homeTeam;
   const awayLabel = prediction.awayIsEstimated ? `${awayTeam} (geschätzt, Aufsteiger?)` : awayTeam;

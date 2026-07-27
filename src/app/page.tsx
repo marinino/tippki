@@ -92,7 +92,7 @@ export default function Home() {
       </section>
 
       <section style={{ marginTop: "2rem" }}>
-        <h2>Backtest (letzte 3 Saisons)</h2>
+        <h2>Backtest</h2>
         <button onClick={runBacktest} disabled={backtestLoading}>
           {backtestLoading ? "Läuft..." : "Backtest starten"}
         </button>

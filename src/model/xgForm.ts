@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
+import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,22 +26,55 @@ export const XG_FORM_WINDOW = 3;
 // Wie stark die xG-Formkurve die erwarteten Tore beeinflusst (multiplikativ via exp(beta * form)).
 export const XG_FORM_WEIGHT = 0.2;
 
-let cachedMatches: XgMatch[] | null = null;
+let cachedXgMatches: XgMatch[] | null = null;
 
 function loadXgMatches(): XgMatch[] {
-  if (!cachedMatches) {
+  if (!cachedXgMatches) {
     const raw = readFileSync(join(__dirname, "..", "..", "data", "xg_bundesliga.json"), "utf-8");
     const matches: XgMatch[] = JSON.parse(raw);
-    cachedMatches = [...matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    cachedXgMatches = [...matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }
-  return cachedMatches;
+  return cachedXgMatches;
 }
 
-// Durchschnittliche xG-Differenz (erzielt minus zugelassen) der letzten `n` Spiele eines Teams
-// vor `beforeDate`, saisonuebergreifend. 0, wenn kein Teamname-Mapping oder keine Historie existiert.
-export function computeXgForm(ourTeamName: string, beforeDate: Date, n: number = XG_FORM_WINDOW): number {
+let cachedOwnMatches: ReturnType<typeof loadAllMatches> | null = null;
+
+function loadOwnMatches() {
+  if (!cachedOwnMatches) cachedOwnMatches = loadAllMatches();
+  return cachedOwnMatches;
+}
+
+// Bundesliga-Saisons laufen von August bis Mai. Ein Datum vor Juli gehoert noch zur
+// Saison, die im Vorjahr gestartet ist (unsere Saison-Codes sind das Startjahr, z.B. "2020").
+function deriveSeasonFromDate(date: Date): string {
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  return String(month >= 6 ? year : year - 1);
+}
+
+// Zaehlt, wie viele Ligaspiele ein Team in der zu `beforeDate` gehoerenden Saison bereits
+// bestritten hat. Damit laesst sich das Formfenster am Saisonstart hochfahren, statt sofort
+// mit Spielen aus der Vorsaison zu rechnen (an Spieltag 1 ist die Formkurve sonst veraltet).
+function gamesPlayedThisSeason(ourTeamName: string, beforeDate: Date): number {
+  const season = deriveSeasonFromDate(beforeDate);
+  return loadOwnMatches().filter(
+    (m) =>
+      m.season === season &&
+      (m.homeTeam === ourTeamName || m.awayTeam === ourTeamName) &&
+      parseMatchDate(m.date) < beforeDate
+  ).length;
+}
+
+// Durchschnittliche xG-Differenz (erzielt minus zugelassen) der letzten Spiele eines Teams vor
+// `beforeDate`. Das Fenster faehrt am Saisonstart hoch (0 an Spieltag 1, 1 an Spieltag 2, ...,
+// ab Spieltag XG_FORM_WINDOW+1 das volle Fenster), damit keine veralteten Vorsaison-Spiele in
+// die Form der neuen Saison einfliessen. 0, wenn kein Teamname-Mapping oder keine Historie existiert.
+export function computeXgForm(ourTeamName: string, beforeDate: Date): number {
   const understatName = OUR_NAME_TO_UNDERSTAT[ourTeamName];
   if (!understatName) return 0;
+
+  const n = Math.min(gamesPlayedThisSeason(ourTeamName, beforeDate), XG_FORM_WINDOW);
+  if (n === 0) return 0;
 
   const matches = loadXgMatches();
   const teamMatches = matches.filter(
