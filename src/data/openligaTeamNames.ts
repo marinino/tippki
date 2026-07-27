@@ -1,0 +1,21 @@
+// OpenLigaDB-Teamname -> unsere (football-data.co.uk-) Namenskonvention.
+export const OPENLIGADB_TO_OUR_NAME: Record<string, string> = {
+  "1. FC Köln": "FC Koln",
+  "1. FC Union Berlin": "Union Berlin",
+  "1. FSV Mainz 05": "Mainz",
+  "Bayer 04 Leverkusen": "Leverkusen",
+  "Borussia Dortmund": "Dortmund",
+  "Borussia Mönchengladbach": "M'gladbach",
+  "Eintracht Frankfurt": "Ein Frankfurt",
+  "FC Augsburg": "Augsburg",
+  "FC Bayern München": "Bayern Munich",
+  "FC Schalke 04": "Schalke 04",
+  "Hamburger SV": "Hamburg",
+  "RB Leipzig": "RB Leipzig",
+  "SC Freiburg": "Freiburg",
+  "SC Paderborn 07": "Paderborn",
+  "SV 07 Elversberg": "Elversberg",
+  "SV Werder Bremen": "Werder Bremen",
+  "TSG Hoffenheim": "Hoffenheim",
+  "VfB Stuttgart": "Stuttgart",
+};

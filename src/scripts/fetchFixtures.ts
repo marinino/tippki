@@ -1,35 +1,19 @@
 import { writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { OPENLIGADB_TO_OUR_NAME } from "../data/openligaTeamNames";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// OpenLigaDB-Teamname -> unsere (football-data.co.uk-) Namenskonvention.
-const OPENLIGADB_TO_OUR_NAME: Record<string, string> = {
-  "1. FC Köln": "FC Koln",
-  "1. FC Union Berlin": "Union Berlin",
-  "1. FSV Mainz 05": "Mainz",
-  "Bayer 04 Leverkusen": "Leverkusen",
-  "Borussia Dortmund": "Dortmund",
-  "Borussia Mönchengladbach": "M'gladbach",
-  "Eintracht Frankfurt": "Ein Frankfurt",
-  "FC Augsburg": "Augsburg",
-  "FC Bayern München": "Bayern Munich",
-  "FC Schalke 04": "Schalke 04",
-  "Hamburger SV": "Hamburg",
-  "RB Leipzig": "RB Leipzig",
-  "SC Freiburg": "Freiburg",
-  "SC Paderborn 07": "Paderborn",
-  "SV 07 Elversberg": "Elversberg",
-  "SV Werder Bremen": "Werder Bremen",
-  "TSG Hoffenheim": "Hoffenheim",
-  "VfB Stuttgart": "Stuttgart",
-};
+interface OpenLigaTeam {
+  teamName: string;
+  teamIconUrl: string;
+}
 
 interface OpenLigaMatch {
   matchDateTime: string;
-  team1: { teamName: string };
-  team2: { teamName: string };
+  team1: OpenLigaTeam;
+  team2: OpenLigaTeam;
   group: { groupOrderID: number; groupName: string };
 }
 
@@ -40,12 +24,18 @@ async function main() {
   const matches: OpenLigaMatch[] = await res.json();
 
   const unmapped = new Set<string>();
+  const logosByTeam: Record<string, string> = {};
+
   const fixtures = matches
     .map((m) => {
       const homeTeam = OPENLIGADB_TO_OUR_NAME[m.team1.teamName];
       const awayTeam = OPENLIGADB_TO_OUR_NAME[m.team2.teamName];
       if (!homeTeam) unmapped.add(m.team1.teamName);
       if (!awayTeam) unmapped.add(m.team2.teamName);
+
+      if (homeTeam && m.team1.teamIconUrl) logosByTeam[homeTeam] = m.team1.teamIconUrl;
+      if (awayTeam && m.team2.teamIconUrl) logosByTeam[awayTeam] = m.team2.teamIconUrl;
+
       return {
         homeTeam: homeTeam ?? m.team1.teamName,
         awayTeam: awayTeam ?? m.team2.teamName,
@@ -59,9 +49,13 @@ async function main() {
     console.warn("WARNUNG: Teams ohne Namens-Mapping:", [...unmapped]);
   }
 
-  const outPath = join(__dirname, "..", "..", "data", "fixtures.json");
-  writeFileSync(outPath, JSON.stringify(fixtures, null, 2));
-  console.log(`${fixtures.length} Spiele der Saison ${season}/${Number(season) + 1} -> ${outPath}`);
+  const fixturesPath = join(__dirname, "..", "..", "data", "fixtures.json");
+  writeFileSync(fixturesPath, JSON.stringify(fixtures, null, 2));
+  console.log(`${fixtures.length} Spiele der Saison ${season}/${Number(season) + 1} -> ${fixturesPath}`);
+
+  const logosPath = join(__dirname, "..", "..", "data", "teamLogos.json");
+  writeFileSync(logosPath, JSON.stringify(logosByTeam, null, 2));
+  console.log(`${Object.keys(logosByTeam).length} Team-Logos -> ${logosPath}`);
 }
 
 main();

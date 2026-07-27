@@ -12,14 +12,25 @@ interface Fixture {
   matchday: number;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const fixturesPath = join(process.cwd(), "data", "fixtures.json");
   const allFixtures: Fixture[] = JSON.parse(readFileSync(fixturesPath, "utf-8"));
+
+  const logosPath = join(process.cwd(), "data", "teamLogos.json");
+  const logosByTeam: Record<string, string> = JSON.parse(readFileSync(logosPath, "utf-8"));
+
+  const availableMatchdays = [...new Set(allFixtures.map((f) => f.matchday))].sort((a, b) => a - b);
 
   const now = new Date();
   const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
   const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
-  const fixtures = upcoming.filter((f) => f.matchday === nextMatchday);
+
+  const requestedParam = new URL(request.url).searchParams.get("matchday");
+  const requestedMatchday = requestedParam ? Number(requestedParam) : null;
+  const selectedMatchday =
+    requestedMatchday && availableMatchdays.includes(requestedMatchday) ? requestedMatchday : nextMatchday;
+
+  const fixtures = allFixtures.filter((f) => f.matchday === selectedMatchday);
 
   const matches = loadAllMatches();
   const model = buildLeagueModel(matches);
@@ -32,6 +43,9 @@ export async function GET() {
     return {
       homeTeam,
       awayTeam,
+      homeLogo: logosByTeam[homeTeam] ?? null,
+      awayLogo: logosByTeam[awayTeam] ?? null,
+      date,
       expectedHomeGoals: prediction.expectedHomeGoals,
       expectedAwayGoals: prediction.expectedAwayGoals,
       homeWinProb: prediction.homeWinProb,
@@ -43,5 +57,5 @@ export async function GET() {
     };
   });
 
-  return Response.json({ predictions });
+  return Response.json({ predictions, matchday: selectedMatchday, nextMatchday, availableMatchdays });
 }

@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
-import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
+import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -44,12 +44,11 @@ function loadOwnMatches() {
   return cachedOwnMatches;
 }
 
-// Bundesliga-Saisons laufen von August bis Mai. Ein Datum vor Juli gehoert noch zur
-// Saison, die im Vorjahr gestartet ist (unsere Saison-Codes sind das Startjahr, z.B. "2020").
-function deriveSeasonFromDate(date: Date): string {
-  const month = date.getMonth();
-  const year = date.getFullYear();
-  return String(month >= 6 ? year : year - 1);
+// Muss nach einem Datenupdate (siehe refreshResults.ts) aufgerufen werden, sonst wuerden
+// die alten, im Prozess zwischengespeicherten Match-/xG-Daten weiterverwendet.
+export function clearXgFormCache(): void {
+  cachedXgMatches = null;
+  cachedOwnMatches = null;
 }
 
 // Zaehlt, wie viele Ligaspiele ein Team in der zu `beforeDate` gehoerenden Saison bereits

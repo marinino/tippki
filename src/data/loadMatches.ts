@@ -23,6 +23,14 @@ export function parseMatchDate(date: string): Date {
   return new Date(year, month - 1, day);
 }
 
+// Bundesliga-Saisons laufen von August bis Mai. Ein Datum vor Juli gehoert noch zur
+// Saison, die im Vorjahr gestartet ist (unsere Saison-Codes sind das Startjahr, z.B. "2020").
+export function deriveSeasonFromDate(date: Date): string {
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  return String(month >= 6 ? year : year - 1);
+}
+
 // football-data.co.uk-Dateinamen wie "2021" oder "9394" sind zwei zweistellige
 // Jahres-Suffixe hintereinander. Als reiner String sortiert "9394" faelschlich NACH
 // "2021" (weil '9' > '2'). Wir normalisieren auf das vierstellige Startjahr der
