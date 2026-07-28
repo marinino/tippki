@@ -363,3 +363,94 @@ body {
   color: var(--text-tertiary);
   font-size: 15px;
 }
+
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: 32px;
+  width: fit-content;
+}
+
+.tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--bg-elevated-2);
+  color: var(--text);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.league-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.league-table th,
+.league-table td {
+  padding: 10px 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.league-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--border);
+}
+
+.league-table td {
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.league-table tr:last-child td {
+  border-bottom: none;
+}
+
+.col-pos {
+  color: var(--text-tertiary);
+  width: 32px;
+}
+
+.col-team {
+  text-align: left;
+}
+
+.col-points {
+  font-weight: 700;
+}
+
+.table-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}

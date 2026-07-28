@@ -40,6 +40,27 @@ interface BacktestResult {
   totalExactScoreAccuracy: number;
 }
 
+interface TableEntry {
+  position: number;
+  team: string;
+  logo: string | null;
+  matches: number;
+  won: number;
+  draw: number;
+  lost: number;
+  goals: number;
+  opponentGoals: number;
+  goalDiff: number;
+  points: number;
+}
+
+interface TableResponse {
+  season: string;
+  table: TableEntry[];
+}
+
+type Tab = "predictions" | "table" | "backtest";
+
 function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
 }
@@ -58,10 +79,27 @@ export default function Home() {
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("predictions");
+  const [table, setTable] = useState<TableResponse | null>(null);
+  const [tableLoading, setTableLoading] = useState(false);
 
   useEffect(() => {
     loadMatchday();
   }, []);
+
+  useEffect(() => {
+    if (tab === "table" && !table) {
+      loadTable();
+    }
+  }, [tab]);
+
+  async function loadTable() {
+    setTableLoading(true);
+    const res = await fetch("/api/table");
+    const result = await res.json();
+    setTable(result);
+    setTableLoading(false);
+  }
 
   async function loadMatchday(matchday?: number) {
     setPredictionsLoading(true);
@@ -81,6 +119,7 @@ export default function Home() {
       if (!res.ok) throw new Error(result.error ?? "Fehler beim Aktualisieren");
       setRefreshMessage(`${result.resultsCount} Ergebnisse, ${result.xgCount} xG-Spiele aktualisiert`);
       await loadMatchday(data?.matchday ?? undefined);
+      if (tab === "table") await loadTable();
     } catch (err) {
       setRefreshMessage(err instanceof Error ? err.message : "Fehler beim Aktualisieren");
     } finally {
@@ -111,6 +150,19 @@ export default function Home() {
         </div>
       </div>
 
+      <div className="tab-bar">
+        <button className={`tab ${tab === "predictions" ? "active" : ""}`} onClick={() => setTab("predictions")}>
+          Tipps
+        </button>
+        <button className={`tab ${tab === "table" ? "active" : ""}`} onClick={() => setTab("table")}>
+          Tabelle
+        </button>
+        <button className={`tab ${tab === "backtest" ? "active" : ""}`} onClick={() => setTab("backtest")}>
+          Backtest
+        </button>
+      </div>
+
+      {tab === "predictions" && (
       <section className="section">
         <div className="section-header">
           <div>
@@ -147,7 +199,68 @@ export default function Home() {
 
         <p className="footnote">* geschätzt (keine oder wenig Bundesliga-Historie)</p>
       </section>
+      )}
 
+      {tab === "table" && (
+      <section className="section">
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Tabelle</h2>
+            <p className="section-subtitle">{table ? `Saison ${table.season}/${Number(table.season) + 1}` : "Aktuelle Bundesliga-Tabelle"}</p>
+          </div>
+        </div>
+
+        {tableLoading && !table && <p className="loading-text">Lade Tabelle …</p>}
+
+        {table && (
+          <div className="table-wrap" style={{ opacity: tableLoading ? 0.5 : 1 }}>
+            <table className="league-table">
+              <thead>
+                <tr>
+                  <th className="col-pos">#</th>
+                  <th className="col-team">Team</th>
+                  <th>Sp</th>
+                  <th>S</th>
+                  <th>U</th>
+                  <th>N</th>
+                  <th>Tore</th>
+                  <th>Diff</th>
+                  <th>Pkt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {table.table.map((row) => (
+                  <tr key={row.team}>
+                    <td className="col-pos">{row.position}</td>
+                    <td className="col-team">
+                      <span className="table-team">
+                        {row.logo && (
+                          <span className="team-logo-badge">
+                            <img src={row.logo} alt="" className="team-logo" />
+                          </span>
+                        )}
+                        {row.team}
+                      </span>
+                    </td>
+                    <td>{row.matches}</td>
+                    <td>{row.won}</td>
+                    <td>{row.draw}</td>
+                    <td>{row.lost}</td>
+                    <td>
+                      {row.goals}:{row.opponentGoals}
+                    </td>
+                    <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
+                    <td className="col-points">{row.points}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      )}
+
+      {tab === "backtest" && (
       <section className="section">
         <div className="section-header">
           <div>
@@ -186,6 +299,7 @@ export default function Home() {
           </div>
         )}
       </section>
+      )}
     </main>
   );
 }
