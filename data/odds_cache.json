@@ -1,0 +1,150 @@
+{
+  "matchday": 1,
+  "fetchedAt": "2026-08-03T09:39:17.103Z",
+  "odds": {
+    "Bayern Munich|Stuttgart": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 1.3,
+          "oddsDraw": 6.25,
+          "oddsAway": 8
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 1.27,
+          "oddsDraw": 7,
+          "oddsAway": 8
+        }
+      ]
+    },
+    "RB Leipzig|M'gladbach": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 1.55,
+          "oddsDraw": 4.2,
+          "oddsAway": 5.5
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 1.52,
+          "oddsDraw": 4.8,
+          "oddsAway": 5.3
+        }
+      ]
+    },
+    "Mainz|Paderborn": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 1.7,
+          "oddsDraw": 3.8,
+          "oddsAway": 4.5
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 1.67,
+          "oddsDraw": 4.1,
+          "oddsAway": 4.7
+        }
+      ]
+    },
+    "Union Berlin|Ein Frankfurt": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 2.3,
+          "oddsDraw": 3.5,
+          "oddsAway": 2.875
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 2.4,
+          "oddsDraw": 3.4,
+          "oddsAway": 2.9
+        }
+      ]
+    },
+    "FC Koln|Hoffenheim": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 3,
+          "oddsDraw": 3.5,
+          "oddsAway": 2.25
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 2.85,
+          "oddsDraw": 3.6,
+          "oddsAway": 2.35
+        }
+      ]
+    },
+    "Elversberg|Leverkusen": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 5,
+          "oddsDraw": 4.75,
+          "oddsAway": 1.55
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 5.5,
+          "oddsDraw": 4.6,
+          "oddsAway": 1.52
+        }
+      ]
+    },
+    "Dortmund|Hamburg": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 1.333,
+          "oddsDraw": 5.5,
+          "oddsAway": 8
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 1.3,
+          "oddsDraw": 5.7,
+          "oddsAway": 9
+        }
+      ]
+    },
+    "Freiburg|Werder Bremen": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 2.1,
+          "oddsDraw": 3.3,
+          "oddsAway": 3.5
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 2,
+          "oddsDraw": 3.6,
+          "oddsAway": 3.6
+        }
+      ]
+    },
+    "Augsburg|Schalke 04": {
+      "bookmakers": [
+        {
+          "bookmaker": "Bet365",
+          "oddsHome": 2.1,
+          "oddsDraw": 3.75,
+          "oddsAway": 3
+        },
+        {
+          "bookmaker": "Tipico DE",
+          "oddsHome": 2.05,
+          "oddsDraw": 3.8,
+          "oddsAway": 3.3
+        }
+      ]
+    }
+  }
+}

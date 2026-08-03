@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react";
 
+interface BookmakerOdds {
+  bookmaker: string;
+  oddsHome: number;
+  oddsDraw: number;
+  oddsAway: number;
+}
+
 interface Prediction {
   homeTeam: string;
   awayTeam: string;
@@ -16,6 +23,8 @@ interface Prediction {
   mostLikelyScore: string;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
+  oddsBlended: boolean;
+  bookmakerOdds: BookmakerOdds[] | null;
 }
 
 interface PredictionsResponse {
@@ -23,6 +32,7 @@ interface PredictionsResponse {
   matchday: number | null;
   nextMatchday: number | null;
   availableMatchdays: number[];
+  oddsFetchedAt: string | null;
 }
 
 interface SeasonBacktest {
@@ -59,7 +69,39 @@ interface TableResponse {
   table: TableEntry[];
 }
 
-type Tab = "predictions" | "table" | "backtest";
+interface SimPrediction {
+  homeTeam: string;
+  awayTeam: string;
+  homeLogo: string | null;
+  awayLogo: string | null;
+  date: string;
+  expectedHomeGoals: number;
+  expectedAwayGoals: number;
+  homeWinProb: number;
+  drawProb: number;
+  awayWinProb: number;
+  mostLikelyScore: string;
+  homeIsEstimated: boolean;
+  awayIsEstimated: boolean;
+}
+
+interface SimResponse {
+  matchday: number;
+  totalMatchdays: number;
+  predictions: SimPrediction[];
+  table: TableEntry[];
+}
+
+interface SimResult {
+  homeTeam: string;
+  awayTeam: string;
+  homeGoals: number;
+  awayGoals: number;
+}
+
+const SIM_STORAGE_KEY = "tippki-simulation";
+
+type Tab = "predictions" | "table" | "backtest" | "simulate";
 
 function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
@@ -79,9 +121,19 @@ export default function Home() {
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [oddsRefreshLoading, setOddsRefreshLoading] = useState(false);
+  const [oddsRefreshMessage, setOddsRefreshMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("predictions");
   const [table, setTable] = useState<TableResponse | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
+
+  const [simResultsSoFar, setSimResultsSoFar] = useState<SimResult[]>([]);
+  const [simMatchday, setSimMatchday] = useState(1);
+  const [simData, setSimData] = useState<SimResponse | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [simInputs, setSimInputs] = useState<Record<string, { home: string; away: string }>>({});
+  const [simHits, setSimHits] = useState({ correct: 0, total: 0 });
+  const [simRestored, setSimRestored] = useState(false);
 
   useEffect(() => {
     loadMatchday();
@@ -92,6 +144,35 @@ export default function Home() {
       loadTable();
     }
   }, [tab]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(SIM_STORAGE_KEY);
+    if (raw) {
+      try {
+        const saved = JSON.parse(raw);
+        setSimResultsSoFar(saved.resultsSoFar ?? []);
+        setSimMatchday(saved.matchday ?? 1);
+        setSimHits(saved.hits ?? { correct: 0, total: 0 });
+      } catch {
+        // ignorieren, mit leerer Simulation starten
+      }
+    }
+    setSimRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!simRestored) return;
+    localStorage.setItem(
+      SIM_STORAGE_KEY,
+      JSON.stringify({ resultsSoFar: simResultsSoFar, matchday: simMatchday, hits: simHits })
+    );
+  }, [simResultsSoFar, simMatchday, simHits, simRestored]);
+
+  useEffect(() => {
+    if (tab === "simulate" && simRestored && !simData) {
+      loadSimMatchday(simMatchday, simResultsSoFar);
+    }
+  }, [tab, simRestored]);
 
   async function loadTable() {
     setTableLoading(true);
@@ -127,6 +208,94 @@ export default function Home() {
     }
   }
 
+  async function refreshOdds() {
+    setOddsRefreshLoading(true);
+    setOddsRefreshMessage(null);
+    try {
+      const res = await fetch("/api/refresh-odds", { method: "POST" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "Fehler beim Aktualisieren der Quoten");
+      setOddsRefreshMessage(`Spieltag ${result.matchday}: ${result.fixturesWithOdds}/${result.fixturesTotal} Quoten geholt`);
+      await loadMatchday(data?.matchday ?? undefined);
+    } catch (err) {
+      setOddsRefreshMessage(err instanceof Error ? err.message : "Fehler beim Aktualisieren der Quoten");
+    } finally {
+      setOddsRefreshLoading(false);
+    }
+  }
+
+  async function loadSimMatchday(matchday: number, resultsSoFar: SimResult[]) {
+    setSimLoading(true);
+    const res = await fetch("/api/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchday, resultsSoFar }),
+    });
+    const result: SimResponse = await res.json();
+    setSimData(result);
+    const prefill: Record<string, { home: string; away: string }> = {};
+    for (const p of result.predictions) {
+      const [home, away] = p.mostLikelyScore.split(":");
+      prefill[`${p.homeTeam}|${p.awayTeam}`] = { home, away };
+    }
+    setSimInputs(prefill);
+    setSimLoading(false);
+  }
+
+  function updateSimInput(homeTeam: string, awayTeam: string, side: "home" | "away", value: string) {
+    setSimInputs((prev) => ({
+      ...prev,
+      [`${homeTeam}|${awayTeam}`]: { ...prev[`${homeTeam}|${awayTeam}`], [side]: value },
+    }));
+  }
+
+  async function submitSimMatchday() {
+    if (!simData) return;
+    const newResults: SimResult[] = [];
+    let correct = 0;
+
+    for (const p of simData.predictions) {
+      const key = `${p.homeTeam}|${p.awayTeam}`;
+      const input = simInputs[key];
+      const homeGoals = Number(input?.home);
+      const awayGoals = Number(input?.away);
+      if (!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals) || homeGoals < 0 || awayGoals < 0) {
+        alert(`Bitte ein gueltiges Ergebnis fuer ${p.homeTeam} vs ${p.awayTeam} eintragen.`);
+        return;
+      }
+      newResults.push({ homeTeam: p.homeTeam, awayTeam: p.awayTeam, homeGoals, awayGoals });
+
+      const actualOutcome = homeGoals > awayGoals ? "H" : homeGoals === awayGoals ? "D" : "A";
+      const predictedOutcome =
+        p.homeWinProb > p.drawProb && p.homeWinProb > p.awayWinProb ? "H" : p.drawProb > p.awayWinProb ? "D" : "A";
+      if (predictedOutcome === actualOutcome) correct++;
+    }
+
+    const updatedResults = [...simResultsSoFar, ...newResults];
+    const updatedHits = { correct: simHits.correct + correct, total: simHits.total + newResults.length };
+    const nextMatchday = simMatchday + 1;
+
+    setSimResultsSoFar(updatedResults);
+    setSimHits(updatedHits);
+    setSimMatchday(nextMatchday);
+
+    // Immer neu laden, auch ueber den letzten Spieltag hinaus (liefert dann leere predictions,
+    // aber die Tabelle wird korrekt aus allen eingetragenen Ergebnissen neu berechnet -- sonst
+    // bleibt die Tabelle nach dem letzten Spieltag auf dem Stand des vorletzten stehen und der
+    // "weiter"-Button laesst sich unbegrenzt weiterklicken.
+    await loadSimMatchday(nextMatchday, updatedResults);
+  }
+
+  function resetSim() {
+    if (!confirm("Simulation wirklich zuruecksetzen?")) return;
+    localStorage.removeItem(SIM_STORAGE_KEY);
+    setSimResultsSoFar([]);
+    setSimMatchday(1);
+    setSimHits({ correct: 0, total: 0 });
+    setSimData(null);
+    loadSimMatchday(1, []);
+  }
+
   async function runBacktest() {
     setBacktestLoading(true);
     const res = await fetch("/api/backtest");
@@ -160,6 +329,9 @@ export default function Home() {
         <button className={`tab ${tab === "backtest" ? "active" : ""}`} onClick={() => setTab("backtest")}>
           Backtest
         </button>
+        <button className={`tab ${tab === "simulate" ? "active" : ""}`} onClick={() => setTab("simulate")}>
+          Simulieren
+        </button>
       </div>
 
       {tab === "predictions" && (
@@ -171,21 +343,33 @@ export default function Home() {
               <p className="section-subtitle">Nächster Spieltag</p>
             )}
           </div>
-          {data && data.availableMatchdays.length > 0 && (
-            <select
-              className="select"
-              value={data.matchday ?? ""}
-              onChange={(e) => loadMatchday(Number(e.target.value))}
-            >
-              {data.availableMatchdays.map((md) => (
-                <option key={md} value={md}>
-                  Spieltag {md}
-                  {md === data.nextMatchday ? " · nächster" : ""}
-                </option>
-              ))}
-            </select>
-          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {data && data.availableMatchdays.length > 0 && (
+              <select
+                className="select"
+                value={data.matchday ?? ""}
+                onChange={(e) => loadMatchday(Number(e.target.value))}
+              >
+                {data.availableMatchdays.map((md) => (
+                  <option key={md} value={md}>
+                    Spieltag {md}
+                    {md === data.nextMatchday ? " · nächster" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button className="button secondary" onClick={refreshOdds} disabled={oddsRefreshLoading}>
+              {oddsRefreshLoading ? "Holt Quoten …" : "Quoten aktualisieren"}
+            </button>
+          </div>
         </div>
+
+        {oddsRefreshMessage && <p className="refresh-message">{oddsRefreshMessage}</p>}
+        {data?.oddsFetchedAt && (
+          <p className="section-subtitle">
+            Quoten-Stand: {new Date(data.oddsFetchedAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+          </p>
+        )}
 
         {!data && <p className="loading-text">Lade Vorhersagen …</p>}
 
@@ -212,49 +396,130 @@ export default function Home() {
 
         {tableLoading && !table && <p className="loading-text">Lade Tabelle …</p>}
 
-        {table && (
-          <div className="table-wrap" style={{ opacity: tableLoading ? 0.5 : 1 }}>
-            <table className="league-table">
-              <thead>
-                <tr>
-                  <th className="col-pos">#</th>
-                  <th className="col-team">Team</th>
-                  <th>Sp</th>
-                  <th>S</th>
-                  <th>U</th>
-                  <th>N</th>
-                  <th>Tore</th>
-                  <th>Diff</th>
-                  <th>Pkt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {table.table.map((row) => (
-                  <tr key={row.team}>
-                    <td className="col-pos">{row.position}</td>
-                    <td className="col-team">
-                      <span className="table-team">
-                        {row.logo && (
+        {table && <LeagueTableView rows={table.table} dimmed={tableLoading} />}
+      </section>
+      )}
+
+      {tab === "simulate" && (
+      <section className="section">
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Saison 26/27 simulieren</h2>
+            <p className="section-subtitle">
+              Nur Modell + Form (Tordifferenz statt echtem xG, keine Wettquoten) ·{" "}
+              {simData && simData.predictions.length === 0
+                ? "Saison beendet"
+                : `Spieltag ${simMatchday}${simData ? ` von ${simData.totalMatchdays}` : ""}`}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {simHits.total > 0 && (
+              <span className="section-subtitle">
+                Tendenz bisher: {simHits.correct}/{simHits.total} ({Math.round((simHits.correct / simHits.total) * 100)}%)
+              </span>
+            )}
+            <button className="button secondary" onClick={resetSim}>
+              Zurücksetzen
+            </button>
+          </div>
+        </div>
+
+        {simLoading && !simData && <p className="loading-text">Lade Simulation …</p>}
+
+        {simData && simData.predictions.length > 0 && (
+          <div className="card-list" style={{ opacity: simLoading ? 0.5 : 1 }}>
+            {simData.predictions.map((p) => {
+              const key = `${p.homeTeam}|${p.awayTeam}`;
+              const input = simInputs[key] ?? { home: "", away: "" };
+              return (
+                <div className="match-card" key={key}>
+                  <div className="match-main">
+                    <div className="match-teams">
+                      <span className="match-team home">
+                        {p.homeLogo && (
                           <span className="team-logo-badge">
-                            <img src={row.logo} alt="" className="team-logo" />
+                            <img src={p.homeLogo} alt="" className="team-logo" />
                           </span>
                         )}
-                        {row.team}
+                        <span>
+                          {p.homeTeam}
+                          {p.homeIsEstimated && <span className="estimated-mark"> *</span>}
+                        </span>
                       </span>
-                    </td>
-                    <td>{row.matches}</td>
-                    <td>{row.won}</td>
-                    <td>{row.draw}</td>
-                    <td>{row.lost}</td>
-                    <td>
-                      {row.goals}:{row.opponentGoals}
-                    </td>
-                    <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
-                    <td className="col-points">{row.points}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <span className="match-vs">
+                        <input
+                          type="number"
+                          min={0}
+                          className="score-input"
+                          value={input.home}
+                          onChange={(e) => updateSimInput(p.homeTeam, p.awayTeam, "home", e.target.value)}
+                        />
+                        :
+                        <input
+                          type="number"
+                          min={0}
+                          className="score-input"
+                          value={input.away}
+                          onChange={(e) => updateSimInput(p.homeTeam, p.awayTeam, "away", e.target.value)}
+                        />
+                      </span>
+                      <span className="match-team away">
+                        <span>
+                          {p.awayIsEstimated && <span className="estimated-mark">* </span>}
+                          {p.awayTeam}
+                        </span>
+                        {p.awayLogo && (
+                          <span className="team-logo-badge">
+                            <img src={p.awayLogo} alt="" className="team-logo" />
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="prob-bar">
+                      <div className="prob-bar-segment home" style={{ width: `${Math.round(p.homeWinProb * 100)}%` }}>
+                        <span className="letter">H</span>
+                        {Math.round(p.homeWinProb * 100)}%
+                      </div>
+                      <div className="prob-bar-segment draw" style={{ width: `${Math.round(p.drawProb * 100)}%` }}>
+                        <span className="letter">U</span>
+                        {Math.round(p.drawProb * 100)}%
+                      </div>
+                      <div className="prob-bar-segment away" style={{ width: `${Math.round(p.awayWinProb * 100)}%` }}>
+                        <span className="letter">A</span>
+                        {Math.round(p.awayWinProb * 100)}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="match-side">
+                    <span className="tip-badge">Tipp {p.mostLikelyScore}</span>
+                    <span className="expected-score">
+                      Ø {p.expectedHomeGoals.toFixed(1)}:{p.expectedAwayGoals.toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {simData && simData.predictions.length > 0 && (
+          <button className="button" onClick={submitSimMatchday} disabled={simLoading} style={{ marginTop: 12 }}>
+            Ergebnisse übernehmen &amp; weiter
+          </button>
+        )}
+
+        {simData && simData.predictions.length === 0 && (
+          <p className="loading-text">Saison komplett simuliert.</p>
+        )}
+
+        {simData && simData.table.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <h3 className="section-title" style={{ fontSize: 16, marginBottom: 8 }}>
+              Tabelle nach Spieltag {simMatchday - 1}
+            </h3>
+            <LeagueTableView rows={simData.table} dimmed={simLoading} />
           </div>
         )}
       </section>
@@ -301,6 +566,54 @@ export default function Home() {
       </section>
       )}
     </main>
+  );
+}
+
+function LeagueTableView({ rows, dimmed }: { rows: TableEntry[]; dimmed: boolean }) {
+  return (
+    <div className="table-wrap" style={{ opacity: dimmed ? 0.5 : 1 }}>
+      <table className="league-table">
+        <thead>
+          <tr>
+            <th className="col-pos">#</th>
+            <th className="col-team">Team</th>
+            <th>Sp</th>
+            <th>S</th>
+            <th>U</th>
+            <th>N</th>
+            <th>Tore</th>
+            <th>Diff</th>
+            <th>Pkt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.team}>
+              <td className="col-pos">{row.position}</td>
+              <td className="col-team">
+                <span className="table-team">
+                  {row.logo && (
+                    <span className="team-logo-badge">
+                      <img src={row.logo} alt="" className="team-logo" />
+                    </span>
+                  )}
+                  {row.team}
+                </span>
+              </td>
+              <td>{row.matches}</td>
+              <td>{row.won}</td>
+              <td>{row.draw}</td>
+              <td>{row.lost}</td>
+              <td>
+                {row.goals}:{row.opponentGoals}
+              </td>
+              <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
+              <td className="col-points">{row.points}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -352,6 +665,14 @@ function MatchCard({ prediction: p }: { prediction: Prediction }) {
             {awayPct}%
           </div>
         </div>
+
+        {p.bookmakerOdds && p.bookmakerOdds.length > 0 && (
+          <p className="odds-line">
+            {p.bookmakerOdds
+              .map((b) => `${b.bookmaker}: ${b.oddsHome.toFixed(2)} / ${b.oddsDraw.toFixed(2)} / ${b.oddsAway.toFixed(2)}`)
+              .join("  ·  ")}
+          </p>
+        )}
       </div>
 
       <div className="match-side">
