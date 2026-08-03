@@ -190,6 +190,28 @@ body {
   color: var(--text-tertiary);
   flex-shrink: 0;
   padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.score-input {
+  width: 34px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-input::-webkit-outer-spin-button,
+.score-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .estimated-mark {
@@ -210,6 +232,13 @@ body {
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.odds-line {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
 }
 
 .tip-badge {

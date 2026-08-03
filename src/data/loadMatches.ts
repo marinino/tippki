@@ -12,6 +12,10 @@ export interface Match {
   awayTeam: string;
   homeGoals: number;
   awayGoals: number;
+  // Bet365-Quoten (1X2) vor Spielbeginn, falls in den football-data.co.uk-Daten vorhanden.
+  oddsHome?: number;
+  oddsDraw?: number;
+  oddsAway?: number;
 }
 
 const DATA_DIR = join(__dirname, "..", "..", "data");
@@ -58,6 +62,9 @@ function parseCsvFile(filePath: string, season: string): Match[] {
       awayTeam: row.AwayTeam,
       homeGoals: Number(row.FTHG),
       awayGoals: Number(row.FTAG),
+      oddsHome: row.B365H ? Number(row.B365H) : undefined,
+      oddsDraw: row.B365D ? Number(row.B365D) : undefined,
+      oddsAway: row.B365A ? Number(row.B365A) : undefined,
     }));
 }
 
