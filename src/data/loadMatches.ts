@@ -16,7 +16,41 @@ export interface Match {
   oddsHome?: number;
   oddsDraw?: number;
   oddsAway?: number;
+  // Over/Under 2.5 Tore. Die einzige Totals-Linie in den historischen Daten -- live
+  // liefert odds-api.io eine ganze Leiter (siehe scripts/inspectOddsMarkets.ts).
+  oddsOver25?: number;
+  oddsUnder25?: number;
+  // Asian Handicap: Linie aus Heimsicht (negativ = Heim gibt Tore vor) plus beide Quoten.
+  ahLine?: number;
+  ahOddsHome?: number;
+  ahOddsAway?: number;
+  // Bisher ungenutzte Spielstatistik, verfuegbar in allen Saisons.
+  shotsOnTargetHome?: number;
+  shotsOnTargetAway?: number;
 }
+
+// Die CSVs kommen in zwei Spaltenschemata: Saisons bis 2018/19 nutzen die
+// Betbrain-Aggregate (BbAv>2.5, BbAHh, ...), ab 2019/20 die modernen Namen (Avg>2.5, AHh,
+// ...). Deshalb Aufloesung ueber eine Namenskette statt ueber feste Spaltennamen.
+// Marktmittel (Avg/BbAv) vor Einzelbuchmacher -- dieselbe Begruendung wie bei
+// averageMarketProbabilities in marketOdds.ts.
+function pickColumn(row: Record<string, string>, names: readonly string[]): number | undefined {
+  for (const name of names) {
+    const raw = row[name];
+    if (raw === undefined || raw === "") continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+const COLUMNS = {
+  over25: ["Avg>2.5", "B365>2.5", "BbAv>2.5", "BbMx>2.5"],
+  under25: ["Avg<2.5", "B365<2.5", "BbAv<2.5", "BbMx<2.5"],
+  ahLine: ["AHh", "BbAHh"],
+  ahHome: ["AvgAHH", "B365AHH", "BbAvAHH"],
+  ahAway: ["AvgAHA", "B365AHA", "BbAvAHA"],
+} as const;
 
 const DATA_DIR = join(__dirname, "..", "..", "data");
 
@@ -65,10 +99,17 @@ function parseCsvFile(filePath: string, season: string): Match[] {
       oddsHome: row.B365H ? Number(row.B365H) : undefined,
       oddsDraw: row.B365D ? Number(row.B365D) : undefined,
       oddsAway: row.B365A ? Number(row.B365A) : undefined,
+      oddsOver25: pickColumn(row, COLUMNS.over25),
+      oddsUnder25: pickColumn(row, COLUMNS.under25),
+      ahLine: pickColumn(row, COLUMNS.ahLine),
+      ahOddsHome: pickColumn(row, COLUMNS.ahHome),
+      ahOddsAway: pickColumn(row, COLUMNS.ahAway),
+      shotsOnTargetHome: pickColumn(row, ["HST"]),
+      shotsOnTargetAway: pickColumn(row, ["AST"]),
     }));
 }
 
-export function loadAllMatches(): Match[] {
+function parseAllMatches(): Match[] {
   const files = readdirSync(DATA_DIR).filter((f) => f.startsWith("D1_") && f.endsWith(".csv"));
   const matches: Match[] = [];
 
@@ -78,4 +119,20 @@ export function loadAllMatches(): Match[] {
   }
 
   return matches;
+}
+
+let cachedMatches: Match[] | null = null;
+
+// Ohne Cache wurden bei jedem Request alle 13 CSVs neu gelesen und geparst -- und jede
+// API-Route ruft das mindestens einmal auf. Der zurueckgegebene Array wird nirgends
+// in-place veraendert (alle Aufrufer filtern/mappen), deshalb ist das Teilen sicher.
+export function loadAllMatches(): Match[] {
+  if (!cachedMatches) cachedMatches = parseAllMatches();
+  return cachedMatches;
+}
+
+// Muss nach einem Datenupdate aufgerufen werden (siehe refreshResults.ts), sonst laufen
+// die alten Spiele weiter durch den Prozess.
+export function clearMatchCache(): void {
+  cachedMatches = null;
 }

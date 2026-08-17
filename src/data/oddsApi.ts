@@ -18,8 +18,27 @@ export interface BookmakerOdds {
   oddsAway: number;
 }
 
+// Entvigte Marktwahrscheinlichkeiten je Linie, ueber alle Buchmacher gemittelt, die die
+// Linie anbieten. Nur Halblinien (x.5): dort ist die Wette echt zweiwertig, es gibt kein
+// Push und keine Aufteilung auf Nachbarlinien -- nur dann ist zweiwertiges Entvigen korrekt.
+export interface TotalsPoint {
+  line: number;
+  overProb: number;
+  bookmakerCount: number;
+}
+
+export interface SpreadPoint {
+  line: number;
+  homeProb: number;
+  bookmakerCount: number;
+}
+
 export interface FixtureOdds {
   bookmakers: BookmakerOdds[];
+  // Aus dem Markt "Totals": legt die Randverteilung der Torsumme fest.
+  totals?: TotalsPoint[];
+  // Aus dem Markt "Spread" (Asian Handicap): legt die Randverteilung der Tordifferenz fest.
+  spread?: SpreadPoint[];
 }
 
 interface FixtureLookup {
@@ -35,8 +54,20 @@ interface OddsApiEvent {
   date: string;
 }
 
+// Die Antwort enthaelt pro Buchmacher eine Liste von Maerkten mit sehr unterschiedlichen
+// Eintragsformen (siehe npm run inspect-odds-markets): "ML" hat home/draw/away, "Totals"
+// hat hdp/over/under, "Spread" hat hdp und je nach Vorzeichen nur home ODER nur away.
+interface OddsApiEntry {
+  home?: string;
+  draw?: string;
+  away?: string;
+  over?: string;
+  under?: string;
+  hdp?: number;
+}
+
 interface OddsApiOddsResponse {
-  bookmakers: Record<string, { name: string; odds: { home: string; draw: string; away: string }[] }[]>;
+  bookmakers: Record<string, { name: string; odds: OddsApiEntry[] }[]>;
 }
 
 const ODDS_API_BASE = "https://api.odds-api.io/v3";
@@ -132,11 +163,15 @@ export async function fetchOddsForFixtures(fixtures: FixtureLookup[]): Promise<M
       const bookmakers: BookmakerOdds[] = [];
       for (const bookmaker of BOOKMAKERS) {
         const ml = oddsData.bookmakers[bookmaker]?.find((m) => m.name === "ML")?.odds[0];
-        if (!ml) continue;
+        if (!ml?.home || !ml.draw || !ml.away) continue;
         bookmakers.push({ bookmaker, oddsHome: Number(ml.home), oddsDraw: Number(ml.draw), oddsAway: Number(ml.away) });
       }
       if (bookmakers.length > 0) {
-        result.set(`${fixture.homeTeam}|${fixture.awayTeam}`, { bookmakers });
+        result.set(`${fixture.homeTeam}|${fixture.awayTeam}`, {
+          bookmakers,
+          totals: extractTotals(oddsData),
+          spread: extractSpread(oddsData),
+        });
       }
     } catch {
       continue;
@@ -146,16 +181,104 @@ export async function fetchOddsForFixtures(fixtures: FixtureLookup[]): Promise<M
   return result;
 }
 
+function isHalfLine(line: number | undefined): line is number {
+  return typeof line === "number" && Math.abs(line % 1) === 0.5;
+}
+
+function averageByLine(
+  samples: { line: number; prob: number }[]
+): { line: number; prob: number; bookmakerCount: number }[] {
+  const grouped = new Map<number, number[]>();
+  for (const s of samples) {
+    if (!Number.isFinite(s.prob) || s.prob <= 0 || s.prob >= 1) continue;
+    const existing = grouped.get(s.line);
+    if (existing) existing.push(s.prob);
+    else grouped.set(s.line, [s.prob]);
+  }
+  return [...grouped.entries()]
+    .map(([line, probs]) => ({
+      line,
+      prob: probs.reduce((sum, p) => sum + p, 0) / probs.length,
+      bookmakerCount: probs.length,
+    }))
+    .sort((a, b) => a.line - b.line);
+}
+
+function devigTwoWay(oddsA: number, oddsB: number): number {
+  const rawA = 1 / oddsA;
+  const rawB = 1 / oddsB;
+  return rawA / (rawA + rawB);
+}
+
+// "Totals" liefert je Linie {hdp, over, under}. Bet365 quotiert ueber 20 Linien, Tipico
+// nur zwei -- gemittelt wird deshalb auf der Wahrscheinlichkeitsskala je Linie, damit
+// eine duenn besetzte Linie nicht dasselbe Gewicht bekommt wie eine dicht besetzte.
+function extractTotals(oddsData: OddsApiOddsResponse): TotalsPoint[] | undefined {
+  const samples: { line: number; prob: number }[] = [];
+
+  for (const markets of Object.values(oddsData.bookmakers ?? {})) {
+    for (const market of markets ?? []) {
+      if (market.name !== "Totals" && market.name !== "Goals Over/Under") continue;
+      for (const entry of market.odds ?? []) {
+        if (!isHalfLine(entry.hdp) || !entry.over || !entry.under) continue;
+        samples.push({ line: entry.hdp, prob: devigTwoWay(Number(entry.over), Number(entry.under)) });
+      }
+    }
+  }
+
+  const averaged = averageByLine(samples);
+  if (averaged.length < 2) return undefined;
+  return averaged.map((a) => ({ line: a.line, overProb: a.prob, bookmakerCount: a.bookmakerCount }));
+}
+
+// "Spread" ist unangenehmer als Totals: die API liefert pro Linie nur EINE Seite
+// ({hdp:-1.5, home:"1.725"} und getrennt {hdp:1.5, away:"2.075"}). Die Gegenseite einer
+// Heimlinie -x steht unter der Auswaertslinie +x. Erst zusammengefuehrt ergibt das eine
+// zweiwertige Wette, die sich entvigen laesst.
+function extractSpread(oddsData: OddsApiOddsResponse): SpreadPoint[] | undefined {
+  const samples: { line: number; prob: number }[] = [];
+
+  for (const markets of Object.values(oddsData.bookmakers ?? {})) {
+    for (const market of markets ?? []) {
+      if (market.name !== "Spread") continue;
+
+      const homeOdds = new Map<number, number>();
+      const awayOdds = new Map<number, number>();
+      for (const entry of market.odds ?? []) {
+        if (!isHalfLine(entry.hdp)) continue;
+        if (entry.home) homeOdds.set(entry.hdp, Number(entry.home));
+        if (entry.away) awayOdds.set(entry.hdp, Number(entry.away));
+      }
+
+      for (const [line, odds] of homeOdds) {
+        const opposite = awayOdds.get(-line);
+        if (!opposite) continue;
+        samples.push({ line, prob: devigTwoWay(odds, opposite) });
+      }
+    }
+  }
+
+  const averaged = averageByLine(samples);
+  if (averaged.length < 2) return undefined;
+  return averaged.map((a) => ({ line: a.line, homeProb: a.prob, bookmakerCount: a.bookmakerCount }));
+}
+
 interface OddsCacheFile {
+  // Erhoehen, wenn sich die Struktur aendert -- readOddsCache verwirft dann alte Dateien,
+  // statt mit halb befuellten Feldern weiterzurechnen.
+  version?: number;
   matchday: number;
   fetchedAt: string;
   odds: Record<string, FixtureOdds>;
 }
 
+const ODDS_CACHE_VERSION = 2;
+
 const CACHE_PATH = join(process.cwd(), "data", "odds_cache.json");
 
 export function writeOddsCache(matchday: number, odds: Map<string, FixtureOdds>): OddsCacheFile {
   const cache: OddsCacheFile = {
+    version: ODDS_CACHE_VERSION,
     matchday,
     fetchedAt: new Date().toISOString(),
     odds: Object.fromEntries(odds),
@@ -166,10 +289,16 @@ export function writeOddsCache(matchday: number, odds: Map<string, FixtureOdds>)
 
 // Liest die zuletzt manuell abgerufenen Quoten von der Platte. Liefert null, wenn noch nie
 // aktualisiert wurde -- die Vorhersage laeuft dann einfach ohne Markt-Blending weiter.
+//
+// Aeltere Cache-Dateien (ohne version, also ohne Totals/Spread) bleiben nutzbar: die
+// 1X2-Quoten stehen darin unveraendert, die neuen Felder sind schlicht undefined und die
+// zusaetzlichen Bedingungen entfallen. Kein Grund, den Nutzer zu einem Refresh zu zwingen.
 export function readOddsCache(): OddsCacheFile | null {
   if (!existsSync(CACHE_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(CACHE_PATH, "utf-8"));
+    const parsed: OddsCacheFile = JSON.parse(readFileSync(CACHE_PATH, "utf-8"));
+    if (!parsed || typeof parsed.matchday !== "number" || !parsed.odds) return null;
+    return parsed;
   } catch {
     return null;
   }

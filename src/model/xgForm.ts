@@ -26,42 +26,98 @@ export const XG_FORM_WINDOW = 3;
 // Wie stark die xG-Formkurve die erwarteten Tore beeinflusst (multiplikativ via exp(beta * form)).
 export const XG_FORM_WEIGHT = 0.2;
 
-let cachedXgMatches: XgMatch[] | null = null;
-
-function loadXgMatches(): XgMatch[] {
-  if (!cachedXgMatches) {
-    const raw = readFileSync(join(__dirname, "..", "..", "data", "xg_bundesliga.json"), "utf-8");
-    const matches: XgMatch[] = JSON.parse(raw);
-    cachedXgMatches = [...matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }
-  return cachedXgMatches;
+// Vorberechnete Indizes statt linearer Scans.
+//
+// Vorher lief computeXgForm zweimal pro Vorhersage ueber alle 3672 xG-Spiele und alle 3672
+// eigenen Spiele, mit je einem new Date() pro Element im Filter-Praedikat. Ueber einen
+// vollen Backtest waren das rund 18 Millionen Date-Konstruktionen -- der mit Abstand
+// teuerste Posten. Mit sortierten Per-Team-Listen wird daraus eine Binaersuche plus eine
+// Fenstersumme.
+interface TeamXgEntry {
+  time: number;
+  xgDiff: number;
 }
 
-let cachedOwnMatches: ReturnType<typeof loadAllMatches> | null = null;
+let xgByTeam: Map<string, TeamXgEntry[]> | null = null;
+let ownKickoffsByTeamSeason: Map<string, number[]> | null = null;
 
-function loadOwnMatches() {
-  if (!cachedOwnMatches) cachedOwnMatches = loadAllMatches();
-  return cachedOwnMatches;
+function pushInto<T>(index: Map<string, T[]>, key: string, value: T): void {
+  const existing = index.get(key);
+  if (existing) existing.push(value);
+  else index.set(key, [value]);
+}
+
+function buildXgIndex(): Map<string, TeamXgEntry[]> {
+  const raw = readFileSync(join(__dirname, "..", "..", "data", "xg_bundesliga.json"), "utf-8");
+  const matches: XgMatch[] = JSON.parse(raw);
+
+  // Erst global chronologisch sortieren, dann in Team-Buckets schieben. Dadurch ist jede
+  // Team-Liste eine Teilfolge der global sortierten Reihenfolge -- inklusive der stabilen
+  // Reihenfolge bei zeitgleichen Anstossen. Das war vorher implizit so und muss es bleiben,
+  // sonst verschiebt sich das Formfenster an Spieltagen mit parallelen Anstossen.
+  const sorted = [...matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const index = new Map<string, TeamXgEntry[]>();
+  for (const m of sorted) {
+    const time = new Date(m.date).getTime();
+    pushInto(index, m.homeTeam, { time, xgDiff: m.homeXG - m.awayXG });
+    pushInto(index, m.awayTeam, { time, xgDiff: m.awayXG - m.homeXG });
+  }
+  return index;
+}
+
+function buildOwnKickoffIndex(): Map<string, number[]> {
+  const index = new Map<string, number[]>();
+  for (const m of loadAllMatches()) {
+    const time = parseMatchDate(m.date).getTime();
+    pushInto(index, `${m.homeTeam}|${m.season}`, time);
+    pushInto(index, `${m.awayTeam}|${m.season}`, time);
+  }
+  for (const times of index.values()) times.sort((a, b) => a - b);
+  return index;
 }
 
 // Muss nach einem Datenupdate (siehe refreshResults.ts) aufgerufen werden, sonst wuerden
 // die alten, im Prozess zwischengespeicherten Match-/xG-Daten weiterverwendet.
 export function clearXgFormCache(): void {
-  cachedXgMatches = null;
-  cachedOwnMatches = null;
+  xgByTeam = null;
+  ownKickoffsByTeamSeason = null;
+}
+
+// Anzahl der Eintraege mit time < beforeTime. Entspricht exakt der Laenge des frueheren
+// .filter(... < beforeDate) -- der Vergleich war und bleibt strikt, Spiele am selben
+// Stichtag zaehlen also nicht mit.
+function countBefore(times: readonly number[], beforeTime: number): number {
+  let low = 0;
+  let high = times.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (times[mid] < beforeTime) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function countBeforeEntries(entries: readonly TeamXgEntry[], beforeTime: number): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (entries[mid].time < beforeTime) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 // Zaehlt, wie viele Ligaspiele ein Team in der zu `beforeDate` gehoerenden Saison bereits
 // bestritten hat. Damit laesst sich das Formfenster am Saisonstart hochfahren, statt sofort
 // mit Spielen aus der Vorsaison zu rechnen (an Spieltag 1 ist die Formkurve sonst veraltet).
 function gamesPlayedThisSeason(ourTeamName: string, beforeDate: Date): number {
+  if (!ownKickoffsByTeamSeason) ownKickoffsByTeamSeason = buildOwnKickoffIndex();
   const season = deriveSeasonFromDate(beforeDate);
-  return loadOwnMatches().filter(
-    (m) =>
-      m.season === season &&
-      (m.homeTeam === ourTeamName || m.awayTeam === ourTeamName) &&
-      parseMatchDate(m.date) < beforeDate
-  ).length;
+  const times = ownKickoffsByTeamSeason.get(`${ourTeamName}|${season}`);
+  if (!times) return 0;
+  return countBefore(times, beforeDate.getTime());
 }
 
 // Durchschnittliche xG-Differenz (erzielt minus zugelassen) der letzten Spiele eines Teams vor
@@ -75,19 +131,68 @@ export function computeXgForm(ourTeamName: string, beforeDate: Date): number {
   const n = Math.min(gamesPlayedThisSeason(ourTeamName, beforeDate), XG_FORM_WINDOW);
   if (n === 0) return 0;
 
-  const matches = loadXgMatches();
-  const teamMatches = matches.filter(
-    (m) => (m.homeTeam === understatName || m.awayTeam === understatName) && new Date(m.date) < beforeDate
-  );
-  const recent = teamMatches.slice(-n);
-  if (recent.length === 0) return 0;
+  if (!xgByTeam) xgByTeam = buildXgIndex();
+  const entries = xgByTeam.get(understatName);
+  if (!entries) return 0;
 
-  const totalXgDiff = recent.reduce((sum, m) => {
-    const isHome = m.homeTeam === understatName;
-    const xgFor = isHome ? m.homeXG : m.awayXG;
-    const xgAgainst = isHome ? m.awayXG : m.homeXG;
-    return sum + (xgFor - xgAgainst);
-  }, 0);
+  const available = countBeforeEntries(entries, beforeDate.getTime());
+  const start = Math.max(0, available - n);
+  const count = available - start;
+  if (count === 0) return 0;
 
-  return totalXgDiff / recent.length;
+  let totalXgDiff = 0;
+  for (let i = start; i < available; i++) totalXgDiff += entries[i].xgDiff;
+
+  return totalXgDiff / count;
+}
+
+// Wie viele zurueckliegende Spiele die Grundlinie eines Teams bilden. Rund eine halbe
+// Saison: lang genug, dass Tagesform herausmittelt, kurz genug, dass ein echter
+// Kaderumbruch nachgezogen wird.
+export const XG_BASELINE_WINDOW = 17;
+
+// Form als ABWEICHUNG vom eigenen Normalniveau.
+//
+// computeXgForm liefert die rohe xG-Differenz der letzten Spiele -- und die korreliert mit
+// r = 0.73 mit der Teamstaerke (siehe npm run form). Bayern hat dort dauerhaft +1.5, weil
+// Bayern eben Bayern ist, nicht weil Bayern gerade gut drauf waere. Multipliziert man das
+// auf eine Torerwartung, die die Staerke ueber attack/defense schon enthaelt, wird sie ein
+// zweites Mal gezaehlt: ein dauerhafter Bonus von 36% fuer ein Team, das ihn nicht
+// verdient hat, und ein dauerhafter Malus fuer schwache Teams.
+//
+// Diese Variante zieht das eigene Normalniveau ab. Ein Team, das genau so spielt wie
+// immer, bekommt 0 -- unabhaengig davon, ob "wie immer" stark oder schwach ist. Damit
+// misst der Wert wirklich nur noch Ueber- und Unterperformance.
+export function computeXgFormResidual(ourTeamName: string, beforeDate: Date): number {
+  const understatName = OUR_NAME_TO_UNDERSTAT[ourTeamName];
+  if (!understatName) return 0;
+
+  const n = Math.min(gamesPlayedThisSeason(ourTeamName, beforeDate), XG_FORM_WINDOW);
+  if (n === 0) return 0;
+
+  if (!xgByTeam) xgByTeam = buildXgIndex();
+  const entries = xgByTeam.get(understatName);
+  if (!entries) return 0;
+
+  const available = countBeforeEntries(entries, beforeDate.getTime());
+  const recentStart = Math.max(0, available - n);
+  const recentCount = available - recentStart;
+  if (recentCount === 0) return 0;
+
+  // Die Grundlinie schliesst das Formfenster bewusst NICHT aus. Sonst waere sie bei
+  // duenner Historie aus sehr wenigen Spielen gebildet und ihrerseits verrauscht --
+  // schlimmer, als die letzten Spiele mitzuzaehlen.
+  const baselineStart = Math.max(0, available - XG_BASELINE_WINDOW);
+  const baselineCount = available - baselineStart;
+  // Ohne genug Historie ist keine Grundlinie schaetzbar; dann lieber gar kein Formeffekt
+  // als ein aus drei Spielen geschaetzter.
+  if (baselineCount < XG_FORM_WINDOW * 2) return 0;
+
+  let recentSum = 0;
+  for (let i = recentStart; i < available; i++) recentSum += entries[i].xgDiff;
+
+  let baselineSum = 0;
+  for (let i = baselineStart; i < available; i++) baselineSum += entries[i].xgDiff;
+
+  return recentSum / recentCount - baselineSum / baselineCount;
 }

@@ -1,62 +1,120 @@
-import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
-import { buildLeagueModel } from "../model/teamStrength";
-import { predictMatch } from "../model/predictMatch";
-import { computeXgForm } from "../model/xgForm";
+// Walk-forward-Backtest. Duenner Wrapper um src/eval/backtestCore.ts -- dieselbe Logik
+// versorgt auch /api/backtest, damit UI und Konsole nicht auseinanderlaufen koennen.
+//
+//   npm run backtest
+//   npm run backtest -- --split=validation
+//   npm run backtest -- --split=all --baselines
+//   npm run backtest -- --variant=blended --scheme=kicktipp321
 
-// Nur Saisons, vor denen es genug Trainingsdaten gibt (mind. 4 vorherige Saisons).
-const TEST_SEASONS = ["2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"];
+import { formatSummary } from "../eval/metrics";
+import { formatBootstrap, formatMcNemar } from "../eval/significance";
+import { resolveScheme, SCORING_SCHEMES } from "../eval/scoringScheme";
+import { accuracyStandardError, parseSplit, warnIfTestSplit, type SplitName } from "../eval/splits";
+import {
+  ALL_VARIANTS,
+  buildContexts,
+  compareRuns,
+  runBacktest,
+  type TipMode,
+  type VariantName,
+} from "../eval/backtestCore";
+import { seasonsFor } from "../eval/splits";
 
-const allMatches = loadAllMatches();
+function flag(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+}
 
-let totalCorrectOutcome = 0;
-let totalCorrectScore = 0;
-let totalEvaluated = 0;
+function hasFlag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
 
-for (const testSeason of TEST_SEASONS) {
-  // Nur echt vorherige Saisons zum Trainieren nutzen, keine Zukunftsinformation.
-  const trainMatches = allMatches.filter((m) => m.season < testSeason);
-  const testMatches = allMatches.filter((m) => m.season === testSeason);
+// Ohne --split bleibt es bei allen acht Saisons, damit der Standardaufruf weiterhin die
+// historisch berichteten Zahlen liefert.
+const split: SplitName = flag("split") ? parseSplit(flag("split")) : "all";
+const variant = (flag("variant") ?? "modelOnly") as VariantName;
+const tipMode = (flag("tip") ?? "argmaxLegacy") as TipMode;
+const scheme = resolveScheme(flag("scheme"));
 
-  const model = buildLeagueModel(trainMatches);
+if (!ALL_VARIANTS.includes(variant)) {
+  console.error(`Unbekannte Variante "${variant}". Moeglich: ${ALL_VARIANTS.join(", ")}`);
+  process.exit(1);
+}
 
-  let correctOutcome = 0;
-  let correctScore = 0;
-  let evaluated = 0;
+warnIfTestSplit(split);
 
-  for (const match of testMatches) {
-    const matchDate = parseMatchDate(match.date);
-    const homeForm = computeXgForm(match.homeTeam, matchDate);
-    const awayForm = computeXgForm(match.awayTeam, matchDate);
-    const prediction = predictMatch(model, match.homeTeam, match.awayTeam, homeForm, awayForm);
+const result = runBacktest({ split, variant, tipMode, scheme });
 
-    const actualOutcome =
-      match.homeGoals > match.awayGoals ? "H" : match.homeGoals === match.awayGoals ? "D" : "A";
-    const predictedOutcome =
-      prediction.homeWinProb > prediction.drawProb && prediction.homeWinProb > prediction.awayWinProb
-        ? "H"
-        : prediction.drawProb > prediction.awayWinProb
-          ? "D"
-          : "A";
+console.log(
+  `Split "${split}" (${result.seasons.join(", ")}), Variante "${variant}", ` +
+    `Tipp "${tipMode}", Punkteschema "${scheme.label}"\n`
+);
 
-    if (predictedOutcome === actualOutcome) correctOutcome++;
-    if (prediction.mostLikelyScore === `${match.homeGoals}:${match.awayGoals}`) correctScore++;
-    evaluated++;
+for (const s of result.perSeason) {
+  console.log(
+    `Saison ${s.season} (${String(s.trainMatchCount).padStart(4)} Trainingsspiele, ` +
+      `${s.summary.n} Testspiele): ` +
+      `Tendenz ${(s.summary.tendencyAccuracy * 100).toFixed(1)}%  ` +
+      `Exakt ${(s.summary.exactScoreRate * 100).toFixed(1)}%  ` +
+      `Pkt/Spiel ${s.summary.pointsPerMatch.toFixed(3)}  ` +
+      `RPS ${s.summary.rps.toFixed(4)}`
+  );
+}
+
+const se = accuracyStandardError(result.overall.n) * 100;
+console.log(
+  `\nGesamt über ${result.seasons.length} Saisons (${result.overall.n} Spiele): ` +
+    `Tendenz ${(result.overall.tendencyAccuracy * 100).toFixed(1)}%  ` +
+    `Exakt ${(result.overall.exactScoreRate * 100).toFixed(1)}%  ` +
+    `Pkt/Spiel ${result.overall.pointsPerMatch.toFixed(3)}  ` +
+    `RPS ${result.overall.rps.toFixed(4)}`
+);
+console.log(
+  `Standardfehler der Trefferquote bei n=${result.overall.n}: ±${se.toFixed(2)} Prozentpunkte. ` +
+    `Unterschiede darunter sind ungepaart nicht aufloesbar.`
+);
+
+if (result.matchesWithoutOdds > 0) {
+  console.log(
+    `Hinweis: ${result.matchesWithoutOdds} von ${result.totalEvaluated} Spielen haben keine ` +
+      `Quoten; marktbasierte Varianten fallen dort auf das Modell zurueck.`
+  );
+}
+
+if (hasFlag("baselines")) {
+  console.log("\n--- Baselines (identische Spiele, identischer Tipp) ---\n");
+  for (const name of ALL_VARIANTS) {
+    console.log(formatSummary(name, result.baselines[name]));
   }
 
   console.log(
-    `Saison ${testSeason} (${trainMatches.length} Trainingsspiele, ${evaluated} Testspiele): ` +
-      `Tendenz ${((correctOutcome / evaluated) * 100).toFixed(1)}%  ` +
-      `Exakt ${((correctScore / evaluated) * 100).toFixed(1)}%`
+    "\nDer Tipp ist in dieser Phase immer der Argmax der Modell-Matrix. Punkte und\n" +
+      "Exaktquote sind deshalb ueber alle Varianten identisch -- vergleichbar sind hier\n" +
+      "nur Tendenz, RPS, LogLoss und Brier.\n"
   );
 
-  totalCorrectOutcome += correctOutcome;
-  totalCorrectScore += correctScore;
-  totalEvaluated += evaluated;
+  const contexts = buildContexts(seasonsFor(split));
+  const pairs: [VariantName, VariantName][] = [
+    ["blended", "modelOnly"],
+    ["blended", "pureMarket"],
+    ["pureMarket", "modelOnly"],
+    ["modelOnly", "baseRate"],
+  ];
+
+  console.log("--- Gepaarte Tests (A gegen B, positiv = A besser) ---\n");
+  for (const [a, b] of pairs) {
+    const c = compareRuns(
+      contexts,
+      { name: a, variant: a, tipMode },
+      { name: b, variant: b, tipMode },
+      scheme
+    );
+    console.log(`${a} vs ${b}`);
+    console.log(`  ${formatMcNemar("Tendenz (McNemar)", c.tendency)}`);
+    console.log(`  ${formatBootstrap("RPS (Bootstrap)", c.rps)}`);
+    console.log("");
+  }
 }
 
-console.log(
-  `\nGesamt über ${TEST_SEASONS.length} Saisons (${totalEvaluated} Spiele): ` +
-    `Tendenz ${((totalCorrectOutcome / totalEvaluated) * 100).toFixed(1)}%  ` +
-    `Exakt ${((totalCorrectScore / totalEvaluated) * 100).toFixed(1)}%`
-);
 console.log(`Zum Vergleich: reines Raten der Tendenz läge bei ca. 33%.`);
+console.log(`Verfuegbare Punkteschemata: ${Object.keys(SCORING_SCHEMES).join(", ")}`);
