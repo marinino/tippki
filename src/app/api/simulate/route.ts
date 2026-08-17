@@ -2,8 +2,9 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
-import { predictMatch } from "../../../model/predictMatch";
+import { predictPipeline } from "../../../model/predictPipeline";
 import { computeSimulatedForm, type SimpleResult } from "../../../model/simulateForm";
+import { resolveScheme } from "../../../eval/scoringScheme";
 
 interface Fixture {
   homeTeam: string;
@@ -81,8 +82,9 @@ function computeStandings(results: SimpleResult[], logosByTeam: Record<string, s
 // Simulation fix -- nur die Form (computeSimulatedForm, Tordifferenz statt echtem xG) aktualisiert
 // sich mit den eingetragenen Ergebnissen.
 export async function POST(request: Request) {
-  const body: { matchday: number; resultsSoFar: SimpleResult[] } = await request.json();
+  const body: { matchday: number; resultsSoFar: SimpleResult[]; scheme?: string } = await request.json();
   const { matchday, resultsSoFar } = body;
+  const scheme = resolveScheme(body.scheme);
 
   const fixturesPath = join(process.cwd(), "data", "fixtures.json");
   const allFixtures: Fixture[] = JSON.parse(readFileSync(fixturesPath, "utf-8"));
@@ -96,9 +98,16 @@ export async function POST(request: Request) {
   const model = buildLeagueModel(matches);
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
-    const homeForm = computeSimulatedForm(homeTeam, resultsSoFar);
-    const awayForm = computeSimulatedForm(awayTeam, resultsSoFar);
-    const prediction = predictMatch(model, homeTeam, awayTeam, homeForm, awayForm);
+    const out = predictPipeline({
+      model,
+      homeTeam,
+      awayTeam,
+      homeForm: computeSimulatedForm(homeTeam, resultsSoFar),
+      awayForm: computeSimulatedForm(awayTeam, resultsSoFar),
+      // Der Simulator kennt keine Quoten fuer hypothetische kuenftige Spiele.
+      market1x2: null,
+      scheme,
+    });
 
     return {
       homeTeam,
@@ -106,18 +115,23 @@ export async function POST(request: Request) {
       date,
       homeLogo: logosByTeam[homeTeam] ?? null,
       awayLogo: logosByTeam[awayTeam] ?? null,
-      expectedHomeGoals: prediction.expectedHomeGoals,
-      expectedAwayGoals: prediction.expectedAwayGoals,
-      homeWinProb: prediction.homeWinProb,
-      drawProb: prediction.drawProb,
-      awayWinProb: prediction.awayWinProb,
-      mostLikelyScore: prediction.mostLikelyScore,
-      homeIsEstimated: prediction.homeIsEstimated,
-      awayIsEstimated: prediction.awayIsEstimated,
+      expectedHomeGoals: out.expectedHomeGoals,
+      expectedAwayGoals: out.expectedAwayGoals,
+      homeWinProb: out.finalProbs.homeWinProb,
+      drawProb: out.finalProbs.drawProb,
+      awayWinProb: out.finalProbs.awayWinProb,
+      tip: out.tip.tip,
+      expectedPoints: out.tip.expectedPoints,
+      runnerUpTip: out.tip.runnerUpTip,
+      runnerUpExpectedPoints: out.tip.runnerUpExpectedPoints,
+      argmaxTip: out.tip.argmaxCellTip,
+      mostLikelyScore: out.tip.tip,
+      homeIsEstimated: out.homeIsEstimated,
+      awayIsEstimated: out.awayIsEstimated,
     };
   });
 
   const table = computeStandings(resultsSoFar, logosByTeam);
 
-  return Response.json({ matchday, totalMatchdays, predictions, table });
+  return Response.json({ matchday, totalMatchdays, predictions, table, scheme: scheme.key });
 }

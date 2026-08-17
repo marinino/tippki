@@ -1,3 +1,4 @@
+import { parse } from "csv-parse/sync";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { OPENLIGADB_TO_OUR_NAME } from "./openligaTeamNames";
@@ -56,15 +57,89 @@ async function refreshCsvResults(season: string): Promise<number> {
     })
     .filter((r) => r.FTHG !== "" && r.FTAG !== "");
 
-  const header = "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR";
-  const csvBody = rows
-    .map((r) => [r.Div, r.Date, r.HomeTeam, r.AwayTeam, r.FTHG, r.FTAG, r.FTR].join(","))
+  const filePath = join(DATA_DIR, `D1_${seasonToFilenameSuffix(season)}.csv`);
+  writeCsvMerged(filePath, rows);
+  return rows.length;
+}
+
+const MINIMAL_HEADER = ["Div", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"];
+
+export interface ResultRow {
+  Div: string;
+  Date: string;
+  HomeTeam: string;
+  AwayTeam: string;
+  FTHG: number | string;
+  FTAG: number | string;
+  FTR: string;
+}
+
+function csvEscape(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function matchKey(date: string, homeTeam: string, awayTeam: string): string {
+  return `${date}|${homeTeam}|${awayTeam}`;
+}
+
+// Bis hierher wurde die Saisondatei komplett mit sieben Spalten ueberschrieben. Damit hat
+// jeder Klick auf "Ergebnisse aktualisieren" saemtliche Quotenspalten der LAUFENDEN Saison
+// geloescht -- also genau die Daten, aus denen die markt-implizierten Torerwartungen kommen,
+// und genau fuer die Saison, um die es geht. Deshalb jetzt ein Merge: bestehende Zeilen
+// behalten alle ihre Spalten, aktualisiert werden nur FTHG/FTAG/FTR.
+export function writeCsvMerged(filePath: string, rows: ResultRow[]): void {
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, `${MINIMAL_HEADER.join(",")}\n${rows.map(minimalLine).join("\n")}\n`);
+    return;
+  }
+
+  const existing: Record<string, string>[] = parse(readFileSync(filePath, "utf-8"), {
+    columns: true,
+    skip_empty_lines: true,
+    bom: true,
+  });
+
+  // csv-parse liefert die Spaltennamen in Dateireihenfolge; ueber die erste Zeile bleibt die
+  // Originalreihenfolge (und damit die Datei-Struktur) erhalten.
+  const header = existing.length > 0 ? Object.keys(existing[0]) : [...MINIMAL_HEADER];
+  for (const column of MINIMAL_HEADER) {
+    if (!header.includes(column)) header.push(column);
+  }
+
+  const byKey = new Map(rows.map((r) => [matchKey(r.Date, r.HomeTeam, r.AwayTeam), r]));
+  const seen = new Set<string>();
+
+  const merged = existing.map((row) => {
+    const key = matchKey(row.Date, row.HomeTeam, row.AwayTeam);
+    const update = byKey.get(key);
+    if (!update) return row;
+    seen.add(key);
+    return { ...row, FTHG: String(update.FTHG), FTAG: String(update.FTAG), FTR: update.FTR };
+  });
+
+  // Spiele, die noch gar nicht in der Datei stehen (z.B. neu angesetzte Partien), anhaengen.
+  for (const [key, row] of byKey) {
+    if (seen.has(key)) continue;
+    const fresh: Record<string, string> = Object.fromEntries(header.map((c) => [c, ""]));
+    fresh.Div = row.Div;
+    fresh.Date = row.Date;
+    fresh.HomeTeam = row.HomeTeam;
+    fresh.AwayTeam = row.AwayTeam;
+    fresh.FTHG = String(row.FTHG);
+    fresh.FTAG = String(row.FTAG);
+    fresh.FTR = row.FTR;
+    merged.push(fresh);
+  }
+
+  const body = merged
+    .map((row) => header.map((column) => csvEscape(row[column] ?? "")).join(","))
     .join("\n");
 
-  const filePath = join(DATA_DIR, `D1_${seasonToFilenameSuffix(season)}.csv`);
-  writeFileSync(filePath, `${header}\n${csvBody}\n`);
+  writeFileSync(filePath, `${header.join(",")}\n${body}\n`);
+}
 
-  return rows.length;
+function minimalLine(r: ResultRow): string {
+  return [r.Div, r.Date, r.HomeTeam, r.AwayTeam, r.FTHG, r.FTAG, r.FTR].join(",");
 }
 
 interface XgMatch {

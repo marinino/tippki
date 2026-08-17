@@ -68,7 +68,7 @@ function parseCsvFile(filePath: string, season: string): Match[] {
     }));
 }
 
-export function loadAllMatches(): Match[] {
+function parseAllMatches(): Match[] {
   const files = readdirSync(DATA_DIR).filter((f) => f.startsWith("D1_") && f.endsWith(".csv"));
   const matches: Match[] = [];
 
@@ -78,4 +78,20 @@ export function loadAllMatches(): Match[] {
   }
 
   return matches;
+}
+
+let cachedMatches: Match[] | null = null;
+
+// Ohne Cache wurden bei jedem Request alle 13 CSVs neu gelesen und geparst -- und jede
+// API-Route ruft das mindestens einmal auf. Der zurueckgegebene Array wird nirgends
+// in-place veraendert (alle Aufrufer filtern/mappen), deshalb ist das Teilen sicher.
+export function loadAllMatches(): Match[] {
+  if (!cachedMatches) cachedMatches = parseAllMatches();
+  return cachedMatches;
+}
+
+// Muss nach einem Datenupdate aufgerufen werden (siehe refreshResults.ts), sonst laufen
+// die alten Spiele weiter durch den Prozess.
+export function clearMatchCache(): void {
+  cachedMatches = null;
 }

@@ -164,7 +164,24 @@ function applyRecencyWeighting(
   return weighted;
 }
 
+// Ein Fit kostet ITERATIONS Durchlaeufe ueber alle Spiele, plus einen eigenen Fit pro
+// Saison -- bei jedem Seitenaufruf erneut. Der Cache haengt an der Identitaet des
+// uebergebenen Arrays: loadAllMatches() liefert dank eigenem Memo immer dieselbe Instanz,
+// waehrend der Backtest pro Saison ein frisch gefiltertes Array uebergibt und dadurch
+// korrekterweise neu fittet. Nach clearMatchCache() ist die alte Instanz unerreichbar und
+// der Eintrag verschwindet von selbst.
+const modelCache = new WeakMap<Match[], LeagueModel>();
+
 export function buildLeagueModel(matches: Match[]): LeagueModel {
+  const cached = modelCache.get(matches);
+  if (cached) return cached;
+
+  const model = fitLeagueModel(matches);
+  modelCache.set(matches, model);
+  return model;
+}
+
+function fitLeagueModel(matches: Match[]): LeagueModel {
   const { avgHomeGoals, avgAwayGoals } = leagueAverages(matches);
   const referenceTeam = pickReferenceTeam(matches);
 

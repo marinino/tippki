@@ -41,6 +41,27 @@ function dixonColesTau(h: number, a: number, lambdaHome: number, lambdaAway: num
 // von dixonColesTau abgedeckten Faelle. 1 = kein Effekt.
 const DRAW_BOOST = 1.2;
 
+// Basis-Torerwartungen ohne Formeffekt. Getrennt herausgezogen, damit der Backtest sie
+// einmal pro Spiel berechnen und danach beliebig viele Formgewichte darauf durchprobieren
+// kann, ohne das Modell neu zu fitten.
+export function baseLambdas(
+  model: LeagueModel,
+  homeTeam: string,
+  awayTeam: string
+): { lambdaHome: number; lambdaAway: number; homeIsEstimated: boolean; awayIsEstimated: boolean } {
+  const homeIsEstimated = !model.teams.has(homeTeam);
+  const awayIsEstimated = !model.teams.has(awayTeam);
+  const home = model.teams.get(homeTeam) ?? model.promotedTeamDefault;
+  const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
+
+  return {
+    lambdaHome: model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense),
+    lambdaAway: model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense),
+    homeIsEstimated,
+    awayIsEstimated,
+  };
+}
+
 export function predictMatch(
   model: LeagueModel,
   homeTeam: string,
@@ -50,16 +71,25 @@ export function predictMatch(
   homeForm: number = 0,
   awayForm: number = 0
 ): MatchPrediction {
-  const homeIsEstimated = !model.teams.has(homeTeam);
-  const awayIsEstimated = !model.teams.has(awayTeam);
-  const home = model.teams.get(homeTeam) ?? model.promotedTeamDefault;
-  const away = model.teams.get(awayTeam) ?? model.promotedTeamDefault;
+  const base = baseLambdas(model, homeTeam, awayTeam);
 
-  const expectedHomeGoals =
-    model.avgHomeGoals * Math.exp(home.attack) * Math.exp(away.defense) * Math.exp(XG_FORM_WEIGHT * homeForm);
-  const expectedAwayGoals =
-    model.avgAwayGoals * Math.exp(away.attack) * Math.exp(home.defense) * Math.exp(XG_FORM_WEIGHT * awayForm);
+  return predictFromLambdas(
+    base.lambdaHome * Math.exp(XG_FORM_WEIGHT * homeForm),
+    base.lambdaAway * Math.exp(XG_FORM_WEIGHT * awayForm),
+    base.homeIsEstimated,
+    base.awayIsEstimated
+  );
+}
 
+// Der eigentliche Vorhersageschritt: Score-Matrix aus zwei Torerwartungen. Nimmt die
+// Lambdas direkt entgegen, damit Aufrufer sie vorher beliebig anpassen koennen (Form,
+// Marktquoten, LLM-Korrektur), ohne diese Logik zu duplizieren.
+export function predictFromLambdas(
+  expectedHomeGoals: number,
+  expectedAwayGoals: number,
+  homeIsEstimated = false,
+  awayIsEstimated = false
+): MatchPrediction {
   const scoreProbabilities = new Map<string, number>();
   let homeWinProb = 0;
   let drawProb = 0;

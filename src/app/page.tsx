@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DEFAULT_SCHEME_KEY, SCORING_SCHEMES } from "../eval/scoringScheme";
 
 interface BookmakerOdds {
   bookmaker: string;
@@ -20,6 +21,14 @@ interface Prediction {
   homeWinProb: number;
   drawProb: number;
   awayWinProb: number;
+  // Der abzugebende Tipp: maximiert den Punkte-Erwartungswert, nicht die
+  // Einzelwahrscheinlichkeit. Weicht deshalb bewusst oft vom wahrscheinlichsten
+  // Ergebnis (argmaxTip) ab.
+  tip: string;
+  expectedPoints: number;
+  runnerUpTip: string;
+  runnerUpExpectedPoints: number;
+  argmaxTip: string;
   mostLikelyScore: string;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
@@ -32,6 +41,8 @@ interface PredictionsResponse {
   matchday: number | null;
   nextMatchday: number | null;
   availableMatchdays: number[];
+  scheme: string;
+  schemeLabel: string;
   oddsFetchedAt: string | null;
 }
 
@@ -41,6 +52,8 @@ interface SeasonBacktest {
   evaluated: number;
   tendencyAccuracy: number;
   exactScoreAccuracy: number;
+  pointsPerMatch: number;
+  rps: number;
 }
 
 interface BacktestResult {
@@ -48,6 +61,14 @@ interface BacktestResult {
   totalEvaluated: number;
   totalTendencyAccuracy: number;
   totalExactScoreAccuracy: number;
+  schemeLabel: string;
+  overall: {
+    pointsPerMatch: number;
+    expectedPointsPerMatch: number | null;
+    rps: number;
+    logLoss: number;
+  };
+  baselines: Record<string, { tendencyAccuracy: number; rps: number }>;
 }
 
 interface TableEntry {
@@ -80,6 +101,11 @@ interface SimPrediction {
   homeWinProb: number;
   drawProb: number;
   awayWinProb: number;
+  tip: string;
+  expectedPoints: number;
+  runnerUpTip: string;
+  runnerUpExpectedPoints: number;
+  argmaxTip: string;
   mostLikelyScore: string;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
@@ -100,6 +126,13 @@ interface SimResult {
 }
 
 const SIM_STORAGE_KEY = "tippki-simulation";
+
+const BASELINE_LABELS: Record<string, string> = {
+  modelOnly: "Nur Modell",
+  blended: "Modell + Markt (50/50)",
+  pureMarket: "Nur Buchmacher",
+  baseRate: "Nur H/U/A-Häufigkeit",
+};
 
 type Tab = "predictions" | "table" | "backtest" | "simulate";
 
@@ -126,6 +159,7 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("predictions");
   const [table, setTable] = useState<TableResponse | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
+  const [scheme, setScheme] = useState<string>(DEFAULT_SCHEME_KEY);
 
   const [simResultsSoFar, setSimResultsSoFar] = useState<SimResult[]>([]);
   const [simMatchday, setSimMatchday] = useState(1);
@@ -182,13 +216,23 @@ export default function Home() {
     setTableLoading(false);
   }
 
-  async function loadMatchday(matchday?: number) {
+  async function loadMatchday(matchday?: number, schemeKey = scheme) {
     setPredictionsLoading(true);
-    const url = matchday ? `/api/predictions?matchday=${matchday}` : "/api/predictions";
-    const res = await fetch(url);
+    const params = new URLSearchParams({ scheme: schemeKey });
+    if (matchday) params.set("matchday", String(matchday));
+    const res = await fetch(`/api/predictions?${params}`);
     const result = await res.json();
     setData(result);
     setPredictionsLoading(false);
+  }
+
+  // Das Punkteschema bestimmt den optimalen Tipp, nicht nur seine Bewertung -- ein
+  // Wechsel muss deshalb neu rechnen lassen, nicht nur die Anzeige umrechnen.
+  function changeScheme(schemeKey: string) {
+    setScheme(schemeKey);
+    loadMatchday(data?.matchday ?? undefined, schemeKey);
+    if (tab === "simulate") loadSimMatchday(simMatchday, simResultsSoFar, schemeKey);
+    if (backtest) runBacktest(schemeKey);
   }
 
   async function refreshData() {
@@ -224,18 +268,18 @@ export default function Home() {
     }
   }
 
-  async function loadSimMatchday(matchday: number, resultsSoFar: SimResult[]) {
+  async function loadSimMatchday(matchday: number, resultsSoFar: SimResult[], schemeKey = scheme) {
     setSimLoading(true);
     const res = await fetch("/api/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matchday, resultsSoFar }),
+      body: JSON.stringify({ matchday, resultsSoFar, scheme: schemeKey }),
     });
     const result: SimResponse = await res.json();
     setSimData(result);
     const prefill: Record<string, { home: string; away: string }> = {};
     for (const p of result.predictions) {
-      const [home, away] = p.mostLikelyScore.split(":");
+      const [home, away] = p.tip.split(":");
       prefill[`${p.homeTeam}|${p.awayTeam}`] = { home, away };
     }
     setSimInputs(prefill);
@@ -296,9 +340,9 @@ export default function Home() {
     loadSimMatchday(1, []);
   }
 
-  async function runBacktest() {
+  async function runBacktest(schemeKey = scheme) {
     setBacktestLoading(true);
-    const res = await fetch("/api/backtest");
+    const res = await fetch(`/api/backtest?scheme=${schemeKey}&tip=ev`);
     const result = await res.json();
     setBacktest(result);
     setBacktestLoading(false);
@@ -344,6 +388,13 @@ export default function Home() {
             )}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select className="select" value={scheme} onChange={(e) => changeScheme(e.target.value)}>
+              {Object.values(SCORING_SCHEMES).map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
             {data && data.availableMatchdays.length > 0 && (
               <select
                 className="select"
@@ -493,7 +544,10 @@ export default function Home() {
                   </div>
 
                   <div className="match-side">
-                    <span className="tip-badge">Tipp {p.mostLikelyScore}</span>
+                    <span className="tip-badge">Tipp {p.tip}</span>
+                    <span className="expected-score">
+                      EV {p.expectedPoints.toFixed(2)} Pkt
+                    </span>
                     <span className="expected-score">
                       Ø {p.expectedHomeGoals.toFixed(1)}:{p.expectedAwayGoals.toFixed(1)}
                     </span>
@@ -532,36 +586,73 @@ export default function Home() {
             <h2 className="section-title">Backtest</h2>
             <p className="section-subtitle">Modellgüte auf historischen Saisons</p>
           </div>
-          <button className="button" onClick={runBacktest} disabled={backtestLoading}>
+          <button className="button" onClick={() => runBacktest()} disabled={backtestLoading}>
             {backtestLoading ? "Läuft …" : backtest ? "Neu berechnen" : "Starten"}
           </button>
         </div>
 
         {backtest && (
-          <div className="stat-grid">
-            <div className="stat-card wide">
-              <p className="stat-label">
-                Gesamt über {backtest.perSeason.length} Saisons ({backtest.totalEvaluated} Spiele)
-              </p>
-              <p className="stat-value">
-                {pct(backtest.totalTendencyAccuracy)}{" "}
-                <span className="stat-value small" style={{ color: "var(--text-tertiary)" }}>
-                  Tendenz
-                </span>
-              </p>
-              <p className="stat-value small" style={{ color: "var(--text-secondary)", marginTop: 4 }}>
-                {pct(backtest.totalExactScoreAccuracy)} exakte Ergebnisse
-              </p>
-            </div>
-            {backtest.perSeason.map((s) => (
-              <div className="stat-card" key={s.season}>
-                <p className="stat-label">Saison {s.season}</p>
-                <p className="stat-value small">
-                  {pct(s.tendencyAccuracy)} <span style={{ color: "var(--text-tertiary)" }}>Tendenz</span>
+          <>
+            <div className="stat-grid">
+              <div className="stat-card wide">
+                <p className="stat-label">
+                  Gesamt über {backtest.perSeason.length} Saisons ({backtest.totalEvaluated} Spiele) ·
+                  Schema {backtest.schemeLabel}
                 </p>
+                <p className="stat-value">
+                  {backtest.overall.pointsPerMatch.toFixed(3)}{" "}
+                  <span className="stat-value small" style={{ color: "var(--text-tertiary)" }}>
+                    Punkte / Spiel
+                  </span>
+                </p>
+                <p className="stat-value small" style={{ color: "var(--text-secondary)", marginTop: 4 }}>
+                  {pct(backtest.totalTendencyAccuracy)} Tendenz ·{" "}
+                  {pct(backtest.totalExactScoreAccuracy)} exakt · RPS{" "}
+                  {backtest.overall.rps.toFixed(4)}
+                </p>
+                {backtest.overall.expectedPointsPerMatch != null && (
+                  <p className="section-subtitle" style={{ marginTop: 6 }}>
+                    Modell erwartet {backtest.overall.expectedPointsPerMatch.toFixed(3)} Punkte/Spiel
+                    und holt {backtest.overall.pointsPerMatch.toFixed(3)} — die Differenz ist der
+                    Kalibrierungsfehler.
+                  </p>
+                )}
               </div>
-            ))}
-          </div>
+              {backtest.perSeason.map((s) => (
+                <div className="stat-card" key={s.season}>
+                  <p className="stat-label">Saison {s.season}</p>
+                  <p className="stat-value small">
+                    {s.pointsPerMatch.toFixed(2)}{" "}
+                    <span style={{ color: "var(--text-tertiary)" }}>Pkt</span>
+                  </p>
+                  <p className="section-subtitle">
+                    {pct(s.tendencyAccuracy)} Tendenz · RPS {s.rps.toFixed(3)}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {backtest.baselines && (
+              <>
+                <p className="section-subtitle" style={{ marginTop: 20 }}>
+                  Vergleichsmaßstäbe (RPS: kleiner ist besser). Die Tendenz-Trefferquoten liegen alle
+                  innerhalb ihres Standardfehlers von ±1,0 Prozentpunkten und sind deshalb
+                  nicht unterscheidbar — der RPS trennt sie dagegen klar.
+                </p>
+                <div className="stat-grid">
+                  {Object.entries(backtest.baselines).map(([name, b]) => (
+                    <div className="stat-card" key={name}>
+                      <p className="stat-label">{BASELINE_LABELS[name] ?? name}</p>
+                      <p className="stat-value small">
+                        {b.rps.toFixed(4)} <span style={{ color: "var(--text-tertiary)" }}>RPS</span>
+                      </p>
+                      <p className="section-subtitle">{pct(b.tendencyAccuracy)} Tendenz</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
       </section>
       )}
@@ -677,7 +768,11 @@ function MatchCard({ prediction: p }: { prediction: Prediction }) {
 
       <div className="match-side">
         <span className="match-date">{formatMatchDate(p.date)}</span>
-        <span className="tip-badge">{p.mostLikelyScore}</span>
+        <span className="tip-badge">{p.tip}</span>
+        <span className="expected-score">EV {p.expectedPoints.toFixed(2)} Pkt</span>
+        <span className="expected-score">
+          Alt {p.runnerUpTip} ({p.runnerUpExpectedPoints.toFixed(2)})
+        </span>
         <span className="expected-score">
           Ø {p.expectedHomeGoals.toFixed(1)}:{p.expectedAwayGoals.toFixed(1)}
         </span>

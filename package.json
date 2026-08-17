@@ -4,9 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run typecheck && npm run check",
+    "typecheck": "tsc --noEmit",
+    "check": "tsx src/scripts/selfCheck.ts",
     "load-matches": "tsx src/scripts/loadMatches.ts",
     "backtest": "tsx src/scripts/backtest.ts",
+    "compare": "tsx src/scripts/compare.ts",
     "backtest-odds": "tsx src/scripts/backtestOdds.ts",
     "backtest-odds-advanced": "tsx src/scripts/backtestOddsAdvanced.ts",
     "predict": "tsx src/scripts/predict.ts",

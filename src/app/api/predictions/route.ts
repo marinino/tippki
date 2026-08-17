@@ -2,10 +2,11 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
-import { predictMatch } from "../../../model/predictMatch";
+import { predictPipeline } from "../../../model/predictPipeline";
 import { computeXgForm } from "../../../model/xgForm";
 import { readOddsCache } from "../../../data/oddsApi";
-import { averageMarketProbabilities, blendWithMarket, ODDS_BLEND_ALPHA } from "../../../model/marketOdds";
+import { averageMarketProbabilities } from "../../../model/marketOdds";
+import { resolveScheme } from "../../../eval/scoringScheme";
 
 interface Fixture {
   homeTeam: string;
@@ -27,7 +28,10 @@ export async function GET(request: Request) {
   const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
   const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
 
-  const requestedParam = new URL(request.url).searchParams.get("matchday");
+  const params = new URL(request.url).searchParams;
+  const scheme = resolveScheme(params.get("scheme"));
+
+  const requestedParam = params.get("matchday");
   const requestedMatchday = requestedParam ? Number(requestedParam) : null;
   const selectedMatchday =
     requestedMatchday && availableMatchdays.includes(requestedMatchday) ? requestedMatchday : nextMatchday;
@@ -45,14 +49,20 @@ export async function GET(request: Request) {
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
     const matchDate = new Date(date);
-    const homeForm = computeXgForm(homeTeam, matchDate);
-    const awayForm = computeXgForm(awayTeam, matchDate);
-    const prediction = predictMatch(model, homeTeam, awayTeam, homeForm, awayForm);
-
     const fixtureOdds = oddsByFixture[`${homeTeam}|${awayTeam}`];
-    const outcomeProbs = fixtureOdds
-      ? blendWithMarket(prediction, averageMarketProbabilities(fixtureOdds.bookmakers), ODDS_BLEND_ALPHA)
-      : prediction;
+
+    // Die Marktquoten gehen jetzt in die Score-Matrix ein, nicht nur in die 1X2-Balken --
+    // vorher kam der angezeigte Tipp aus der ungeblendeten Modellmatrix und ignorierte
+    // die beste verfuegbare Information vollstaendig.
+    const out = predictPipeline({
+      model,
+      homeTeam,
+      awayTeam,
+      homeForm: computeXgForm(homeTeam, matchDate),
+      awayForm: computeXgForm(awayTeam, matchDate),
+      market1x2: fixtureOdds ? averageMarketProbabilities(fixtureOdds.bookmakers) : null,
+      scheme,
+    });
 
     return {
       homeTeam,
@@ -60,15 +70,21 @@ export async function GET(request: Request) {
       homeLogo: logosByTeam[homeTeam] ?? null,
       awayLogo: logosByTeam[awayTeam] ?? null,
       date,
-      expectedHomeGoals: prediction.expectedHomeGoals,
-      expectedAwayGoals: prediction.expectedAwayGoals,
-      homeWinProb: outcomeProbs.homeWinProb,
-      drawProb: outcomeProbs.drawProb,
-      awayWinProb: outcomeProbs.awayWinProb,
-      mostLikelyScore: prediction.mostLikelyScore,
-      homeIsEstimated: prediction.homeIsEstimated,
-      awayIsEstimated: prediction.awayIsEstimated,
-      oddsBlended: Boolean(fixtureOdds),
+      expectedHomeGoals: out.expectedHomeGoals,
+      expectedAwayGoals: out.expectedAwayGoals,
+      homeWinProb: out.finalProbs.homeWinProb,
+      drawProb: out.finalProbs.drawProb,
+      awayWinProb: out.finalProbs.awayWinProb,
+      tip: out.tip.tip,
+      expectedPoints: out.tip.expectedPoints,
+      runnerUpTip: out.tip.runnerUpTip,
+      runnerUpExpectedPoints: out.tip.runnerUpExpectedPoints,
+      argmaxTip: out.tip.argmaxCellTip,
+      // Altes Feld bleibt befuellt, damit aeltere Clients nicht brechen.
+      mostLikelyScore: out.tip.tip,
+      homeIsEstimated: out.homeIsEstimated,
+      awayIsEstimated: out.awayIsEstimated,
+      oddsBlended: out.marketApplied,
       bookmakerOdds: fixtureOdds?.bookmakers ?? null,
     };
   });
@@ -78,6 +94,8 @@ export async function GET(request: Request) {
     matchday: selectedMatchday,
     nextMatchday,
     availableMatchdays,
+    scheme: scheme.key,
+    schemeLabel: scheme.label,
     oddsFetchedAt: oddsCache && oddsCache.matchday === selectedMatchday ? oddsCache.fetchedAt : null,
   });
 }

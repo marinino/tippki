@@ -1,65 +1,42 @@
-import { loadAllMatches, parseMatchDate } from "../../../data/loadMatches";
-import { buildLeagueModel } from "../../../model/teamStrength";
-import { predictMatch } from "../../../model/predictMatch";
-import { computeXgForm } from "../../../model/xgForm";
+// Duenner Wrapper um src/eval/backtestCore.ts. Bis hierher war die gesamte
+// Backtest-Logik aus src/scripts/backtest.ts kopiert -- zwei Kopien, die zwangslaeufig
+// irgendwann verschiedene Zahlen geliefert haetten.
 
-const TEST_SEASONS = ["2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"];
+import { runBacktest, type TipMode, type VariantName } from "../../../eval/backtestCore";
+import { resolveScheme } from "../../../eval/scoringScheme";
+import { parseSplit } from "../../../eval/splits";
 
-export async function GET() {
-  const allMatches = loadAllMatches();
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const split = params.get("split") ? parseSplit(params.get("split")) : "all";
+  const variant = (params.get("variant") ?? "blended") as VariantName;
+  const tipMode = (params.get("tip") ?? "ev") as TipMode;
+  const scheme = resolveScheme(params.get("scheme"));
 
-  const perSeason = [];
-  let totalCorrectOutcome = 0;
-  let totalCorrectScore = 0;
-  let totalEvaluated = 0;
-
-  for (const testSeason of TEST_SEASONS) {
-    const trainMatches = allMatches.filter((m) => m.season < testSeason);
-    const testMatches = allMatches.filter((m) => m.season === testSeason);
-
-    const model = buildLeagueModel(trainMatches);
-
-    let correctOutcome = 0;
-    let correctScore = 0;
-    let evaluated = 0;
-
-    for (const match of testMatches) {
-      const matchDate = parseMatchDate(match.date);
-      const homeForm = computeXgForm(match.homeTeam, matchDate);
-      const awayForm = computeXgForm(match.awayTeam, matchDate);
-      const prediction = predictMatch(model, match.homeTeam, match.awayTeam, homeForm, awayForm);
-
-      const actualOutcome =
-        match.homeGoals > match.awayGoals ? "H" : match.homeGoals === match.awayGoals ? "D" : "A";
-      const predictedOutcome =
-        prediction.homeWinProb > prediction.drawProb && prediction.homeWinProb > prediction.awayWinProb
-          ? "H"
-          : prediction.drawProb > prediction.awayWinProb
-            ? "D"
-            : "A";
-
-      if (predictedOutcome === actualOutcome) correctOutcome++;
-      if (prediction.mostLikelyScore === `${match.homeGoals}:${match.awayGoals}`) correctScore++;
-      evaluated++;
-    }
-
-    perSeason.push({
-      season: testSeason,
-      trainMatchCount: trainMatches.length,
-      evaluated,
-      tendencyAccuracy: correctOutcome / evaluated,
-      exactScoreAccuracy: correctScore / evaluated,
-    });
-
-    totalCorrectOutcome += correctOutcome;
-    totalCorrectScore += correctScore;
-    totalEvaluated += evaluated;
-  }
+  const result = runBacktest({ split, variant, tipMode, scheme });
 
   return Response.json({
-    perSeason,
-    totalEvaluated,
-    totalTendencyAccuracy: totalCorrectOutcome / totalEvaluated,
-    totalExactScoreAccuracy: totalCorrectScore / totalEvaluated,
+    // Bestehende Felder unveraendert, damit das Frontend nicht bricht.
+    perSeason: result.perSeason.map((s) => ({
+      season: s.season,
+      trainMatchCount: s.trainMatchCount,
+      evaluated: s.summary.n,
+      tendencyAccuracy: s.summary.tendencyAccuracy,
+      exactScoreAccuracy: s.summary.exactScoreRate,
+      pointsPerMatch: s.summary.pointsPerMatch,
+      rps: s.summary.rps,
+    })),
+    totalEvaluated: result.totalEvaluated,
+    totalTendencyAccuracy: result.overall.tendencyAccuracy,
+    totalExactScoreAccuracy: result.overall.exactScoreRate,
+    // Neu
+    split,
+    variant,
+    tipMode,
+    scheme: result.scheme.key,
+    schemeLabel: result.scheme.label,
+    overall: result.overall,
+    baselines: result.baselines,
+    matchesWithoutOdds: result.matchesWithoutOdds,
   });
 }
