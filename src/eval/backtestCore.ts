@@ -15,7 +15,11 @@
 // Sekunden. Ohne diese Trennung waere die Hyperparametersuche in Phase 2 nicht machbar.
 
 import { loadAllMatches, parseMatchDate, type Match } from "../data/loadMatches";
-import { buildLeagueModel } from "../model/teamStrength";
+import {
+  buildLeagueModel,
+  type LeagueModel,
+  type LeagueModelOptions,
+} from "../model/teamStrength";
 import { baseLambdas } from "../model/predictMatch";
 import {
   argmaxCell,
@@ -24,7 +28,14 @@ import {
   reweightToOutcomeMasses,
 } from "../model/scoreMatrix";
 import { expectedPointsForTip, selectEvTip } from "../model/tipSelector";
-import { XG_FORM_WEIGHT, computeXgForm } from "../model/xgForm";
+import {
+  applyConstraints,
+  devigTwoWay,
+  outcomeConstraint,
+  totalOverConstraint,
+  type MatrixConstraint,
+} from "../model/marketConstraints";
+import { XG_FORM_WEIGHT, computeXgForm, computeXgFormResidual } from "../model/xgForm";
 import { ODDS_BLEND_ALPHA, blendWithMarket, impliedProbabilities } from "../model/marketOdds";
 import {
   argmaxOutcome,
@@ -61,9 +72,16 @@ export interface PredictionContext {
   // Rohe xG-Differenz, damit sich das Formgewicht spaeter ohne Refit variieren laesst.
   homeForm: number;
   awayForm: number;
+  // Dieselbe Groesse, aber als Abweichung vom eigenen Normalniveau -- ohne den
+  // Teamstaerke-Anteil, der in homeForm/awayForm mit r = 0.73 steckt.
+  homeFormResidual: number;
+  awayFormResidual: number;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
   market1x2: OutcomeProbs | null;
+  // Entvigte Marktwahrscheinlichkeit fuer "mehr als 2.5 Tore". Die einzige Totals-Linie
+  // in den historischen Daten; live gibt es eine ganze Leiter.
+  totalsOverProb: number | null;
 }
 
 export interface SeasonContexts {
@@ -75,11 +93,18 @@ export interface SeasonContexts {
 }
 
 // Strikt walk-forward: trainiert wird ausschliesslich auf Saisons VOR der Testsaison.
-export function buildContexts(seasons: string[], allMatches = loadAllMatches()): SeasonContexts[] {
+export function buildContexts(
+  seasons: string[],
+  modelOptions: LeagueModelOptions = {},
+  allMatches = loadAllMatches(),
+  // Injizierbar, damit der Konvergenz-Audit denselben Auswertungspfad mit dem alten
+  // Gradientenfit durchlaufen lassen kann. Sonst waere der Vergleich nicht gepaart.
+  buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel
+): SeasonContexts[] {
   return seasons.map((testSeason) => {
     const trainMatches = allMatches.filter((m) => m.season < testSeason);
     const testMatches = allMatches.filter((m) => m.season === testSeason);
-    const model = buildLeagueModel(trainMatches);
+    const model = buildModel(trainMatches, modelOptions);
 
     const contexts = testMatches.map((match): PredictionContext => {
       const matchDate = parseMatchDate(match.date);
@@ -97,9 +122,15 @@ export function buildContexts(seasons: string[], allMatches = loadAllMatches()):
         baseLambdaAway: base.lambdaAway,
         homeForm: computeXgForm(match.homeTeam, matchDate),
         awayForm: computeXgForm(match.awayTeam, matchDate),
+        homeFormResidual: computeXgFormResidual(match.homeTeam, matchDate),
+        awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
         homeIsEstimated: base.homeIsEstimated,
         awayIsEstimated: base.awayIsEstimated,
         market1x2: marketProbsOf(match),
+        totalsOverProb:
+          match.oddsOver25 && match.oddsUnder25
+            ? devigTwoWay(match.oddsOver25, match.oddsUnder25)
+            : null,
       };
     });
 
@@ -160,6 +191,19 @@ export interface RunSpec {
   name: string;
   variant: VariantName;
   tipMode: TipMode;
+  // Over/Under-2.5-Bedingung zusaetzlich auf die Score-Matrix legen. Der 1X2-Blend
+  // korrigiert nur, WIE das Spiel ausgeht -- diese Bedingung korrigiert, wie viele Tore
+  // dabei fallen. Genau das entscheidet ueber Exakt- und Tordifferenz-Punkte.
+  useTotals?: boolean;
+  // Staerke der Marktbedingungen im IPF: 0 = ignorieren, 1 = voll erzwingen.
+  marketStrength?: number;
+  // Gewicht der Formkurve. Default ist der produktive Wert aus xgForm.ts.
+  xgFormWeight?: number;
+  // "diff" = rohe xG-Differenz (Ist-Zustand), "residual" = Abweichung vom Normalniveau.
+  formMode?: "diff" | "residual";
+  // Matrixparameter. Ohne Angabe die produktiven Werte aus scoreMatrix.ts.
+  rho?: number;
+  drawBoost?: number;
 }
 
 export interface MatchEvaluation {
@@ -209,19 +253,37 @@ export function evaluateRun(
 
   for (const season of seasonContexts) {
     for (const ctx of season.contexts) {
-      const lambdaHome = ctx.baseLambdaHome * Math.exp(XG_FORM_WEIGHT * ctx.homeForm);
-      const lambdaAway = ctx.baseLambdaAway * Math.exp(XG_FORM_WEIGHT * ctx.awayForm);
+      const formWeight = spec.xgFormWeight ?? XG_FORM_WEIGHT;
+      const residual = spec.formMode === "residual";
+      const homeForm = residual ? ctx.homeFormResidual : ctx.homeForm;
+      const awayForm = residual ? ctx.awayFormResidual : ctx.awayForm;
+      const lambdaHome = ctx.baseLambdaHome * Math.exp(formWeight * homeForm);
+      const lambdaAway = ctx.baseLambdaAway * Math.exp(formWeight * awayForm);
 
-      const modelMatrix = buildDixonColesMatrix(lambdaHome, lambdaAway);
+      const modelMatrix = buildDixonColesMatrix(lambdaHome, lambdaAway, {
+        rho: spec.rho,
+        drawBoost: spec.drawBoost,
+      });
       const modelProbs = outcomeMasses(modelMatrix);
       const finalProbs = finalProbsFor(spec.variant, modelProbs, ctx.market1x2, season.trainBaseRate);
 
-      // Nur umgewichten, wenn die Variante die Massen ueberhaupt verschoben hat --
-      // sonst waere es eine Identitaetsoperation mit Rundungsrauschen.
-      const useReweighted = spec.tipMode !== "argmaxLegacy" && finalProbs !== modelProbs;
-      const tipMatrix = useReweighted
-        ? reweightToOutcomeMasses(modelMatrix, finalProbs)
-        : modelMatrix;
+      // Marktbedingungen auf die Matrix legen. Mit nur der 1X2-Bedingung ist das
+      // beweisbar identisch zu reweightToOutcomeMasses (siehe selfCheck.ts), die alten
+      // Zahlen bleiben also erhalten; die Totals-Bedingung kommt additiv dazu.
+      const constraints: MatrixConstraint[] = [];
+      if (spec.tipMode !== "argmaxLegacy") {
+        if (finalProbs !== modelProbs) {
+          constraints.push(outcomeConstraint(modelMatrix.maxGoals, finalProbs));
+        }
+        if (spec.useTotals && ctx.totalsOverProb !== null) {
+          constraints.push(totalOverConstraint(modelMatrix.maxGoals, 2.5, ctx.totalsOverProb));
+        }
+      }
+
+      const tipMatrix =
+        constraints.length > 0
+          ? applyConstraints(modelMatrix, constraints, { strength: spec.marketStrength ?? 1 }).matrix
+          : modelMatrix;
 
       let tip: string;
       let expectedPoints: number;

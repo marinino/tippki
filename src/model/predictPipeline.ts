@@ -15,12 +15,26 @@ import { baseLambdas } from "./predictMatch";
 import { ODDS_BLEND_ALPHA, blendWithMarket } from "./marketOdds";
 import {
   buildDixonColesMatrix,
+  expectedGoals,
   outcomeMasses,
-  reweightToOutcomeMasses,
   type MatrixOptions,
   type ScoreMatrix,
 } from "./scoreMatrix";
+import {
+  applyConstraints,
+  goalDifferenceConstraintFromProbs,
+  outcomeConstraint,
+  totalGoalsConstraintFromProbs,
+  type MatrixConstraint,
+} from "./marketConstraints";
 import { selectEvTip, type TipChoice } from "./tipSelector";
+import {
+  applyWithGuardrails,
+  toLlmAdjustment,
+  type LlmAdjustment,
+  type LlmAdjustmentOptions,
+} from "../llm/llmAdjustment";
+import type { LlmMatchContext } from "../llm/matchContext";
 
 export interface PipelineInput {
   model: LeagueModel;
@@ -31,14 +45,26 @@ export interface PipelineInput {
   awayForm?: number;
   // Entvigte Marktwahrscheinlichkeiten, falls vorhanden.
   market1x2?: OutcomeProbs | null;
+  // Randverteilung der Torsumme bzw. der Tordifferenz aus den Markt-Leitern.
+  marketTotals?: { line: number; overProb: number }[] | null;
+  marketSpread?: { line: number; homeProb: number }[] | null;
+  // Recherchierter Spielkontext (Ausfaelle, Belastung, Motivation) als geklammerte
+  // Korrektur der Torerwartungen.
+  llmContext?: LlmMatchContext | null;
+  llmOptions?: LlmAdjustmentOptions;
   scheme?: ScoringScheme;
   oddsBlendAlpha?: number;
+  marketStrength?: number;
   matrixOptions?: MatrixOptions;
 }
 
 export interface PipelineOutput {
+  // Erwartete Tore NACH allen Marktbedingungen, aus der Matrix gerechnet.
   expectedHomeGoals: number;
   expectedAwayGoals: number;
+  // Die rohen Modell-Lambdas davor -- fuer Diagnose und Vergleich.
+  modelLambdaHome: number;
+  modelLambdaAway: number;
   modelProbs: OutcomeProbs;
   finalProbs: OutcomeProbs;
   matrix: ScoreMatrix;
@@ -46,6 +72,14 @@ export interface PipelineOutput {
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
   marketApplied: boolean;
+  // Welche Marktbedingungen tatsaechlich gegriffen haben -- fuer UI und Diagnose.
+  marketConstraints: string[];
+  marketConverged: boolean;
+  // null, wenn kein Kontext vorlag oder er keine Faktoren enthielt.
+  llmAdjustment: LlmAdjustment | null;
+  // Torerwartungen VOR der LLM-Korrektur -- fuer den gepaarten Vorwaertsvergleich.
+  formLambdaHome: number;
+  formLambdaAway: number;
 }
 
 // Feste Reihenfolge:
@@ -60,30 +94,92 @@ export function predictPipeline(input: PipelineInput): PipelineOutput {
   const alpha = input.oddsBlendAlpha ?? ODDS_BLEND_ALPHA;
 
   const base = baseLambdas(input.model, input.homeTeam, input.awayTeam);
-  const expectedHomeGoals = base.lambdaHome * Math.exp(XG_FORM_WEIGHT * (input.homeForm ?? 0));
-  const expectedAwayGoals = base.lambdaAway * Math.exp(XG_FORM_WEIGHT * (input.awayForm ?? 0));
+  const formLambdaHome = base.lambdaHome * Math.exp(XG_FORM_WEIGHT * (input.homeForm ?? 0));
+  const formLambdaAway = base.lambdaAway * Math.exp(XG_FORM_WEIGHT * (input.awayForm ?? 0));
+
+  // Schritt 3: geklammerte Korrektur aus dem recherchierten Spielkontext. Wirkt VOR der
+  // Matrix und damit vor den Marktbedingungen -- die duerfen sie anschliessend
+  // ueberstimmen, denn der Markt kennt Ausfaelle ohnehin.
+  let llmAdjustment: LlmAdjustment | null = null;
+  let modelLambdaHome = formLambdaHome;
+  let modelLambdaAway = formLambdaAway;
+
+  if (input.llmContext && input.llmContext.keyFactors.length > 0) {
+    const applied = applyWithGuardrails(
+      formLambdaHome,
+      formLambdaAway,
+      toLlmAdjustment(input.llmContext, input.llmOptions),
+      input.matrixOptions
+    );
+    modelLambdaHome = applied.lambdaHome;
+    modelLambdaAway = applied.lambdaAway;
+    llmAdjustment = applied.adjustment;
+  }
 
   const modelMatrix = buildDixonColesMatrix(
-    expectedHomeGoals,
-    expectedAwayGoals,
+    modelLambdaHome,
+    modelLambdaAway,
     input.matrixOptions
   );
   const modelProbs = outcomeMasses(modelMatrix);
 
   const market = input.market1x2 ?? null;
   const finalProbs = market ? blendWithMarket(modelProbs, market, alpha) : modelProbs;
-  // Schritt 5: die Marktkorrektur wandert in die Matrix, damit sie auch den Tipp erreicht.
-  const matrix = market ? reweightToOutcomeMasses(modelMatrix, finalProbs) : modelMatrix;
+
+  // Schritt 5: alle Marktinformationen wandern als Nebenbedingungen in die Matrix, damit
+  // sie den Tipp erreichen. Der 1X2-Blend korrigiert, WIE das Spiel ausgeht; die Totals-
+  // und Spread-Leitern korrigieren, wie viele Tore fallen und wie hoch der Sieg ausfaellt.
+  // Genau diese beiden Dimensionen entscheiden ueber Exakt- und Tordifferenz-Punkte, und
+  // der 1X2-Markt sagt darueber nichts.
+  const constraints: MatrixConstraint[] = [];
+  const applied: string[] = [];
+
+  if (market) {
+    constraints.push(outcomeConstraint(modelMatrix.maxGoals, finalProbs));
+    applied.push("1X2");
+  }
+  if (input.marketTotals && input.marketTotals.length >= 2) {
+    const totals = totalGoalsConstraintFromProbs(modelMatrix.maxGoals, input.marketTotals);
+    if (totals) {
+      constraints.push(totals);
+      applied.push(totals.name);
+    }
+  }
+  if (input.marketSpread && input.marketSpread.length >= 2) {
+    const spread = goalDifferenceConstraintFromProbs(modelMatrix.maxGoals, input.marketSpread);
+    if (spread) {
+      constraints.push(spread);
+      applied.push(spread.name);
+    }
+  }
+
+  const fit =
+    constraints.length > 0
+      ? applyConstraints(modelMatrix, constraints, { strength: input.marketStrength ?? 1 })
+      : null;
+  const matrix = fit ? fit.matrix : modelMatrix;
+  const expected = expectedGoals(matrix);
 
   return {
-    expectedHomeGoals,
-    expectedAwayGoals,
+    // Aus der fertigen Matrix, nicht die rohen Modell-Lambdas: nach den Marktbedingungen
+    // gelten die nicht mehr, und daneben angezeigt wuerden sie dem Tipp widersprechen.
+    expectedHomeGoals: expected.home,
+    expectedAwayGoals: expected.away,
+    modelLambdaHome,
+    modelLambdaAway,
     modelProbs,
-    finalProbs,
+    // Nach dem Fit koennen die 1X2-Massen minimal von finalProbs abweichen, wenn sich
+    // Bedingungen widersprechen. Berichtet wird, was wirklich in der Matrix steht.
+    finalProbs: fit ? outcomeMasses(matrix) : finalProbs,
     matrix,
     tip: selectEvTip(matrix, scheme),
     homeIsEstimated: base.homeIsEstimated,
     awayIsEstimated: base.awayIsEstimated,
     marketApplied: market !== null,
+    marketConstraints: applied,
+    marketConverged: fit ? fit.converged : true,
+    llmAdjustment,
+    formLambdaHome,
+    formLambdaAway,
   };
 }

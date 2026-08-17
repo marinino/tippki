@@ -1,5 +1,12 @@
 import { LeagueModel } from "./teamStrength";
 import { XG_FORM_WEIGHT } from "./xgForm";
+import {
+  argmaxCell,
+  buildDixonColesMatrix,
+  outcomeMasses,
+  toScoreMap,
+  type MatrixOptions,
+} from "./scoreMatrix";
 
 export interface MatchPrediction {
   expectedHomeGoals: number;
@@ -12,34 +19,6 @@ export interface MatchPrediction {
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
 }
-
-function poissonProbability(lambda: number, k: number): number {
-  return (Math.exp(-lambda) * lambda ** k) / factorial(k);
-}
-
-function factorial(n: number): number {
-  let result = 1;
-  for (let i = 2; i <= n; i++) result *= i;
-  return result;
-}
-
-const MAX_GOALS = 10;
-
-// Dixon-Coles-Korrektur: in echten Daten kommen 0:0, 1:0, 0:1 und 1:1 etwas anders
-// vor, als die (vereinfachende) Annahme unabhaengiger Heim-/Auswaertstore vorhersagt.
-const RHO = -0.15;
-
-function dixonColesTau(h: number, a: number, lambdaHome: number, lambdaAway: number): number {
-  if (h === 0 && a === 0) return 1 - lambdaHome * lambdaAway * RHO;
-  if (h === 0 && a === 1) return 1 + lambdaHome * RHO;
-  if (h === 1 && a === 0) return 1 + lambdaAway * RHO;
-  if (h === 1 && a === 1) return 1 - RHO;
-  return 1;
-}
-
-// Genereller Bonus fuer JEDES Unentschieden (0:0, 1:1, 2:2, ...), nicht nur die
-// von dixonColesTau abgedeckten Faelle. 1 = kein Effekt.
-const DRAW_BOOST = 1.2;
 
 // Basis-Torerwartungen ohne Formeffekt. Getrennt herausgezogen, damit der Backtest sie
 // einmal pro Spiel berechnen und danach beliebig viele Formgewichte darauf durchprobieren
@@ -84,55 +63,29 @@ export function predictMatch(
 // Der eigentliche Vorhersageschritt: Score-Matrix aus zwei Torerwartungen. Nimmt die
 // Lambdas direkt entgegen, damit Aufrufer sie vorher beliebig anpassen koennen (Form,
 // Marktquoten, LLM-Korrektur), ohne diese Logik zu duplizieren.
+// Bis hierher stand die Matrixberechnung ein zweites Mal in dieser Datei, mit eigenen
+// Kopien von MAX_GOALS, RHO und DRAW_BOOST. Solange beide Kopien dieselben Werte hatten,
+// fiel das nicht auf -- beim ersten Aendern von DRAW_BOOST liefen sie sofort auseinander
+// und lieferten fuer dasselbe Spiel verschiedene Wahrscheinlichkeiten. Jetzt gibt es nur
+// noch scoreMatrix.ts als Quelle.
 export function predictFromLambdas(
   expectedHomeGoals: number,
   expectedAwayGoals: number,
   homeIsEstimated = false,
-  awayIsEstimated = false
+  awayIsEstimated = false,
+  options?: MatrixOptions
 ): MatchPrediction {
-  const scoreProbabilities = new Map<string, number>();
-  let homeWinProb = 0;
-  let drawProb = 0;
-  let awayWinProb = 0;
-  let mostLikelyScore = "0:0";
-  let mostLikelyProb = -1;
-
-  let totalProb = 0;
-  for (let h = 0; h <= MAX_GOALS; h++) {
-    for (let a = 0; a <= MAX_GOALS; a++) {
-      const prob =
-        poissonProbability(expectedHomeGoals, h) *
-        poissonProbability(expectedAwayGoals, a) *
-        dixonColesTau(h, a, expectedHomeGoals, expectedAwayGoals) *
-        (h === a ? DRAW_BOOST : 1);
-      scoreProbabilities.set(`${h}:${a}`, prob);
-      totalProb += prob;
-    }
-  }
-
-  for (const [score, prob] of scoreProbabilities) {
-    const normalizedProb = prob / totalProb;
-    scoreProbabilities.set(score, normalizedProb);
-
-    const [h, a] = score.split(":").map(Number);
-    if (h > a) homeWinProb += normalizedProb;
-    else if (h === a) drawProb += normalizedProb;
-    else awayWinProb += normalizedProb;
-
-    if (normalizedProb > mostLikelyProb) {
-      mostLikelyProb = normalizedProb;
-      mostLikelyScore = score;
-    }
-  }
+  const matrix = buildDixonColesMatrix(expectedHomeGoals, expectedAwayGoals, options);
+  const masses = outcomeMasses(matrix);
 
   return {
     expectedHomeGoals,
     expectedAwayGoals,
-    scoreProbabilities,
-    homeWinProb,
-    drawProb,
-    awayWinProb,
-    mostLikelyScore,
+    scoreProbabilities: toScoreMap(matrix),
+    homeWinProb: masses.homeWinProb,
+    drawProb: masses.drawProb,
+    awayWinProb: masses.awayWinProb,
+    mostLikelyScore: argmaxCell(matrix),
     homeIsEstimated,
     awayIsEstimated,
   };

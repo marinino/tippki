@@ -145,3 +145,54 @@ export function computeXgForm(ourTeamName: string, beforeDate: Date): number {
 
   return totalXgDiff / count;
 }
+
+// Wie viele zurueckliegende Spiele die Grundlinie eines Teams bilden. Rund eine halbe
+// Saison: lang genug, dass Tagesform herausmittelt, kurz genug, dass ein echter
+// Kaderumbruch nachgezogen wird.
+export const XG_BASELINE_WINDOW = 17;
+
+// Form als ABWEICHUNG vom eigenen Normalniveau.
+//
+// computeXgForm liefert die rohe xG-Differenz der letzten Spiele -- und die korreliert mit
+// r = 0.73 mit der Teamstaerke (siehe npm run form). Bayern hat dort dauerhaft +1.5, weil
+// Bayern eben Bayern ist, nicht weil Bayern gerade gut drauf waere. Multipliziert man das
+// auf eine Torerwartung, die die Staerke ueber attack/defense schon enthaelt, wird sie ein
+// zweites Mal gezaehlt: ein dauerhafter Bonus von 36% fuer ein Team, das ihn nicht
+// verdient hat, und ein dauerhafter Malus fuer schwache Teams.
+//
+// Diese Variante zieht das eigene Normalniveau ab. Ein Team, das genau so spielt wie
+// immer, bekommt 0 -- unabhaengig davon, ob "wie immer" stark oder schwach ist. Damit
+// misst der Wert wirklich nur noch Ueber- und Unterperformance.
+export function computeXgFormResidual(ourTeamName: string, beforeDate: Date): number {
+  const understatName = OUR_NAME_TO_UNDERSTAT[ourTeamName];
+  if (!understatName) return 0;
+
+  const n = Math.min(gamesPlayedThisSeason(ourTeamName, beforeDate), XG_FORM_WINDOW);
+  if (n === 0) return 0;
+
+  if (!xgByTeam) xgByTeam = buildXgIndex();
+  const entries = xgByTeam.get(understatName);
+  if (!entries) return 0;
+
+  const available = countBeforeEntries(entries, beforeDate.getTime());
+  const recentStart = Math.max(0, available - n);
+  const recentCount = available - recentStart;
+  if (recentCount === 0) return 0;
+
+  // Die Grundlinie schliesst das Formfenster bewusst NICHT aus. Sonst waere sie bei
+  // duenner Historie aus sehr wenigen Spielen gebildet und ihrerseits verrauscht --
+  // schlimmer, als die letzten Spiele mitzuzaehlen.
+  const baselineStart = Math.max(0, available - XG_BASELINE_WINDOW);
+  const baselineCount = available - baselineStart;
+  // Ohne genug Historie ist keine Grundlinie schaetzbar; dann lieber gar kein Formeffekt
+  // als ein aus drei Spielen geschaetzter.
+  if (baselineCount < XG_FORM_WINDOW * 2) return 0;
+
+  let recentSum = 0;
+  for (let i = recentStart; i < available; i++) recentSum += entries[i].xgDiff;
+
+  let baselineSum = 0;
+  for (let i = baselineStart; i < available; i++) baselineSum += entries[i].xgDiff;
+
+  return recentSum / recentCount - baselineSum / baselineCount;
+}

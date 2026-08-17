@@ -120,12 +120,25 @@ export function totalGoalsConstraint(
   maxGoals: number,
   lines: TotalsLine[]
 ): MatrixConstraint | null {
-  const usable = halfLinesOnly(lines).filter((l) => l.line >= 0.5 && l.line <= 2 * maxGoals);
+  return totalGoalsConstraintFromProbs(
+    maxGoals,
+    lines.map((l) => ({ line: l.line, overProb: devigTwoWay(l.oddsOver, l.oddsUnder) }))
+  );
+}
+
+// Getrennter Einstieg fuer bereits entvigte Wahrscheinlichkeiten. Live werden die Linien
+// ueber mehrere Buchmacher gemittelt, und gemittelt wird sinnvollerweise auf der
+// Wahrscheinlichkeits-, nicht auf der Quotenskala.
+export function totalGoalsConstraintFromProbs(
+  maxGoals: number,
+  points: { line: number; overProb: number }[]
+): MatrixConstraint | null {
+  const usable = halfLinesOnly(points).filter((l) => l.line >= 0.5 && l.line <= 2 * maxGoals);
   if (usable.length < 2) return null;
 
   // thresholds[i] = k bedeutet: P(Summe >= k)
   const thresholds = usable.map((l) => Math.ceil(l.line));
-  const overProbs = enforceNonIncreasing(usable.map((l) => devigTwoWay(l.oddsOver, l.oddsUnder)));
+  const overProbs = enforceNonIncreasing(usable.map((l) => l.overProb));
 
   const maxTotal = 2 * maxGoals;
   const highest = thresholds[thresholds.length - 1];
@@ -186,12 +199,22 @@ export function goalDifferenceConstraint(
   maxGoals: number,
   lines: SpreadLine[]
 ): MatrixConstraint | null {
+  return goalDifferenceConstraintFromProbs(
+    maxGoals,
+    lines.map((l) => ({ line: l.line, homeProb: devigTwoWay(l.oddsHome, l.oddsAway) }))
+  );
+}
+
+export function goalDifferenceConstraintFromProbs(
+  maxGoals: number,
+  lines: { line: number; homeProb: number }[]
+): MatrixConstraint | null {
   const usable = halfLinesOnly(lines);
   if (usable.length < 2) return null;
 
   // P(Differenz >= d) fuer d = -hdp + 0.5, aufsteigend nach d sortiert.
   const points = usable
-    .map((l) => ({ d: Math.ceil(-l.line), prob: devigTwoWay(l.oddsHome, l.oddsAway) }))
+    .map((l) => ({ d: Math.ceil(-l.line), prob: l.homeProb }))
     .sort((x, y) => x.d - y.d);
 
   const dedup: { d: number; prob: number }[] = [];

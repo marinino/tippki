@@ -7,6 +7,8 @@ import { computeXgForm } from "../../../model/xgForm";
 import { readOddsCache } from "../../../data/oddsApi";
 import { averageMarketProbabilities } from "../../../model/marketOdds";
 import { resolveScheme } from "../../../eval/scoringScheme";
+import { cacheKey, readLlmCache } from "../../../llm/llmCache";
+import { describeFactors } from "../../../llm/llmAdjustment";
 
 interface Fixture {
   homeTeam: string;
@@ -47,9 +49,16 @@ export async function GET(request: Request) {
   const oddsCache = readOddsCache();
   const oddsByFixture = oddsCache && oddsCache.matchday === selectedMatchday ? oddsCache.odds : {};
 
+  // Gleiche Staleness-Pruefung wie bei den Quoten: ein Kontext aus einem anderen Spieltag
+  // waere schlimmer als keiner.
+  const llmCache = readLlmCache();
+  const llmByFixture =
+    llmCache && llmCache.matchday === selectedMatchday ? llmCache.contexts : {};
+
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
     const matchDate = new Date(date);
     const fixtureOdds = oddsByFixture[`${homeTeam}|${awayTeam}`];
+    const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
 
     // Die Marktquoten gehen jetzt in die Score-Matrix ein, nicht nur in die 1X2-Balken --
     // vorher kam der angezeigte Tipp aus der ungeblendeten Modellmatrix und ignorierte
@@ -61,6 +70,9 @@ export async function GET(request: Request) {
       homeForm: computeXgForm(homeTeam, matchDate),
       awayForm: computeXgForm(awayTeam, matchDate),
       market1x2: fixtureOdds ? averageMarketProbabilities(fixtureOdds.bookmakers) : null,
+      marketTotals: fixtureOdds?.totals ?? null,
+      marketSpread: fixtureOdds?.spread ?? null,
+      llmContext: cachedLlm?.context ?? null,
       scheme,
     });
 
@@ -85,7 +97,14 @@ export async function GET(request: Request) {
       homeIsEstimated: out.homeIsEstimated,
       awayIsEstimated: out.awayIsEstimated,
       oddsBlended: out.marketApplied,
+      marketConstraints: out.marketConstraints,
       bookmakerOdds: fixtureOdds?.bookmakers ?? null,
+      llmApplied: out.llmAdjustment !== null && !out.llmAdjustment.blocked,
+      llmBlocked: out.llmAdjustment?.blocked ?? false,
+      llmShrinkFactor: out.llmAdjustment?.shrinkFactor ?? null,
+      llmFactors: cachedLlm ? describeFactors(cachedLlm.context) : [],
+      llmSummary: cachedLlm?.context.summary ?? null,
+      llmSources: cachedLlm?.sources ?? [],
     };
   });
 
@@ -97,5 +116,7 @@ export async function GET(request: Request) {
     scheme: scheme.key,
     schemeLabel: scheme.label,
     oddsFetchedAt: oddsCache && oddsCache.matchday === selectedMatchday ? oddsCache.fetchedAt : null,
+    llmFetchedAt: llmCache && llmCache.matchday === selectedMatchday ? llmCache.fetchedAt : null,
+    llmModel: llmCache && llmCache.matchday === selectedMatchday ? llmCache.model : null,
   });
 }

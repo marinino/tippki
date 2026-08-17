@@ -54,6 +54,8 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
     homeForm: computeXgForm(homeTeam, matchDate),
     awayForm: computeXgForm(awayTeam, matchDate),
     market1x2: fixtureOdds ? averageMarketProbabilities(fixtureOdds.bookmakers) : null,
+    marketTotals: fixtureOdds?.totals ?? null,
+    marketSpread: fixtureOdds?.spread ?? null,
     scheme,
   });
 
@@ -62,14 +64,20 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
 
   console.log(`${homeLabel} vs ${awayLabel}${out.marketApplied ? " (mit Marktquoten geblendet)" : ""}`);
   console.log(
-    `  erwartete Tore: ${out.expectedHomeGoals.toFixed(2)} : ${out.expectedAwayGoals.toFixed(2)}`
+    `  erwartete Tore: ${out.expectedHomeGoals.toFixed(2)} : ${out.expectedAwayGoals.toFixed(2)}` +
+      (out.marketConstraints.length > 0
+        ? `  (Modell allein: ${out.modelLambdaHome.toFixed(2)} : ${out.modelLambdaAway.toFixed(2)})`
+        : "")
   );
+  if (out.marketConstraints.length > 0) {
+    console.log(`  Marktbedingungen: ${out.marketConstraints.join(", ")}`);
+  }
   console.log(
     `  Sieg H: ${(out.finalProbs.homeWinProb * 100).toFixed(1)}%  Unentschieden: ${(out.finalProbs.drawProb * 100).toFixed(1)}%  Sieg A: ${(out.finalProbs.awayWinProb * 100).toFixed(1)}%`
   );
   console.log(
-    `  Tipp: ${out.tip.tip}  (EV ${out.tip.expectedPoints.toFixed(2)} Pkt)  ` +
-      `Alternative: ${out.tip.runnerUpTip} (${out.tip.runnerUpExpectedPoints.toFixed(2)})  ` +
+    `  Tipp: ${out.tip.tip}  (EV ${out.tip.expectedPoints.toFixed(3)} Pkt)  ` +
+      `Alternative: ${out.tip.runnerUpTip} (${out.tip.runnerUpExpectedPoints.toFixed(3)})  ` +
       `wahrscheinlichstes Ergebnis: ${out.tip.argmaxCellTip}\n`
   );
 }

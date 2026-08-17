@@ -33,7 +33,17 @@ interface Prediction {
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
   oddsBlended: boolean;
+  // Welche Marktinformationen in die Ergebnismatrix eingeflossen sind, z.B.
+  // ["1X2", "Totals (10 Linien)", "Spread (4 Linien)"].
+  marketConstraints: string[];
   bookmakerOdds: BookmakerOdds[] | null;
+  // Recherchierter Spielkontext (Ausfälle, Belastung, Motivation).
+  llmApplied: boolean;
+  llmBlocked: boolean;
+  llmShrinkFactor: number | null;
+  llmFactors: string[];
+  llmSummary: string | null;
+  llmSources: string[];
 }
 
 interface PredictionsResponse {
@@ -44,6 +54,8 @@ interface PredictionsResponse {
   scheme: string;
   schemeLabel: string;
   oddsFetchedAt: string | null;
+  llmFetchedAt: string | null;
+  llmModel: string | null;
 }
 
 interface SeasonBacktest {
@@ -156,6 +168,8 @@ export default function Home() {
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [oddsRefreshLoading, setOddsRefreshLoading] = useState(false);
   const [oddsRefreshMessage, setOddsRefreshMessage] = useState<string | null>(null);
+  const [llmRefreshLoading, setLlmRefreshLoading] = useState(false);
+  const [llmRefreshMessage, setLlmRefreshMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("predictions");
   const [table, setTable] = useState<TableResponse | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
@@ -265,6 +279,29 @@ export default function Home() {
       setOddsRefreshMessage(err instanceof Error ? err.message : "Fehler beim Aktualisieren der Quoten");
     } finally {
       setOddsRefreshLoading(false);
+    }
+  }
+
+  // Kostet echtes Geld (rund 1 $ für neun Partien), deshalb nur auf Knopfdruck.
+  async function refreshLlm() {
+    setLlmRefreshLoading(true);
+    setLlmRefreshMessage(null);
+    try {
+      const res = await fetch("/api/refresh-llm", { method: "POST" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "Fehler beim Recherchieren");
+      const failed = Object.keys(result.failures ?? {}).length;
+      setLlmRefreshMessage(
+        `Spieltag ${result.matchday}: ${result.fixturesWithContext}/${result.fixturesTotal} recherchiert, ` +
+          `${result.fixturesWithFactors} mit Faktoren` +
+          (failed > 0 ? `, ${failed} fehlgeschlagen` : "") +
+          ` · ${result.estimatedCostUsd.toFixed(2)} USD`
+      );
+      await loadMatchday(data?.matchday ?? undefined);
+    } catch (err) {
+      setLlmRefreshMessage(err instanceof Error ? err.message : "Fehler beim Recherchieren");
+    } finally {
+      setLlmRefreshLoading(false);
     }
   }
 
@@ -412,10 +449,20 @@ export default function Home() {
             <button className="button secondary" onClick={refreshOdds} disabled={oddsRefreshLoading}>
               {oddsRefreshLoading ? "Holt Quoten …" : "Quoten aktualisieren"}
             </button>
+            <button className="button secondary" onClick={refreshLlm} disabled={llmRefreshLoading}>
+              {llmRefreshLoading ? "Recherchiert …" : "Spielkontext recherchieren"}
+            </button>
           </div>
         </div>
 
         {oddsRefreshMessage && <p className="refresh-message">{oddsRefreshMessage}</p>}
+        {llmRefreshMessage && <p className="refresh-message">{llmRefreshMessage}</p>}
+        {data?.llmFetchedAt && (
+          <p className="section-subtitle">
+            Spielkontext-Stand: {new Date(data.llmFetchedAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+            {data.llmModel ? ` · ${data.llmModel}` : ""}
+          </p>
+        )}
         {data?.oddsFetchedAt && (
           <p className="section-subtitle">
             Quoten-Stand: {new Date(data.oddsFetchedAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
@@ -763,6 +810,28 @@ function MatchCard({ prediction: p }: { prediction: Prediction }) {
               .map((b) => `${b.bookmaker}: ${b.oddsHome.toFixed(2)} / ${b.oddsDraw.toFixed(2)} / ${b.oddsAway.toFixed(2)}`)
               .join("  ·  ")}
           </p>
+        )}
+
+        {p.marketConstraints && p.marketConstraints.length > 0 && (
+          <p className="odds-line">Markt im Tipp: {p.marketConstraints.join(" · ")}</p>
+        )}
+
+        {p.llmFactors && p.llmFactors.length > 0 && (
+          <div className="odds-line">
+            {p.llmFactors.map((factor, i) => (
+              <p key={i} style={{ margin: 0 }}>
+                {factor}
+              </p>
+            ))}
+            <p style={{ margin: "4px 0 0", color: "var(--text-tertiary)" }}>
+              {p.llmBlocked
+                ? "Korrektur verworfen (hätte die Tendenz gedreht)"
+                : p.llmShrinkFactor != null && p.llmShrinkFactor < 1
+                  ? `Korrektur auf ${Math.round(p.llmShrinkFactor * 100)}% gedämpft (Favoritenschutz)`
+                  : "Korrektur angewandt"}
+              {p.llmSources.length > 0 && ` · ${p.llmSources.length} Quellen`}
+            </p>
+          </div>
         )}
       </div>
 

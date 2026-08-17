@@ -21,7 +21,28 @@ export const DEFAULT_RHO = -0.15;
 
 // Genereller Bonus fuer JEDES Unentschieden (0:0, 1:1, 2:2, ...), nicht nur die von
 // dixonColesTau abgedeckten Faelle. 1 = kein Effekt.
-export const DEFAULT_DRAW_BOOST = 1.2;
+//
+// Stand seit jeher auf 1.2 und war nie gemessen worden. `npm run tune-matrix` sucht
+// (RHO, DRAW_BOOST) gemeinsam ab, mit Punkten als Zielgroesse -- nicht mit RPS, denn der
+// bewertet nur die drei aggregierten Ausgaenge und ist fuer einen Parameter, der Masse
+// INNERHALB einer Tendenz verschiebt, bauartbedingt blind.
+//
+// Befund, und der Ehrlichkeit halber vollstaendig:
+//   Validation: 1.20 -> 1.00 bringt +0.052 Punkte/Spiel, die Spalte B=1.20 ist dort im
+//               ganzen Gitter die schwaechste.
+//   Testset:    derselbe Wechsel bringt +0.006. Die Richtung stimmt, die Groessenordnung
+//               bricht auf ein Neuntel zusammen.
+//
+// Der Validation-Effekt hat sich also NICHT repliziert. 1.0 steht hier deshalb nicht,
+// weil es messbar besser waere, sondern weil die Daten 1.0 und 1.2 nicht unterscheiden
+// koennen -- und bei Gleichstand gewinnt das einfachere Modell. DRAW_BOOST ist kein
+// Wahrscheinlichkeitsmodell, sondern ein Eingriff: er blaeht jede Unentschieden-Zelle auf
+// und drueckt nach der Normalisierung Masse aus Ergebnissen wie 2:1 heraus. Mit 1.0 ist
+// er weg, und die Unentschieden-Korrektur macht allein dixonColesTau, wo sie hingehoert.
+//
+// Nicht das Gitter-Maximum (0.85) nehmen -- das waere die Selektionsfalle, und genau die
+// hat sich hier ja gerade als solche erwiesen.
+export const DEFAULT_DRAW_BOOST = 1.0;
 
 export function createScoreMatrix(maxGoals: number): ScoreMatrix {
   return { maxGoals, cells: new Float64Array((maxGoals + 1) * (maxGoals + 1)) };
@@ -144,6 +165,26 @@ export function argmaxCell(m: ScoreMatrix): string {
   }
 
   return bestScore;
+}
+
+// Erwartungswert der Tore AUS der Matrix, also nach allen Marktbedingungen. Die
+// urspruenglichen Modell-Lambdas gelten nach der Umgewichtung nicht mehr -- sie daneben
+// anzuzeigen waere genau die Art Widerspruch zwischen Anzeige und Tipp, die vorher schon
+// zwischen Wahrscheinlichkeitsbalken und Ergebnistipp bestand.
+export function expectedGoals(m: ScoreMatrix): { home: number; away: number } {
+  const size = m.maxGoals + 1;
+  let home = 0;
+  let away = 0;
+
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) {
+      const p = m.cells[h * size + a];
+      home += h * p;
+      away += a * p;
+    }
+  }
+
+  return { home, away };
 }
 
 export function toScoreMap(m: ScoreMatrix): Map<string, number> {

@@ -12,8 +12,25 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
 import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
-import { XG_FORM_WINDOW, computeXgForm } from "../model/xgForm";
+import { XG_FORM_WINDOW, computeXgForm, computeXgFormResidual } from "../model/xgForm";
 import { predictFromLambdas } from "../model/predictMatch";
+import { buildLeagueModel, exponentialTimeWeights, fitPoissonModel } from "../model/teamStrength";
+import { lookupMatchXg } from "../model/xgLookup";
+import { predictPipeline } from "../model/predictPipeline";
+import { aggregateFactors, toLambdaExponents } from "../llm/factMapping";
+import {
+  DEFAULT_LLM_MAX_LOG_ADJUSTMENT,
+  applyWithGuardrails,
+  outcomeProbsOf,
+  toLlmAdjustment,
+} from "../llm/llmAdjustment";
+import {
+  isValidMatchContext,
+  isValidMatchdayContext,
+  type LlmKeyFactor,
+  type LlmMatchContext,
+} from "../llm/matchContext";
+import { SEARCH_USD_PER_REQUEST, estimateCostUsd, resolveModelProfile } from "../llm/modelProfile";
 import {
   argmaxCell,
   buildDixonColesMatrix,
@@ -23,6 +40,16 @@ import {
   toScoreMap,
 } from "../model/scoreMatrix";
 import { expectedPointsForTip, selectEvTip } from "../model/tipSelector";
+import {
+  applyConstraints,
+  constraintMasses,
+  devigTwoWay,
+  goalDifferenceConstraint,
+  outcomeConstraint,
+  totalGoalsConstraint,
+  totalGoalsMarginal,
+  totalOverConstraint,
+} from "../model/marketConstraints";
 import {
   argmaxOutcome,
   brierScore,
@@ -551,6 +578,557 @@ section("xG-Form == Referenzimplementierung", () => {
   check(() => assert.ok(compared > 500, `zu wenige Vergleiche: ${compared}`));
   check(() =>
     assert.ok(nonZero > compared * 0.5, `zu wenige Formwerte ungleich 0: ${nonZero}/${compared}`)
+  );
+
+  // Die Abweichungsvariante muss den Teamstaerke-Anteil herausnehmen: gemittelt ueber
+  // viele Spiele muss sie je Team deutlich naeher an 0 liegen als die rohe xG-Differenz.
+  // Genau das ist ihr Zweck -- ein Team, das spielt wie immer, hat keine "Form".
+  const rawByTeam = new Map<string, number[]>();
+  const residualByTeam = new Map<string, number[]>();
+
+  for (let i = 0; i < ownMatches.length; i += 3) {
+    const m = ownMatches[i];
+    const date = parseMatchDate(m.date);
+    for (const team of [m.homeTeam, m.awayTeam]) {
+      const raw = computeXgForm(team, date);
+      const residual = computeXgFormResidual(team, date);
+      if (raw === 0 && residual === 0) continue;
+      (rawByTeam.get(team) ?? rawByTeam.set(team, []).get(team)!).push(raw);
+      (residualByTeam.get(team) ?? residualByTeam.set(team, []).get(team)!).push(residual);
+    }
+  }
+
+  function meanAbsTeamMean(byTeam: Map<string, number[]>): number {
+    const means: number[] = [];
+    for (const values of byTeam.values()) {
+      if (values.length < 30) continue;
+      means.push(Math.abs(values.reduce((s, v) => s + v, 0) / values.length));
+    }
+    return means.reduce((s, v) => s + v, 0) / means.length;
+  }
+
+  const rawBias = meanAbsTeamMean(rawByTeam);
+  const residualBias = meanAbsTeamMean(residualByTeam);
+
+  check(() =>
+    assert.ok(
+      residualBias < rawBias * 0.5,
+      `Abweichungsvariante muss den Staerkeanteil entfernen: ${residualBias.toFixed(3)} vs ${rawBias.toFixed(3)}`
+    )
+  );
+  check(() => assert.ok(rawBias > 0.2, `rohe Form traegt erwartungsgemaess Staerke: ${rawBias.toFixed(3)}`));
+});
+
+// ---------------------------------------------------------------------------
+
+section("Markt-Nebenbedingungen (IPF)", () => {
+  const m = buildDixonColesMatrix(1.7, 1.1);
+
+  check(() => closeTo(devigTwoWay(2, 2), 0.5, 1e-12, "faire Zweiwegquote"));
+  check(() => closeTo(devigTwoWay(1.25, 5), 0.8, 1e-12, "1.25/5.00 ohne Marge"));
+  check(() =>
+    closeTo(devigTwoWay(1.9, 1.9), 0.5, 1e-12, "gleiche Quoten -> 50% trotz Overround")
+  );
+
+  // Eine 1X2-Bedingung allein muss dasselbe liefern wie reweightToOutcomeMasses.
+  const target = { homeWinProb: 0.55, drawProb: 0.25, awayWinProb: 0.2 };
+  const viaIpf = applyConstraints(m, [outcomeConstraint(m.maxGoals, target)]);
+  const viaReweight = reweightToOutcomeMasses(m, target);
+  for (let i = 0; i < m.cells.length; i++) {
+    assert.ok(
+      Math.abs(viaIpf.matrix.cells[i] - viaReweight.cells[i]) < 1e-12,
+      `IPF mit einer Bedingung muss reweightToOutcomeMasses entsprechen (Zelle ${i})`
+    );
+  }
+  checkCount += m.cells.length;
+
+  // Zwei Bedingungen gleichzeitig: beide muessen am Ende erfuellt sein.
+  const overProb = 0.62;
+  const both = applyConstraints(m, [
+    outcomeConstraint(m.maxGoals, target),
+    totalOverConstraint(m.maxGoals, 2.5, overProb),
+  ]);
+  check(() => assert.ok(both.converged, `IPF konvergiert (Abweichung ${both.maxDeviation})`));
+
+  const masses = outcomeMasses(both.matrix);
+  check(() => closeTo(masses.homeWinProb, target.homeWinProb, 1e-8, "1X2 erfuellt"));
+  check(() => closeTo(masses.drawProb, target.drawProb, 1e-8, "Remis erfuellt"));
+
+  const totalMarginal = totalGoalsMarginal(both.matrix);
+  let over25 = 0;
+  for (let k = 3; k < totalMarginal.length; k++) over25 += totalMarginal[k];
+  check(() => closeTo(over25, overProb, 1e-8, "Over/Under gleichzeitig erfuellt"));
+
+  let sum = 0;
+  for (const c of both.matrix.cells) sum += c;
+  check(() => closeTo(sum, 1, 1e-12, "Ergebnis bleibt eine Verteilung"));
+
+  // Volle Totals-Leiter: Halblinien werden genutzt, Viertellinien verworfen.
+  const ladder = [
+    { line: 0.5, oddsOver: 1.006, oddsUnder: 29 },
+    { line: 1.5, oddsOver: 1.071, oddsUnder: 9 },
+    { line: 2.25, oddsOver: 1.16, oddsUnder: 5.25 }, // Viertellinie -> ignorieren
+    { line: 2.5, oddsOver: 1.24, oddsUnder: 3.9 },
+    { line: 3.5, oddsOver: 1.615, oddsUnder: 2.3 },
+    { line: 4.5, oddsOver: 2.375, oddsUnder: 1.571 },
+    { line: 5.5, oddsOver: 4, oddsUnder: 1.25 },
+  ];
+  const totalsConstraint = totalGoalsConstraint(m.maxGoals, ladder)!;
+  check(() => assert.ok(totalsConstraint !== null, "Leiter ergibt eine Bedingung"));
+  check(() =>
+    assert.ok(totalsConstraint.name.includes("6 Linien"), `Viertellinie verworfen: ${totalsConstraint.name}`)
+  );
+
+  let targetSum = 0;
+  for (const t of totalsConstraint.targets) {
+    assert.ok(t >= 0, "keine negativen Zielmassen");
+    targetSum += t;
+  }
+  checkCount += totalsConstraint.targets.length;
+  check(() => closeTo(targetSum, 1, 1e-12, "Zielmassen summieren auf 1"));
+
+  const fitted = applyConstraints(m, [totalsConstraint]);
+  const fittedMasses = constraintMasses(fitted.matrix, totalsConstraint);
+  for (let g = 0; g < totalsConstraint.groupCount; g++) {
+    assert.ok(
+      Math.abs(fittedMasses[g] - totalsConstraint.targets[g]) < 1e-8,
+      `Totals-Gruppe ${g}: ${fittedMasses[g]} statt ${totalsConstraint.targets[g]}`
+    );
+  }
+  checkCount += totalsConstraint.groupCount;
+
+  // Spread-Leiter, Vorzeichenkonvention: hdp -1.5 heisst "Heim gewinnt mit >= 2 Toren".
+  const spread = [
+    { line: -2.5, oddsHome: 2.6, oddsAway: 1.475 },
+    { line: -1.5, oddsHome: 1.725, oddsAway: 2.075 },
+    { line: -0.5, oddsHome: 1.3, oddsAway: 3.45 },
+    { line: 0.5, oddsHome: 1.105, oddsAway: 4.4 },
+    { line: 1.5, oddsHome: 1.05, oddsAway: 8 },
+  ];
+  const diffConstraint = goalDifferenceConstraint(m.maxGoals, spread)!;
+  check(() => assert.ok(diffConstraint !== null, "Spread-Leiter ergibt eine Bedingung"));
+
+  const withDiff = applyConstraints(m, [diffConstraint]);
+  const diffMasses = constraintMasses(withDiff.matrix, diffConstraint);
+  for (let g = 0; g < diffConstraint.groupCount; g++) {
+    assert.ok(
+      Math.abs(diffMasses[g] - diffConstraint.targets[g]) < 1e-8,
+      `Spread-Gruppe ${g}: ${diffMasses[g]} statt ${diffConstraint.targets[g]}`
+    );
+  }
+  checkCount += diffConstraint.groupCount;
+
+  // strength = 0 muss die Matrix unveraendert lassen.
+  const noop = applyConstraints(m, [outcomeConstraint(m.maxGoals, target)], { strength: 0 });
+  for (let i = 0; i < m.cells.length; i++) {
+    assert.equal(noop.matrix.cells[i], m.cells[i], `strength=0 darf nichts aendern (Zelle ${i})`);
+  }
+  checkCount += m.cells.length;
+
+  // Umgekehrt: Bedingungen, die schon erfuellt sind, duerfen nichts bewegen.
+  const identity = applyConstraints(m, [outcomeConstraint(m.maxGoals, outcomeMasses(m))]);
+  for (let i = 0; i < m.cells.length; i++) {
+    assert.ok(
+      Math.abs(identity.matrix.cells[i] - m.cells[i]) < 1e-14,
+      `bereits erfuellte Bedingung ist die Identitaet (Zelle ${i})`
+    );
+  }
+  checkCount += m.cells.length;
+
+  // Nicht genug Halblinien -> null statt Unsinn.
+  check(() =>
+    assert.equal(totalGoalsConstraint(m.maxGoals, [{ line: 2.25, oddsOver: 1.16, oddsUnder: 5.25 }]), null)
+  );
+  check(() => assert.equal(goalDifferenceConstraint(m.maxGoals, []), null));
+
+  // Monotonie-Korrektur: eine widerspruechliche Leiter darf keine negativen Massen erzeugen.
+  const inconsistent = totalGoalsConstraint(m.maxGoals, [
+    { line: 1.5, oddsOver: 2, oddsUnder: 2 }, // P(>=2) = 0.50
+    { line: 2.5, oddsOver: 1.2, oddsUnder: 6 }, // P(>=3) = 0.833 -- unmoeglich hoeher
+    { line: 3.5, oddsOver: 3, oddsUnder: 1.5 },
+  ]);
+  check(() => assert.ok(inconsistent !== null, "widerspruechliche Leiter wird geglaettet"));
+  if (inconsistent) {
+    for (const t of inconsistent.targets) assert.ok(t >= 0, "keine negativen Massen nach Glaettung");
+    checkCount += inconsistent.targets.length;
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Gewichteter Fit und xG-Ziel", () => {
+  const matches = loadAllMatches().filter((m) => m.season === "2022");
+  const avgHome = matches.reduce((s, m) => s + m.homeGoals, 0) / matches.length;
+  const avgAway = matches.reduce((s, m) => s + m.awayGoals, 0) / matches.length;
+
+  const plain = fitPoissonModel(matches, avgHome, avgAway);
+  const uniform = fitPoissonModel(matches, avgHome, avgAway, {
+    weights: new Float64Array(matches.length).fill(1),
+  });
+
+  // Gleichgewichtung muss exakt dasselbe liefern wie gar keine Gewichtung, sonst ist der
+  // gewichtete Pfad nicht dieselbe Rechnung.
+  for (const [team, strength] of plain.teams) {
+    const other = uniform.teams.get(team)!;
+    assert.ok(Math.abs(strength.attack - other.attack) < 1e-12, `attack ${team}`);
+    assert.ok(Math.abs(strength.defense - other.defense) < 1e-12, `defense ${team}`);
+  }
+  checkCount += plain.teams.size * 2;
+
+  // Ein konstanter Gewichtsfaktor darf ebenfalls nichts aendern -- die geschlossene Form
+  // ist ein Quotient, gemeinsame Faktoren kuerzen sich heraus.
+  const scaled = fitPoissonModel(matches, avgHome, avgAway, {
+    weights: new Float64Array(matches.length).fill(3.7),
+  });
+  for (const [team, strength] of plain.teams) {
+    const other = scaled.teams.get(team)!;
+    assert.ok(Math.abs(strength.attack - other.attack) < 1e-10, `skaliert attack ${team}`);
+  }
+  checkCount += plain.teams.size;
+
+  // MLE-Identitaet: bei k = 0 muss die Summe der erwarteten Tore je Team exakt der
+  // Summe der tatsaechlichen entsprechen. Das ist eine exakte Eigenschaft des Optimums
+  // und faengt jeden Indexfehler sofort.
+  const expectedFor = new Map<string, number>();
+  const actualFor = new Map<string, number>();
+  for (const m of matches) {
+    const h = plain.teams.get(m.homeTeam)!;
+    const a = plain.teams.get(m.awayTeam)!;
+    const lambdaHome = avgHome * Math.exp(h.attack) * Math.exp(a.defense);
+    const lambdaAway = avgAway * Math.exp(a.attack) * Math.exp(h.defense);
+    expectedFor.set(m.homeTeam, (expectedFor.get(m.homeTeam) ?? 0) + lambdaHome);
+    expectedFor.set(m.awayTeam, (expectedFor.get(m.awayTeam) ?? 0) + lambdaAway);
+    actualFor.set(m.homeTeam, (actualFor.get(m.homeTeam) ?? 0) + m.homeGoals);
+    actualFor.set(m.awayTeam, (actualFor.get(m.awayTeam) ?? 0) + m.awayGoals);
+  }
+  for (const [team, expected] of expectedFor) {
+    assert.ok(
+      Math.abs(expected - actualFor.get(team)!) < 1e-6,
+      `MLE-Identitaet verletzt fuer ${team}: ${expected} statt ${actualFor.get(team)}`
+    );
+  }
+  checkCount += expectedFor.size;
+
+  check(() => assert.ok(plain.diagnostics.converged, "Fit konvergiert"));
+  check(() => assert.ok(plain.diagnostics.sweeps < 200, `Sweeps: ${plain.diagnostics.sweeps}`));
+
+  // Zeitgewichte: monoton fallend mit dem Alter, und nach genau einer Halbwertszeit halb
+  // so gross.
+  const weights = exponentialTimeWeights(matches, 180);
+  check(() => assert.ok(Math.max(...weights) <= 1 + 1e-12, "Gewichte hoechstens 1"));
+  check(() => assert.ok(Math.min(...weights) > 0, "Gewichte positiv"));
+
+  const sorted = [...matches].map((m, i) => ({ t: parseMatchDate(m.date).getTime(), w: weights[i] }));
+  sorted.sort((a, b) => a.t - b.t);
+  for (let i = 1; i < sorted.length; i++) {
+    assert.ok(sorted[i].w >= sorted[i - 1].w - 1e-12, "juengere Spiele duerfen nicht leichter wiegen");
+  }
+  checkCount += sorted.length - 1;
+
+  // Nach genau einer Halbwertszeit muss das Gewicht auf die Haelfte fallen.
+  // Toleranz 2e-3 statt 1e-6, weil parseMatchDate auf lokale Mitternacht abbildet und
+  // eine Zeitumstellung im Zeitraum das Alter um eine Stunde verschiebt -- bei 180 Tagen
+  // sind das rund 1.6e-4 relativ. Die geprüfte Eigenschaft ist davon unberuehrt.
+  const newest = Math.max(...matches.map((m) => parseMatchDate(m.date).getTime()));
+  const halfLifeAgo = new Date(newest);
+  halfLifeAgo.setDate(halfLifeAgo.getDate() - 180);
+  const asCsvDate = `${String(halfLifeAgo.getDate()).padStart(2, "0")}/${String(halfLifeAgo.getMonth() + 1).padStart(2, "0")}/${halfLifeAgo.getFullYear()}`;
+  const single = exponentialTimeWeights([{ ...matches[0], date: asCsvDate }], 180, new Date(newest));
+  check(() => closeTo(single[0], 0.5, 2e-3, "nach einer Halbwertszeit rund 0.5"));
+
+  // xG-Abdeckung: ist sie luecken haft, verwaessert der xG-Fit still zum Tor-Fit.
+  let covered = 0;
+  for (const m of matches) {
+    if (lookupMatchXg(m.homeTeam, m.awayTeam, parseMatchDate(m.date))) covered++;
+  }
+  check(() =>
+    assert.ok(
+      covered / matches.length > 0.95,
+      `xG-Abdeckung zu gering: ${covered}/${matches.length}`
+    )
+  );
+
+  // xG-Fit muss andere Staerken liefern als der Tor-Fit -- sonst greift das Ziel nicht.
+  const xgFit = fitPoissonModel(matches, avgHome, avgAway, { target: "xg" });
+  let maxDiff = 0;
+  for (const [team, strength] of plain.teams) {
+    maxDiff = Math.max(maxDiff, Math.abs(strength.attack - xgFit.teams.get(team)!.attack));
+  }
+  check(() => assert.ok(maxDiff > 0.02, `xG-Ziel aendert die Staerken kaum: ${maxDiff}`));
+
+  // Blend mit Anteil 1.0 fuer echte Tore muss dem Tor-Fit entsprechen.
+  const blendAllGoals = fitPoissonModel(matches, avgHome, avgAway, {
+    target: "blend",
+    xgBlendWeight: 1,
+  });
+  for (const [team, strength] of plain.teams) {
+    assert.ok(
+      Math.abs(strength.attack - blendAllGoals.teams.get(team)!.attack) < 1e-12,
+      `Blend mit 100% Toren muss dem Tor-Fit entsprechen (${team})`
+    );
+  }
+  checkCount += plain.teams.size;
+});
+
+// ---------------------------------------------------------------------------
+
+section("LLM-Kontext: Mapping und Guardrails", () => {
+  function factor(overrides: Partial<LlmKeyFactor> = {}): LlmKeyFactor {
+    return {
+      team: "home",
+      category: "absence",
+      subject: "Testspieler",
+      role: "forward",
+      importance: "key",
+      direction: "weakens",
+      certainty: "confirmed",
+      note: "Test",
+      source: "https://example.org/a",
+      ...overrides,
+    };
+  }
+
+  // Spieltag-Schema: ein Aufruf liefert alle neun Partien.
+  check(() => assert.equal(isValidMatchdayContext(null), false));
+  check(() => assert.equal(isValidMatchdayContext({ matches: "keine Liste" }), false));
+  check(() => assert.equal(isValidMatchdayContext({ matches: [] }), true));
+  check(() =>
+    assert.equal(
+      isValidMatchdayContext({
+        matches: [{ homeTeam: "A", awayTeam: "B", foundAnything: false, keyFactors: [], summary: "" }],
+      }),
+      true
+    )
+  );
+  check(() =>
+    assert.equal(
+      isValidMatchdayContext({ matches: [{ homeTeam: "A" }] }),
+      false,
+      "eine kaputte Partie macht den ganzen Spieltag ungueltig"
+    )
+  );
+
+  // Modellprofil: die API-Oberflaeche unterscheidet sich, und ein falsches Feld ist ein
+  // harter Fehler statt einer stillen Verschlechterung.
+  const haiku = { ...resolveModelProfile() };
+  check(() => assert.ok(haiku.model.startsWith("claude-"), `Modell-ID: ${haiku.model}`));
+  check(() =>
+    assert.ok(
+      haiku.webSearchType === "web_search_20260209" || haiku.webSearchType === "web_search_20250305",
+      "gueltiger Websuche-Typ"
+    )
+  );
+  check(() =>
+    assert.ok(
+      haiku.model !== "claude-haiku-4-5" || haiku.supportsEffort === false,
+      "Haiku 4.5 lehnt output_config.effort ab -- darf nicht gesetzt werden"
+    )
+  );
+  check(() =>
+    assert.ok(
+      haiku.model !== "claude-haiku-4-5" || haiku.webSearchType === "web_search_20250305",
+      "Haiku 4.5 kennt die dynamische Filterung nicht"
+    )
+  );
+
+  // Kostenschaetzung: die Websuche ist der Kostenboden, nicht das Modell.
+  const cost = estimateCostUsd(haiku, { inputTokens: 16000, outputTokens: 3000, webSearches: 8 });
+  check(() => assert.ok(cost > 0 && cost < 1, `ein gebuendelter Spieltag unter 1 USD: ${cost.toFixed(3)}`));
+  const searchShare =
+    (8 * SEARCH_USD_PER_REQUEST) / cost;
+  check(() =>
+    assert.ok(
+      searchShare > 0.4,
+      `die Suche dominiert die Kosten (${(searchShare * 100).toFixed(0)}%) -- deshalb buendeln`
+    )
+  );
+
+  // Schema-Validierung: das Modell kann trotz Structured Outputs bei einer Verweigerung
+  // etwas anderes liefern, und ein halb geparster Kontext waere schlimmer als keiner.
+  check(() => assert.equal(isValidMatchContext(null), false));
+  check(() => assert.equal(isValidMatchContext({}), false));
+  check(() => assert.equal(isValidMatchContext({ homeTeam: "A", awayTeam: "B" }), false));
+  check(() =>
+    assert.equal(
+      isValidMatchContext({ homeTeam: "A", awayTeam: "B", foundAnything: false, keyFactors: [], summary: "" }),
+      true
+    )
+  );
+  check(() =>
+    assert.equal(
+      isValidMatchContext({
+        homeTeam: "A",
+        awayTeam: "B",
+        foundAnything: true,
+        summary: "",
+        keyFactors: [{ ...factor(), role: "kein-gueltiger-wert" }],
+      }),
+      false,
+      "unbekannter Enum-Wert muss abgelehnt werden"
+    )
+  );
+
+  // Richtung der Wirkung. Ein fehlender Heim-Stuermer senkt die Heim-Torerwartung.
+  const homeForwardOut = aggregateFactors([factor({ role: "forward" })]);
+  check(() => assert.ok(homeForwardOut.homeAttack < 0, "fehlender Stuermer senkt den Angriff"));
+  check(() => assert.equal(homeForwardOut.homeDefense, 0, "Stuermer wirkt nicht defensiv"));
+
+  // Ein fehlender Auswaerts-Torhueter erhoeht die Heim-Torerwartung -- genau der Kanal,
+  // der der xG-Formkurve komplett fehlt.
+  const awayKeeperOut = aggregateFactors([factor({ team: "away", role: "goalkeeper" })]);
+  check(() => assert.ok(awayKeeperOut.awayDefense > 0, "fehlender Torhueter erhoeht Gegentore"));
+  const awayKeeperExp = toLambdaExponents(awayKeeperOut);
+  check(() => assert.ok(awayKeeperExp.home > 0, "und damit die Heim-Torerwartung"));
+  check(() => assert.equal(awayKeeperExp.away, 0, "die Auswaerts-Torerwartung bleibt unberuehrt"));
+
+  // Rueckkehrer drehen das Vorzeichen.
+  const returning = aggregateFactors([factor({ category: "return", direction: "strengthens" })]);
+  check(() => assert.ok(returning.homeAttack > 0, "Rueckkehrer hebt den Angriff"));
+
+  // Sicherheitsgrad und Bedeutung skalieren monoton nach unten.
+  const confirmedKey = Math.abs(aggregateFactors([factor()]).homeAttack);
+  const likelyKey = Math.abs(aggregateFactors([factor({ certainty: "likely" })]).homeAttack);
+  const reportedKey = Math.abs(aggregateFactors([factor({ certainty: "reported" })]).homeAttack);
+  check(() => assert.ok(confirmedKey > likelyKey && likelyKey > reportedKey, "Sicherheit skaliert"));
+
+  const regular = Math.abs(aggregateFactors([factor({ importance: "regular" })]).homeAttack);
+  const squad = Math.abs(aggregateFactors([factor({ importance: "squad" })]).homeAttack);
+  check(() => assert.ok(confirmedKey > regular && regular > squad, "Bedeutung skaliert"));
+
+  // Abnehmender Grenzertrag: vier fehlende Stuermer sind nicht viermal so schlimm.
+  const one = Math.abs(aggregateFactors([factor()]).homeAttack);
+  const four = Math.abs(
+    aggregateFactors([factor(), factor({ subject: "B" }), factor({ subject: "C" }), factor({ subject: "D" })])
+      .homeAttack
+  );
+  check(() => assert.ok(four > one, "mehr Ausfaelle wirken staerker"));
+  check(() => assert.ok(four < 4 * one, `aber unterlinear: ${four.toFixed(4)} statt ${(4 * one).toFixed(4)}`));
+
+  // Leerer Kontext = keine Korrektur.
+  const empty: LlmMatchContext = {
+    homeTeam: "A",
+    awayTeam: "B",
+    foundAnything: false,
+    keyFactors: [],
+    summary: "",
+  };
+  const noAdj = toLlmAdjustment(empty);
+  check(() => assert.equal(noAdj.homeLogAdj, 0));
+  check(() => assert.equal(noAdj.awayLogAdj, 0));
+
+  const untouched = applyWithGuardrails(1.8, 1.0, noAdj);
+  check(() => assert.equal(untouched.lambdaHome, 1.8, "ohne Faktoren bleibt lambda gleich"));
+  check(() => assert.equal(untouched.lambdaAway, 1.0));
+
+  // Klammerung: selbst absurd viele Faktoren duerfen die Grenze nicht ueberschreiten.
+  const many: LlmMatchContext = {
+    ...empty,
+    foundAnything: true,
+    keyFactors: Array.from({ length: 25 }, (_, i) =>
+      factor({ subject: `Spieler ${i}`, role: i % 2 === 0 ? "forward" : "midfielder" })
+    ),
+  };
+  const clamped = toLlmAdjustment(many);
+  check(() =>
+    assert.ok(
+      Math.abs(clamped.homeLogAdj) <= DEFAULT_LLM_MAX_LOG_ADJUSTMENT + 1e-12,
+      `Klammerung greift: ${clamped.homeLogAdj}`
+    )
+  );
+
+  // Favoritenschutz: eine Korrektur, die die Tendenz drehen wuerde, wird zurueckgedreht
+  // oder verworfen. Das LLM darf aus einem Heimsieg keinen Auswaertssieg machen.
+  const tight: LlmMatchContext = {
+    ...empty,
+    foundAnything: true,
+    keyFactors: [
+      factor({ role: "forward" }),
+      factor({ role: "midfielder", subject: "B" }),
+      factor({ team: "away", role: "goalkeeper", direction: "strengthens", subject: "C" }),
+    ],
+  };
+  const tightAdj = toLlmAdjustment(tight);
+
+  // Ein knappes Spiel, bei dem Heim gerade eben vorn liegt.
+  const baseHome = 1.34;
+  const baseAway = 1.3;
+  const baseOutcome = argmaxOutcome(outcomeProbsOf(baseHome, baseAway));
+  const guarded = applyWithGuardrails(baseHome, baseAway, tightAdj);
+  const guardedOutcome = argmaxOutcome(outcomeProbsOf(guarded.lambdaHome, guarded.lambdaAway));
+  check(() =>
+    assert.equal(guardedOutcome, baseOutcome, "die wahrscheinlichste Tendenz darf nicht kippen")
+  );
+  check(() =>
+    assert.ok(
+      guarded.adjustment.shrinkFactor >= 0 && guarded.adjustment.shrinkFactor <= 1,
+      "Shrink-Faktor im Intervall"
+    )
+  );
+
+  // Systematisch: ueber viele Lambda-Paare und Faktorlisten darf die Tendenz NIE kippen.
+  const rng = mulberry32(4242);
+  let flipped = 0;
+  let shrunk = 0;
+  for (let trial = 0; trial < 300; trial++) {
+    const lh = 0.4 + rng() * 2.6;
+    const la = 0.4 + rng() * 2.6;
+    const count = 1 + Math.floor(rng() * 4);
+    const roles: LlmKeyFactor["role"][] = ["forward", "midfielder", "defender", "goalkeeper"];
+    const factors = Array.from({ length: count }, (_, i) =>
+      factor({
+        subject: `S${i}`,
+        team: rng() < 0.5 ? "home" : "away",
+        role: roles[Math.floor(rng() * roles.length)],
+        direction: rng() < 0.5 ? "weakens" : "strengthens",
+      })
+    );
+    const adj = toLlmAdjustment({ ...empty, foundAnything: true, keyFactors: factors });
+    const before = argmaxOutcome(outcomeProbsOf(lh, la));
+    const applied = applyWithGuardrails(lh, la, adj);
+    const after = argmaxOutcome(outcomeProbsOf(applied.lambdaHome, applied.lambdaAway));
+    if (before !== after) flipped++;
+    if (applied.adjustment.shrinkFactor < 1) shrunk++;
+  }
+  checkCount += 300;
+  check(() => assert.equal(flipped, 0, `${flipped} von 300 Tendenzen gekippt -- Guardrail defekt`));
+  // Waere nie gedaempft worden, wuerde der Guardrail nichts pruefen.
+  check(() => assert.ok(shrunk > 0, "in mindestens einem Fall muss der Guardrail eingreifen"));
+
+  // Die Pipeline muss den Kontext auch tatsaechlich verwenden -- und ohne ihn identisch
+  // rechnen wie vorher.
+  const model = buildLeagueModel(loadAllMatches().filter((m) => m.season < "2025"));
+  const withoutLlm = predictPipeline({
+    model,
+    homeTeam: "Bayern Munich",
+    awayTeam: "Augsburg",
+    market1x2: null,
+  });
+  const withLlmContext = predictPipeline({
+    model,
+    homeTeam: "Bayern Munich",
+    awayTeam: "Augsburg",
+    market1x2: null,
+    llmContext: {
+      ...empty,
+      foundAnything: true,
+      keyFactors: [factor({ role: "forward", importance: "key", certainty: "confirmed" })],
+    },
+  });
+  check(() => assert.equal(withoutLlm.llmAdjustment, null, "ohne Kontext keine Korrektur"));
+  check(() => assert.ok(withLlmContext.llmAdjustment !== null, "mit Kontext eine Korrektur"));
+  check(() =>
+    assert.ok(
+      withLlmContext.expectedHomeGoals < withoutLlm.expectedHomeGoals,
+      "fehlender Heim-Stuermer muss die Heim-Torerwartung senken"
+    )
+  );
+  check(() =>
+    closeTo(
+      withLlmContext.formLambdaHome,
+      withoutLlm.formLambdaHome,
+      1e-12,
+      "die Lambdas VOR der Korrektur bleiben unveraendert"
+    )
   );
 });
 

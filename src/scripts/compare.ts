@@ -36,12 +36,19 @@ const IST: RunSpec = { name: "ist (argmax, ohne Markt)", variant: "blended", tip
 const MARKT: RunSpec = { name: "argmax auf Marktmatrix", variant: "blended", tipMode: "argmaxReweighted" };
 const EV: RunSpec = { name: "EV-Tipp auf Marktmatrix", variant: "blended", tipMode: "ev" };
 const EV_OHNE_MARKT: RunSpec = { name: "EV-Tipp ohne Markt", variant: "modelOnly", tipMode: "ev" };
+const EV_TOTALS: RunSpec = {
+  name: "EV + 1X2 + Over/Under",
+  variant: "blended",
+  tipMode: "ev",
+  useTotals: true,
+};
 
 const steps: [RunSpec, RunSpec, string][] = [
   [EV_OHNE_MARKT, IST, "Nur EV-Auswahl (ohne Marktinfo im Tipp)"],
   [MARKT, IST, "Nur Marktinfo im Tipp (weiter argmax)"],
-  [EV, IST, "Beides zusammen -- die eigentliche Umstellung"],
-  [EV, MARKT, "EV-Auswahl oben auf die Marktmatrix"],
+  [EV, IST, "Phase 1 gesamt: EV-Tipp auf 1X2-korrigierter Matrix"],
+  [EV_TOTALS, EV, "Phase 2: Torsummen-Bedingung obendrauf"],
+  [EV_TOTALS, IST, "Alles zusammen gegen den Ausgangszustand"],
 ];
 
 for (const [a, b, label] of steps) {
