@@ -5,35 +5,28 @@ import { SkeletonCards } from "./Skeleton";
 
 export function PredictionsSection({
   predictions,
-  onSchemeChange,
 }: {
   predictions: ReturnType<typeof usePredictions>;
-  onSchemeChange: (key: string) => void;
 }) {
-  const { data, loading, scheme, load, odds, llm, refreshOdds, refreshLlm } = predictions;
+  const { data, loading, load, llm, refreshLlm } = predictions;
 
   return (
     <section className="section">
       <div className="section-header">
         <div>
-          <h2 className="section-title">Spieltag-Tipps</h2>
+          <h2 className="section-title">Faire Quoten</h2>
           {data?.nextMatchday != null && data.matchday === data.nextMatchday && (
             <p className="section-subtitle">Nächster Spieltag</p>
           )}
         </div>
         <MatchdayToolbar
           data={data}
-          scheme={scheme}
-          onSchemeChange={onSchemeChange}
           onMatchdayChange={(md) => load(md)}
-          onRefreshOdds={refreshOdds}
-          oddsLoading={odds.loading}
           onRefreshLlm={refreshLlm}
           llmLoading={llm.loading}
         />
       </div>
 
-      {odds.message && <p className="refresh-message">{odds.message}</p>}
       {llm.message && <p className="refresh-message">{llm.message}</p>}
       <FreshnessLines data={data} />
 

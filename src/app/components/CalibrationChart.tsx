@@ -10,9 +10,10 @@ const PAD = 30;
 // darunter heisst "sagt oefter voraus, als eintritt" (uebermuetig), darueber das
 // Gegenteil.
 //
-// Der bisherige Kalibrierungshinweis im Backtest war ein Satz Prosa ueber die Luecke
-// zwischen erwarteten und geholten Punkten. Der sagt, DASS etwas nicht stimmt -- hier
-// steht, in welchem Wahrscheinlichkeitsbereich.
+// Fuer ein Modell, dessen Produkt Wahrscheinlichkeiten sind, ist das nicht eine Kennzahl
+// unter vielen, sondern die Kernfrage. RPS und LogLoss sagen, DASS etwas nicht stimmt;
+// hier steht, in welchem Wahrscheinlichkeitsbereich. Das Diagramm wird deshalb zweimal
+// gezeigt -- einmal fuer das Modell, einmal fuer den Buchmacher auf denselben Spielen.
 export function CalibrationChart({ calibration }: { calibration: BacktestResult["calibration"] }) {
   if (!calibration || calibration.bins.length === 0) return null;
 

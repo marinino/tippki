@@ -1,12 +1,9 @@
-// Die Formen, die die API-Routen an die UI liefern. Vorher lagen sie als 130 Zeilen
-// Interface-Block am Kopf von page.tsx und waren damit nur dort verwendbar.
+// Die Formen, die die API-Routen an die UI liefern.
 
-export interface BookmakerOdds {
-  bookmaker: string;
-  oddsHome: number;
-  oddsDraw: number;
-  oddsAway: number;
-}
+import type { PriceSheet } from "../model/priceSheet";
+import type { MetricSummary } from "../eval/metrics";
+import type { VariantName } from "../eval/backtestCore";
+import type { BenchmarkSource } from "../eval/benchmarkOdds";
 
 export interface Prediction {
   homeTeam: string;
@@ -21,22 +18,11 @@ export interface Prediction {
   homeWinProb: number;
   drawProb: number;
   awayWinProb: number;
-  // Der abzugebende Tipp: maximiert den Punkte-Erwartungswert, nicht die
-  // Einzelwahrscheinlichkeit. Weicht deshalb bewusst oft vom wahrscheinlichsten
-  // Ergebnis (argmaxTip) ab.
-  tip: string;
-  expectedPoints: number;
-  runnerUpTip: string;
-  runnerUpExpectedPoints: number;
-  argmaxTip: string;
   mostLikelyScore: string;
+  // Faire Quoten ueber alle Maerkte -- das eigentliche Produkt.
+  prices: PriceSheet;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
-  oddsBlended: boolean;
-  // Welche Marktinformationen in die Ergebnismatrix eingeflossen sind, z.B.
-  // ["1X2", "Totals (10 Linien)", "Spread (4 Linien)"].
-  marketConstraints: string[];
-  bookmakerOdds: BookmakerOdds[] | null;
   // Recherchierter Spielkontext (Ausfaelle, Belastung, Motivation).
   llmApplied: boolean;
   llmBlocked: boolean;
@@ -51,9 +37,6 @@ export interface PredictionsResponse {
   matchday: number | null;
   nextMatchday: number | null;
   availableMatchdays: number[];
-  scheme: string;
-  schemeLabel: string;
-  oddsFetchedAt: string | null;
   llmFetchedAt: string | null;
   llmModel: string | null;
 }
@@ -63,29 +46,30 @@ export interface SeasonBacktest {
   trainMatchCount: number;
   evaluated: number;
   tendencyAccuracy: number;
-  exactScoreAccuracy: number;
-  pointsPerMatch: number;
   rps: number;
+  logLoss: number;
+}
+
+export interface CalibrationView {
+  bins: { from: number; to: number; n: number; meanPredicted: number; observed: number }[];
+  expectedCalibrationError: number;
+  totalPoints: number;
 }
 
 export interface BacktestResult {
+  split: string;
+  variant: VariantName;
+  benchmark: BenchmarkSource;
+  benchmarkLabel: string;
   perSeason: SeasonBacktest[];
+  totalMatches: number;
   totalEvaluated: number;
-  totalTendencyAccuracy: number;
-  totalExactScoreAccuracy: number;
-  schemeLabel: string;
-  overall: {
-    pointsPerMatch: number;
-    expectedPointsPerMatch: number | null;
-    rps: number;
-    logLoss: number;
-  };
-  baselines: Record<string, { tendencyAccuracy: number; rps: number }>;
-  calibration: {
-    bins: { from: number; to: number; n: number; meanPredicted: number; observed: number }[];
-    expectedCalibrationError: number;
-    totalPoints: number;
-  };
+  overall: MetricSummary;
+  baselines: Record<VariantName, MetricSummary>;
+  // Zwei Reliability-Diagramme nebeneinander: das Modell und die Messlatte. Eine einzelne
+  // Kalibrierungskurve sagt wenig -- interessant ist, wo sie von der des Marktes abweicht.
+  calibration: CalibrationView;
+  benchmarkCalibration: CalibrationView;
 }
 
 export interface TableEntry {
@@ -117,17 +101,12 @@ export interface SimPrediction {
   date: string;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
-  // Wahrscheinlichkeit je Ergebnis, grid[Heimtore][Auswaertstore], 0..5 Tore je Seite.
   scoreGrid: number[][];
   homeWinProb: number;
   drawProb: number;
   awayWinProb: number;
-  tip: string;
-  expectedPoints: number;
-  runnerUpTip: string;
-  runnerUpExpectedPoints: number;
-  argmaxTip: string;
   mostLikelyScore: string;
+  prices: PriceSheet;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
 }

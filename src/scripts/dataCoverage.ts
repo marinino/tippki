@@ -1,12 +1,18 @@
-// Abdeckung der Marktspalten je Saison.
+// Abdeckung der Referenzquoten je Saison.
 //
 //   npm run coverage
+//
+// Die Quoten sind in diesem Projekt ausschliesslich Messlatte, nie Eingabe. Genau deshalb
+// zaehlt ihre Abdeckung: fehlt in einer Saison die Referenz, faellt diese Saison aus dem
+// gepaarten Vergleich heraus und die Gesamtzahl beruht still auf weniger Spielen, als sie
+// zu behaupten scheint.
 //
 // Die CSVs kommen in zwei Spaltenschemata (Betbrain-Aggregate bis 2018/19, moderne Namen
 // ab 2019/20). Dieses Skript zeigt, ob die Namensketten in loadMatches.ts in jeder Saison
 // greifen -- und faellt sofort auf, wenn ein Datenrefresh Spalten weggeschrieben hat.
 
 import { loadAllMatches } from "../data/loadMatches";
+import { benchmarkQuote, BENCHMARK_LABELS, type BenchmarkSource } from "../eval/benchmarkOdds";
 
 const matches = loadAllMatches();
 
@@ -14,20 +20,34 @@ interface Coverage {
   n: number;
   x2: number;
   ou: number;
-  ah: number;
+  ahHalf: number;
   sot: number;
 }
 
-const bySeason = new Map<string, Coverage>();
+const SOURCES: BenchmarkSource[] = ["pinnacleClose", "marketAverageClose", "marketAverageOpen"];
 
-for (const m of matches) {
-  const e = bySeason.get(m.season) ?? { n: 0, x2: 0, ou: 0, ah: 0, sot: 0 };
-  e.n++;
-  if (m.oddsHome && m.oddsDraw && m.oddsAway) e.x2++;
-  if (m.oddsOver25 && m.oddsUnder25) e.ou++;
-  if (m.ahLine !== undefined && m.ahOddsHome && m.ahOddsAway) e.ah++;
-  if (m.shotsOnTargetHome !== undefined) e.sot++;
-  bySeason.set(m.season, e);
+for (const source of SOURCES) {
+  const bySeason = new Map<string, Coverage>();
+
+  for (const m of matches) {
+    const e = bySeason.get(m.season) ?? { n: 0, x2: 0, ou: 0, ahHalf: 0, sot: 0 };
+    e.n++;
+    const q = benchmarkQuote(m, source);
+    if (q) e.x2++;
+    if (q?.totalsOverProb !== null && q?.totalsOverProb !== undefined) e.ou++;
+    if (q?.handicap) e.ahHalf++;
+    if (m.shotsOnTargetHome !== undefined) e.sot++;
+    bySeason.set(m.season, e);
+  }
+
+  console.log(`\n=== ${BENCHMARK_LABELS[source]} ===`);
+  console.log("Saison    1X2          O/U 2.5      AH Halblinie   SoT");
+  for (const season of [...bySeason.keys()].sort()) {
+    const e = bySeason.get(season)!;
+    console.log(
+      `${season}    ${bar(e.x2, e.n)}  ${bar(e.ou, e.n)}  ${bar(e.ahHalf, e.n)}    ${bar(e.sot, e.n)}`
+    );
+  }
 }
 
 function bar(part: number, total: number): string {
@@ -36,21 +56,14 @@ function bar(part: number, total: number): string {
   return `${mark} ${String(part).padStart(3)}/${String(total).padEnd(3)}`;
 }
 
-console.log("Saison    1X2          O/U 2.5      Asian Hcp    SoT");
-for (const season of [...bySeason.keys()].sort()) {
-  const e = bySeason.get(season)!;
-  console.log(
-    `${season}    ${bar(e.x2, e.n)}  ${bar(e.ou, e.n)}  ${bar(e.ah, e.n)}  ${bar(e.sot, e.n)}`
-  );
-}
-
-// Fuer die Marktbedingungen zaehlt, ob die Asian-Handicap-Linie eine saubere Partition
-// erlaubt. Nur Halblinien tun das -- Viertellinien verteilen den Einsatz auf zwei
-// Nachbarlinien und sind keine Zweiwegwette.
+// Nur Halblinien erlauben eine saubere Zweiwegwette. Viertellinien verteilen den Einsatz
+// auf zwei Nachbarlinien, ganze Linien kennen ein Push -- beides laesst sich nicht in eine
+// zweiwertige Wahrscheinlichkeit uebersetzen, ohne zu schummeln.
 const lineCounts = new Map<number, number>();
 for (const m of matches) {
-  if (m.ahLine === undefined) continue;
-  lineCounts.set(m.ahLine, (lineCounts.get(m.ahLine) ?? 0) + 1);
+  const line = m.closeAhLine ?? m.openAhLine;
+  if (line === undefined) continue;
+  lineCounts.set(line, (lineCounts.get(line) ?? 0) + 1);
 }
 
 let half = 0;
@@ -69,5 +82,6 @@ console.log(
     `${whole} ganze Linien (Push moeglich) -- von ${withLine} mit Linie`
 );
 console.log(
-  `Nutzbar fuer eine saubere Tordifferenz-Bedingung: ${((half / withLine) * 100).toFixed(1)}%`
+  `Nutzbar als Tordifferenz-Messlatte: ${((half / withLine) * 100).toFixed(1)}% -- der ` +
+    `Handicap-Vergleich laeuft also auf deutlich weniger Spielen als der 1X2-Vergleich.`
 );

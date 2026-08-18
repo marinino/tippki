@@ -12,28 +12,51 @@ export interface Match {
   awayTeam: string;
   homeGoals: number;
   awayGoals: number;
-  // Bet365-Quoten (1X2) vor Spielbeginn, falls in den football-data.co.uk-Daten vorhanden.
-  oddsHome?: number;
-  oddsDraw?: number;
-  oddsAway?: number;
-  // Over/Under 2.5 Tore. Die einzige Totals-Linie in den historischen Daten -- live
-  // liefert odds-api.io eine ganze Leiter (siehe scripts/inspectOddsMarkets.ts).
-  oddsOver25?: number;
-  oddsUnder25?: number;
-  // Asian Handicap: Linie aus Heimsicht (negativ = Heim gibt Tore vor) plus beide Quoten.
-  ahLine?: number;
-  ahOddsHome?: number;
-  ahOddsAway?: number;
   // Bisher ungenutzte Spielstatistik, verfuegbar in allen Saisons.
   shotsOnTargetHome?: number;
   shotsOnTargetAway?: number;
+
+  // ---------------------------------------------------------------------------
+  // Ab hier ausschliesslich MASSSTAB. Kein Feld unterhalb dieser Linie darf jemals
+  // in src/model/ gelesen werden -- sonst schreibt das Modell den Gegner ab, gegen
+  // den es antreten soll. Die Auswertung liegt in src/eval/benchmarkOdds.ts.
+  // ---------------------------------------------------------------------------
+
+  // Pinnacle-Schlussquote. In allen Saisons vorhanden und die schaerfste verfuegbare
+  // Referenz -- die Standardmesslatte des Projekts.
+  closeOddsHome?: number;
+  closeOddsDraw?: number;
+  closeOddsAway?: number;
+  closeOddsOver25?: number;
+  closeOddsUnder25?: number;
+  closeAhLine?: number;
+  closeAhOddsHome?: number;
+  closeAhOddsAway?: number;
+
+  // Marktmittel zum Anpfiff. Erst ab Saison 2019 in den Dateien.
+  avgCloseOddsHome?: number;
+  avgCloseOddsDraw?: number;
+  avgCloseOddsAway?: number;
+  avgCloseOddsOver25?: number;
+  avgCloseOddsUnder25?: number;
+  avgCloseAhLine?: number;
+  avgCloseAhOddsHome?: number;
+  avgCloseAhOddsAway?: number;
+
+  // Marktmittel zur Eroeffnung. Der weichste der drei Gegner, dafuer in allen Saisons.
+  openOddsHome?: number;
+  openOddsDraw?: number;
+  openOddsAway?: number;
+  openOddsOver25?: number;
+  openOddsUnder25?: number;
+  openAhLine?: number;
+  openAhOddsHome?: number;
+  openAhOddsAway?: number;
 }
 
 // Die CSVs kommen in zwei Spaltenschemata: Saisons bis 2018/19 nutzen die
 // Betbrain-Aggregate (BbAv>2.5, BbAHh, ...), ab 2019/20 die modernen Namen (Avg>2.5, AHh,
 // ...). Deshalb Aufloesung ueber eine Namenskette statt ueber feste Spaltennamen.
-// Marktmittel (Avg/BbAv) vor Einzelbuchmacher -- dieselbe Begruendung wie bei
-// averageMarketProbabilities in marketOdds.ts.
 function pickColumn(row: Record<string, string>, names: readonly string[]): number | undefined {
   for (const name of names) {
     const raw = row[name];
@@ -44,12 +67,35 @@ function pickColumn(row: Record<string, string>, names: readonly string[]): numb
   return undefined;
 }
 
+// "C" im Spaltennamen steht bei football-data.co.uk fuer closing. PS = Pinnacle Sports,
+// P = dasselbe Haus unter neuem Namen, Avg = Mittel ueber alle erfassten Buchmacher.
 const COLUMNS = {
-  over25: ["Avg>2.5", "B365>2.5", "BbAv>2.5", "BbMx>2.5"],
-  under25: ["Avg<2.5", "B365<2.5", "BbAv<2.5", "BbMx<2.5"],
-  ahLine: ["AHh", "BbAHh"],
-  ahHome: ["AvgAHH", "B365AHH", "BbAvAHH"],
-  ahAway: ["AvgAHA", "B365AHA", "BbAvAHA"],
+  closeHome: ["PSCH"],
+  closeDraw: ["PSCD"],
+  closeAway: ["PSCA"],
+  closeOver25: ["PC>2.5"],
+  closeUnder25: ["PC<2.5"],
+  closeAhLine: ["AHCh"],
+  closeAhHome: ["PCAHH"],
+  closeAhAway: ["PCAHA"],
+
+  avgCloseHome: ["AvgCH"],
+  avgCloseDraw: ["AvgCD"],
+  avgCloseAway: ["AvgCA"],
+  avgCloseOver25: ["AvgC>2.5"],
+  avgCloseUnder25: ["AvgC<2.5"],
+  avgCloseAhLine: ["AHCh"],
+  avgCloseAhHome: ["AvgCAHH"],
+  avgCloseAhAway: ["AvgCAHA"],
+
+  openHome: ["AvgH", "BbAvH"],
+  openDraw: ["AvgD", "BbAvD"],
+  openAway: ["AvgA", "BbAvA"],
+  openOver25: ["Avg>2.5", "BbAv>2.5"],
+  openUnder25: ["Avg<2.5", "BbAv<2.5"],
+  openAhLine: ["AHh", "BbAHh"],
+  openAhHome: ["AvgAHH", "BbAvAHH"],
+  openAhAway: ["AvgAHA", "BbAvAHA"],
 } as const;
 
 const DATA_DIR = join(__dirname, "..", "..", "data");
@@ -96,16 +142,35 @@ function parseCsvFile(filePath: string, season: string): Match[] {
       awayTeam: row.AwayTeam,
       homeGoals: Number(row.FTHG),
       awayGoals: Number(row.FTAG),
-      oddsHome: row.B365H ? Number(row.B365H) : undefined,
-      oddsDraw: row.B365D ? Number(row.B365D) : undefined,
-      oddsAway: row.B365A ? Number(row.B365A) : undefined,
-      oddsOver25: pickColumn(row, COLUMNS.over25),
-      oddsUnder25: pickColumn(row, COLUMNS.under25),
-      ahLine: pickColumn(row, COLUMNS.ahLine),
-      ahOddsHome: pickColumn(row, COLUMNS.ahHome),
-      ahOddsAway: pickColumn(row, COLUMNS.ahAway),
       shotsOnTargetHome: pickColumn(row, ["HST"]),
       shotsOnTargetAway: pickColumn(row, ["AST"]),
+
+      closeOddsHome: pickColumn(row, COLUMNS.closeHome),
+      closeOddsDraw: pickColumn(row, COLUMNS.closeDraw),
+      closeOddsAway: pickColumn(row, COLUMNS.closeAway),
+      closeOddsOver25: pickColumn(row, COLUMNS.closeOver25),
+      closeOddsUnder25: pickColumn(row, COLUMNS.closeUnder25),
+      closeAhLine: pickColumn(row, COLUMNS.closeAhLine),
+      closeAhOddsHome: pickColumn(row, COLUMNS.closeAhHome),
+      closeAhOddsAway: pickColumn(row, COLUMNS.closeAhAway),
+
+      avgCloseOddsHome: pickColumn(row, COLUMNS.avgCloseHome),
+      avgCloseOddsDraw: pickColumn(row, COLUMNS.avgCloseDraw),
+      avgCloseOddsAway: pickColumn(row, COLUMNS.avgCloseAway),
+      avgCloseOddsOver25: pickColumn(row, COLUMNS.avgCloseOver25),
+      avgCloseOddsUnder25: pickColumn(row, COLUMNS.avgCloseUnder25),
+      avgCloseAhLine: pickColumn(row, COLUMNS.avgCloseAhLine),
+      avgCloseAhOddsHome: pickColumn(row, COLUMNS.avgCloseAhHome),
+      avgCloseAhOddsAway: pickColumn(row, COLUMNS.avgCloseAhAway),
+
+      openOddsHome: pickColumn(row, COLUMNS.openHome),
+      openOddsDraw: pickColumn(row, COLUMNS.openDraw),
+      openOddsAway: pickColumn(row, COLUMNS.openAway),
+      openOddsOver25: pickColumn(row, COLUMNS.openOver25),
+      openOddsUnder25: pickColumn(row, COLUMNS.openUnder25),
+      openAhLine: pickColumn(row, COLUMNS.openAhLine),
+      openAhOddsHome: pickColumn(row, COLUMNS.openAhHome),
+      openAhOddsAway: pickColumn(row, COLUMNS.openAhAway),
     }));
 }
 

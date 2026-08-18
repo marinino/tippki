@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_SCHEME_KEY } from "../../eval/scoringScheme";
 import { num } from "../lib/format";
 import type { PredictionsResponse } from "../types";
 
@@ -13,22 +12,20 @@ export interface RefreshState {
 
 const IDLE: RefreshState = { loading: false, message: null };
 
-export function usePredictions(initialScheme?: string | null, initialMatchday?: number | null) {
+export function usePredictions(initialMatchday?: number | null) {
   const [data, setData] = useState<PredictionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [scheme, setScheme] = useState<string>(initialScheme ?? DEFAULT_SCHEME_KEY);
   const [results, setResults] = useState<RefreshState>(IDLE);
-  const [odds, setOdds] = useState<RefreshState>(IDLE);
   const [llm, setLlm] = useState<RefreshState>(IDLE);
 
-  const load = useCallback(async (matchday?: number, schemeKey = scheme) => {
+  const load = useCallback(async (matchday?: number) => {
     setLoading(true);
-    const params = new URLSearchParams({ scheme: schemeKey });
+    const params = new URLSearchParams();
     if (matchday) params.set("matchday", String(matchday));
     const res = await fetch(`/api/predictions?${params}`);
     setData(await res.json());
     setLoading(false);
-  }, [scheme]);
+  }, []);
 
   useEffect(() => {
     // Der Spieltag aus der Adresse gilt nur beim ersten Laden; danach fuehrt die
@@ -38,8 +35,8 @@ export function usePredictions(initialScheme?: string | null, initialMatchday?: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Gemeinsamer Ablauf aller drei Aktualisierungsknoepfe: sperren, POST, Meldung
-  // setzen, Vorhersagen neu laden. Vorher stand das dreimal fast wortgleich da.
+  // Gemeinsamer Ablauf beider Aktualisierungsknoepfe: sperren, POST, Meldung setzen,
+  // Vorhersagen neu laden.
   const runRefresh = useCallback(
     async (
       endpoint: string,
@@ -73,16 +70,6 @@ export function usePredictions(initialScheme?: string | null, initialMatchday?: 
     return result;
   }, [runRefresh, load, data?.matchday]);
 
-  const refreshOdds = useCallback(async () => {
-    const result = await runRefresh(
-      "/api/refresh-odds",
-      setOdds,
-      (r) => `Spieltag ${r.matchday}: ${r.fixturesWithOdds}/${r.fixturesTotal} Quoten geholt`,
-      "Fehler beim Aktualisieren der Quoten"
-    );
-    if (result) await load(data?.matchday ?? undefined);
-  }, [runRefresh, load, data?.matchday]);
-
   // Kostet echtes Geld (rund 1 $ fuer neun Partien), deshalb nur auf Knopfdruck.
   const refreshLlm = useCallback(async () => {
     const result = await runRefresh(
@@ -102,17 +89,5 @@ export function usePredictions(initialScheme?: string | null, initialMatchday?: 
     if (result) await load(data?.matchday ?? undefined);
   }, [runRefresh, load, data?.matchday]);
 
-  return {
-    data,
-    loading,
-    scheme,
-    setScheme,
-    load,
-    results,
-    odds,
-    llm,
-    refreshResults,
-    refreshOdds,
-    refreshLlm,
-  };
+  return { data, loading, load, results, llm, refreshResults, refreshLlm };
 }

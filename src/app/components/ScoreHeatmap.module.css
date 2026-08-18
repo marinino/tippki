@@ -68,11 +68,6 @@
   outline-offset: 1px;
 }
 
-.argmaxCell {
-  outline: 1.5px dashed var(--text-2);
-  outline-offset: 1px;
-}
-
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -88,8 +83,7 @@
   font-weight: 500;
 }
 
-.keyTip::before,
-.keyArgmax::before {
+.keyTip::before {
   content: "";
   display: inline-block;
   width: 8px;
@@ -101,14 +95,6 @@
 
 .keyTip::before {
   border: 1.5px solid var(--brass);
-}
-
-.keyArgmax::before {
-  border: 1.5px dashed var(--text-2);
-}
-
-.keyArgmax {
-  color: var(--text-2);
 }
 
 .keyNote {

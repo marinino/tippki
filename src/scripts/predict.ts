@@ -1,3 +1,12 @@
+// Preisblatt fuer den naechsten Spieltag.
+//
+//   npm run predict
+//   npm run predict -- --matchday=12
+//   npm run predict -- --full        (alle Linien und die Correct-Score-Liste)
+//
+// Ausgegeben werden faire Quoten, also OHNE Marge. Ein Buchmacher schlaegt darauf noch
+// seinen Aufschlag; die Kehrwerte der Zahlen hier summieren je Markt exakt auf 1.
+
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -6,9 +15,8 @@ import { loadAllMatches } from "../data/loadMatches";
 import { buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
 import { computeXgForm } from "../model/xgForm";
-import { readOddsCache } from "../data/oddsApi";
-import { averageMarketProbabilities } from "../model/marketOdds";
-import { resolveScheme } from "../eval/scoringScheme";
+import { formatOdds } from "../model/priceSheet";
+import { cacheKey, readLlmCache } from "../llm/llmCache";
 
 loadEnvLocal();
 
@@ -22,30 +30,38 @@ interface Fixture {
   matchday: number;
 }
 
+function flag(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+}
+
+const full = process.argv.includes("--full");
+
 const allFixtures: Fixture[] = JSON.parse(readFileSync(FIXTURES_PATH, "utf-8"));
 
 const now = new Date();
 const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
 const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
-const fixtures = upcoming.filter((f) => f.matchday === nextMatchday);
+const matchday = flag("matchday") ? Number(flag("matchday")) : nextMatchday;
 
-const matches = loadAllMatches();
-const model = buildLeagueModel(matches);
+if (matchday == null) {
+  console.error("Kein kommender Spieltag gefunden.");
+  process.exit(0);
+}
 
-// Liest nur den zuletzt manuell aktualisierten Quoten-Cache (npm run refresh-odds), holt keine
-// neuen Quoten -- damit laesst sich dieses Script beliebig oft aufrufen, ohne API-Kontingent
-// zu verbrauchen.
-const oddsCache = readOddsCache();
-const oddsByFixture = oddsCache && oddsCache.matchday === nextMatchday ? oddsCache.odds : {};
+const fixtures = allFixtures.filter((f) => f.matchday === matchday);
+const model = buildLeagueModel(loadAllMatches());
 
-const schemeFlag = process.argv.find((a) => a.startsWith("--scheme="))?.slice(9);
-const scheme = resolveScheme(schemeFlag);
+// Nur lesen, nie abrufen. Der LLM-Refresh kostet Geld und laeuft ausschliesslich auf
+// ausdruecklichen Knopfdruck (npm run refresh-llm).
+const llmCache = readLlmCache();
+const llmByFixture = llmCache && llmCache.matchday === matchday ? llmCache.contexts : {};
 
-console.log(`Punkteschema: ${scheme.label}\n`);
+console.log(`Spieltag ${matchday} -- faire Quoten, ohne Marge\n`);
 
 for (const { homeTeam, awayTeam, date } of fixtures) {
   const matchDate = new Date(date);
-  const fixtureOdds = oddsByFixture[`${homeTeam}|${awayTeam}`];
+  const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
 
   const out = predictPipeline({
     model,
@@ -53,31 +69,57 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
     awayTeam,
     homeForm: computeXgForm(homeTeam, matchDate),
     awayForm: computeXgForm(awayTeam, matchDate),
-    market1x2: fixtureOdds ? averageMarketProbabilities(fixtureOdds.bookmakers) : null,
-    marketTotals: fixtureOdds?.totals ?? null,
-    marketSpread: fixtureOdds?.spread ?? null,
-    scheme,
+    llmContext: cachedLlm?.context ?? null,
   });
 
+  const p = out.prices;
   const homeLabel = out.homeIsEstimated ? `${homeTeam} (geschätzt, Aufsteiger?)` : homeTeam;
   const awayLabel = out.awayIsEstimated ? `${awayTeam} (geschätzt, Aufsteiger?)` : awayTeam;
 
-  console.log(`${homeLabel} vs ${awayLabel}${out.marketApplied ? " (mit Marktquoten geblendet)" : ""}`);
+  console.log(`${homeLabel} vs ${awayLabel}`);
   console.log(
-    `  erwartete Tore: ${out.expectedHomeGoals.toFixed(2)} : ${out.expectedAwayGoals.toFixed(2)}` +
-      (out.marketConstraints.length > 0
-        ? `  (Modell allein: ${out.modelLambdaHome.toFixed(2)} : ${out.modelLambdaAway.toFixed(2)})`
-        : "")
-  );
-  if (out.marketConstraints.length > 0) {
-    console.log(`  Marktbedingungen: ${out.marketConstraints.join(", ")}`);
-  }
-  console.log(
-    `  Sieg H: ${(out.finalProbs.homeWinProb * 100).toFixed(1)}%  Unentschieden: ${(out.finalProbs.drawProb * 100).toFixed(1)}%  Sieg A: ${(out.finalProbs.awayWinProb * 100).toFixed(1)}%`
+    `  erwartete Tore ${out.expectedHomeGoals.toFixed(2)} : ${out.expectedAwayGoals.toFixed(2)}` +
+      (out.llmAdjustment && !out.llmAdjustment.blocked ? "  (mit Spielkontext)" : "")
   );
   console.log(
-    `  Tipp: ${out.tip.tip}  (EV ${out.tip.expectedPoints.toFixed(3)} Pkt)  ` +
-      `Alternative: ${out.tip.runnerUpTip} (${out.tip.runnerUpExpectedPoints.toFixed(3)})  ` +
-      `wahrscheinlichstes Ergebnis: ${out.tip.argmaxCellTip}\n`
+    `  1X2       1 ${formatOdds(p.outcome.home)} (${(p.outcome.home.prob * 100).toFixed(1)}%)   ` +
+      `X ${formatOdds(p.outcome.draw)} (${(p.outcome.draw.prob * 100).toFixed(1)}%)   ` +
+      `2 ${formatOdds(p.outcome.away)} (${(p.outcome.away.prob * 100).toFixed(1)}%)`
   );
+  console.log(
+    `  Doppelt   1X ${formatOdds(p.doubleChance.homeOrDraw)}   ` +
+      `12 ${formatOdds(p.doubleChance.homeOrAway)}   ` +
+      `X2 ${formatOdds(p.doubleChance.drawOrAway)}`
+  );
+  console.log(
+    `  BTTS      Ja ${formatOdds(p.bothTeamsToScore.yes)}   Nein ${formatOdds(p.bothTeamsToScore.no)}`
+  );
+
+  const totalsShown = full ? p.totals : p.totals.filter((t) => t.line >= 1.5 && t.line <= 3.5);
+  console.log(
+    `  Torsumme  ` +
+      totalsShown
+        .map((t) => `${t.line} Ü ${formatOdds(t.over)} / U ${formatOdds(t.under)}`)
+        .join("   ")
+  );
+
+  const hcShown = full ? p.handicaps : p.handicaps.filter((h) => Math.abs(h.line) <= 1.5);
+  console.log(
+    `  Handicap  ` +
+      hcShown
+        .map((h) => `${h.line > 0 ? "+" : ""}${h.line} H ${formatOdds(h.home)} / A ${formatOdds(h.away)}`)
+        .join("   ")
+  );
+
+  const scores = full ? p.correctScore : p.correctScore.slice(0, 6);
+  console.log(
+    `  Ergebnis  ` + scores.map((c) => `${c.score} ${formatOdds(c.price)}`).join("   ")
+  );
+  console.log("");
 }
+
+console.log(
+  `Die Zahlen stammen ausschliesslich aus Teamstaerken, Formkurve und Spielkontext --\n` +
+    `keine Buchmacherquote geht ein. Wie sie sich gegen den Markt schlagen, zeigt\n` +
+    `"npm run benchmark".`
+);

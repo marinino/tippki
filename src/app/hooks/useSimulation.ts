@@ -14,7 +14,7 @@ export function fixtureKey(homeTeam: string, awayTeam: string): string {
   return `${homeTeam}|${awayTeam}`;
 }
 
-export function useSimulation(scheme: string) {
+export function useSimulation() {
   const [resultsSoFar, setResultsSoFar] = useState<SimResult[]>([]);
   const [matchday, setMatchday] = useState(1);
   const [data, setData] = useState<SimResponse | null>(null);
@@ -45,24 +45,24 @@ export function useSimulation(scheme: string) {
   }, [resultsSoFar, matchday, hits, restored]);
 
   const loadMatchday = useCallback(
-    async (targetMatchday: number, soFar: SimResult[], schemeKey = scheme) => {
+    async (targetMatchday: number, soFar: SimResult[]) => {
       setLoading(true);
       const res = await fetch("/api/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchday: targetMatchday, resultsSoFar: soFar, scheme: schemeKey }),
+        body: JSON.stringify({ matchday: targetMatchday, resultsSoFar: soFar }),
       });
       const result: SimResponse = await res.json();
       setData(result);
       const prefill: Record<string, SimInput> = {};
       for (const p of result.predictions) {
-        const [home, away] = p.tip.split(":");
+        const [home, away] = p.mostLikelyScore.split(":");
         prefill[fixtureKey(p.homeTeam, p.awayTeam)] = { home, away };
       }
       setInputs(prefill);
       setLoading(false);
     },
-    [scheme]
+    []
   );
 
   const updateInput = useCallback(

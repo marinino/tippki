@@ -16,7 +16,8 @@ export function SimulateSection({ sim }: { sim: ReturnType<typeof useSimulation>
         <div>
           <h2 className="section-title">Saison 26/27 simulieren</h2>
           <p className="section-subtitle">
-            Nur Modell + Form (Tordifferenz statt echtem xG, keine Wettquoten) ·{" "}
+            Modell + Form (Tordifferenz statt echtem xG, weil es für erfundene Spiele keine
+            gibt) ·{" "}
             {data && data.predictions.length === 0
               ? "Saison beendet"
               : `Spieltag ${matchday}${data ? ` von ${data.totalMatchdays}` : ""}`}

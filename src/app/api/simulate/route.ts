@@ -3,9 +3,8 @@ import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
-import { toScoreGrid } from "../../../model/scoreMatrix";
+import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
 import { computeSimulatedForm, type SimpleResult } from "../../../model/simulateForm";
-import { resolveScheme } from "../../../eval/scoringScheme";
 
 // 0 bis 5 Tore je Seite -- gleiche Aufloesung wie im Tipps-Tab.
 const DISPLAY_MAX_GOALS = 5;
@@ -80,15 +79,14 @@ function computeStandings(results: SimpleResult[], logosByTeam: Record<string, s
   return rows.map((row, i) => ({ position: i + 1, ...row }));
 }
 
-// Liefert Modell-Vorhersagen (ohne Wettquoten) fuer einen Spieltag der Saison-Simulation, plus die
+// Liefert Modell-Vorhersagen fuer einen Spieltag der Saison-Simulation, plus die
 // Tabelle aus den bisher im Frontend eingetragenen Ergebnissen. Team-Staerke ist wie im
 // Produktivmodell aus allen bisherigen echten Saisons trainiert und bleibt waehrend der ganzen
 // Simulation fix -- nur die Form (computeSimulatedForm, Tordifferenz statt echtem xG) aktualisiert
 // sich mit den eingetragenen Ergebnissen.
 export async function POST(request: Request) {
-  const body: { matchday: number; resultsSoFar: SimpleResult[]; scheme?: string } = await request.json();
+  const body: { matchday: number; resultsSoFar: SimpleResult[] } = await request.json();
   const { matchday, resultsSoFar } = body;
-  const scheme = resolveScheme(body.scheme);
 
   const fixturesPath = join(process.cwd(), "data", "fixtures.json");
   const allFixtures: Fixture[] = JSON.parse(readFileSync(fixturesPath, "utf-8"));
@@ -108,9 +106,6 @@ export async function POST(request: Request) {
       awayTeam,
       homeForm: computeSimulatedForm(homeTeam, resultsSoFar),
       awayForm: computeSimulatedForm(awayTeam, resultsSoFar),
-      // Der Simulator kennt keine Quoten fuer hypothetische kuenftige Spiele.
-      market1x2: null,
-      scheme,
     });
 
     return {
@@ -122,15 +117,11 @@ export async function POST(request: Request) {
       scoreGrid: toScoreGrid(out.matrix, DISPLAY_MAX_GOALS),
       expectedHomeGoals: out.expectedHomeGoals,
       expectedAwayGoals: out.expectedAwayGoals,
-      homeWinProb: out.finalProbs.homeWinProb,
-      drawProb: out.finalProbs.drawProb,
-      awayWinProb: out.finalProbs.awayWinProb,
-      tip: out.tip.tip,
-      expectedPoints: out.tip.expectedPoints,
-      runnerUpTip: out.tip.runnerUpTip,
-      runnerUpExpectedPoints: out.tip.runnerUpExpectedPoints,
-      argmaxTip: out.tip.argmaxCellTip,
-      mostLikelyScore: out.tip.tip,
+      homeWinProb: out.probs.homeWinProb,
+      drawProb: out.probs.drawProb,
+      awayWinProb: out.probs.awayWinProb,
+      mostLikelyScore: argmaxCell(out.matrix),
+      prices: out.prices,
       homeIsEstimated: out.homeIsEstimated,
       awayIsEstimated: out.awayIsEstimated,
     };
@@ -138,5 +129,5 @@ export async function POST(request: Request) {
 
   const table = computeStandings(resultsSoFar, logosByTeam);
 
-  return Response.json({ matchday, totalMatchdays, predictions, table, scheme: scheme.key });
+  return Response.json({ matchday, totalMatchdays, predictions, table });
 }

@@ -1,48 +1,81 @@
-// Hyperparametersuche fuer das EIGENSTAENDIGE Modell -- ohne Markt.
+// Hyperparametersuche fuer das eigenstaendige Modell.
 //
 //   npm run tune-model
+//   npm run tune-model -- --objective=score
+//   npm run tune-model -- --split=validation
 //
-// Getrennt von tune.ts, und zwar aus einem inhaltlichen Grund: mit aktiven
-// Marktbedingungen sind Modellverbesserungen praktisch unsichtbar. Das haben zwei
-// Messungen gezeigt -- der konvergierte Fit (RPS 0.2088 -> 0.2042 ohne Markt, aber
-// wirkungslos mit) und die Formkurve (+0.0025 ohne, +0.0012 mit). Wer am Modell arbeitet
-// und die Gesamtzahl anschaut, sieht deshalb nie etwas.
+// Zielgroesse waehlbar, und das ist wichtiger als es aussieht:
 //
-// Zielgroesse ist hier also modelOnly-RPS. Referenz: 0.2042 (aktuelles Modell),
-// zu schlagen waere der reine Markt mit 0.1978.
+//   rps      Ranked Probability Score auf 1X2. Die Standardmetrik, aber sie sieht nur
+//            drei aggregierte Massen.
+//   logloss  LogLoss auf 1X2. Empfindlicher fuer Ueberzeugung als der RPS.
+//   totals   LogLoss auf "mehr als 2.5 Tore". Misst das Torniveau.
+//   score    LogLoss auf dem exakten Ergebnis. Die einzige Zielgroesse, die die FORM der
+//            Verteilung sieht.
+//
+// Genau daran hing bisher ein Problem: RHO und DRAW_BOOST verschieben Masse INNERHALB
+// einer Tendenz. Der RPS ist dafuer bauartbedingt blind, und deshalb wurden diese beiden
+// Parameter frueher an Tippspiel-Punkten gewaehlt -- einer Zielgroesse, die mit dem Ziel
+// dieses Projekts nichts zu tun hat. Correct-Score-LogLoss misst dieselbe Sache, ist eine
+// strikt propere Bewertungsregel und braucht kein Punkteschema. Fuer RHO und DRAW_BOOST
+// ist "--objective=score" also die richtige Wahl.
 
-import { formatSummary, summarize } from "../eval/metrics";
+import { formatSummary, summarize, type MetricSummary } from "../eval/metrics";
 import { pairedBootstrap } from "../eval/significance";
-import { resolveScheme } from "../eval/scoringScheme";
 import { parseSplit, seasonsFor, warnIfTestSplit, type SplitName } from "../eval/splits";
 import {
   buildContexts,
   evaluateRun,
-  toPerMatchMetrics,
   type MatchEvaluation,
   type RunSpec,
 } from "../eval/backtestCore";
-import type { LeagueModelOptions } from "../model/teamStrength";
+import { BENCHMARK_LABELS, parseBenchmarkSource } from "../eval/benchmarkOdds";
+import { loadAllMatches } from "../data/loadMatches";
+import { buildLeagueModel, type LeagueModelOptions } from "../model/teamStrength";
 
 function flag(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : undefined;
 }
 
-const ACCEPT_THRESHOLD = 0.002;
+type Objective = "rps" | "logloss" | "totals" | "score";
+
+const OBJECTIVES: Record<Objective, { label: string; pick: (e: MatchEvaluation) => number | null; of: (s: MetricSummary) => number }> = {
+  rps: { label: "1X2 RPS", pick: (e) => e.metrics.rps, of: (s) => s.rps },
+  logloss: { label: "1X2 LogLoss", pick: (e) => e.metrics.logLoss, of: (s) => s.logLoss },
+  totals: { label: "O/U 2.5 LogLoss", pick: (e) => e.metrics.totals?.logLoss ?? null, of: (s) => s.totalsLogLoss },
+  score: { label: "Correct Score LogLoss", pick: (e) => e.metrics.scoreLogLoss, of: (s) => s.scoreLogLoss },
+};
+
+function parseObjective(raw?: string): Objective {
+  if (raw === "logloss" || raw === "totals" || raw === "score" || raw === "rps") return raw;
+  return "rps";
+}
+
+// Schwelle in RPS-Einheiten. LogLoss-Skalen sind groeber, deshalb je Zielgroesse eigen.
+const THRESHOLDS: Record<Objective, number> = {
+  rps: 0.002,
+  logloss: 0.005,
+  totals: 0.005,
+  score: 0.005,
+};
 
 const split: SplitName = flag("split") ? parseSplit(flag("split")) : "validation";
-const scheme = resolveScheme(undefined);
+const objective = parseObjective(flag("objective"));
+const source = parseBenchmarkSource(flag("benchmark"));
+const threshold = THRESHOLDS[objective];
+const obj = OBJECTIVES[objective];
+
 warnIfTestSplit(split);
 
 const seasons = seasonsFor(split);
-console.log(`Modellsuche auf "${split}" (${seasons.join(", ")}), Zielgroesse: modelOnly-RPS`);
-console.log(`Annahmeschwelle ΔRPS > ${ACCEPT_THRESHOLD}\n`);
+const allMatches = loadAllMatches();
 
-// Ohne Markt und ohne Marktbedingungen -- hier soll ausschliesslich das Modell wirken.
-const RUN: RunSpec = { name: "modell", variant: "modelOnly", tipMode: "ev" };
-// Marktreferenz auf denselben Spielen, damit der Abstand sichtbar bleibt.
-const MARKT: RunSpec = { name: "markt", variant: "pureMarket", tipMode: "ev" };
+console.log(`Modellsuche auf "${split}" (${seasons.join(", ")})`);
+console.log(`Zielgroesse: ${obj.label}, Annahmeschwelle Δ > ${threshold}\n`);
+
+const RUN: RunSpec = { name: "modell", variant: "model" };
+const MARKT: RunSpec = { name: "markt", variant: "benchmark" };
 
 interface Candidate {
   label: string;
@@ -53,8 +86,7 @@ const candidates: Candidate[] = [{ label: "Ausgang (Saisonbloecke, Tore)", model
 
 // Hebel 1: Halbwertszeit der Zeitgewichtung. 60 Tage ist sehr kurz (gut zwei Monate),
 // 700 Tage entspricht ungefaehr der bisherigen Reichweite ueber mehrere Saisons.
-const HALF_LIVES = [60, 90, 120, 180, 250, 365, 500, 700];
-for (const halfLifeDays of HALF_LIVES) {
+for (const halfLifeDays of [60, 90, 120, 180, 250, 365, 500, 700]) {
   candidates.push({ label: `Halbwertszeit ${halfLifeDays}d`, model: { halfLifeDays } });
 }
 
@@ -75,29 +107,21 @@ for (const halfLifeDays of [90, 180, 365]) {
     ["nur xG", { target: "xg" as const }],
     ["50/50", { target: "blend" as const, xgBlendWeight: 0.5 }],
   ] as [string, LeagueModelOptions][]) {
-    candidates.push({
-      label: `${halfLifeDays}d + ${suffix}`,
-      model: { halfLifeDays, ...extra },
-    });
+    candidates.push({ label: `${halfLifeDays}d + ${suffix}`, model: { halfLifeDays, ...extra } });
   }
 }
 
-// Matrixparameter kosten keinen Refit -- sie werden deshalb getrennt und feiner
-// durchsucht, auf den Kontexten der jeweils besten Modellkonfiguration.
-const RHOS = [-0.3, -0.25, -0.2, -0.15, -0.1, -0.05, 0, 0.05];
-const DRAW_BOOSTS = [0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25];
-
-const baselineContexts = buildContexts(seasons, {});
-const baselineEval = evaluateRun(baselineContexts, RUN, scheme);
-const baselineSummary = summarize(baselineEval.map(toPerMatchMetrics));
-const marketEval = evaluateRun(baselineContexts, MARKT, scheme);
-const marketSummary = summarize(marketEval.map(toPerMatchMetrics));
+const baselineContexts = buildContexts(seasons, {}, allMatches, buildLeagueModel, source);
+const baselineEval = evaluateRun(baselineContexts, RUN);
+const baselineSummary = summarize(baselineEval.map((e) => e.metrics));
+const marketEval = evaluateRun(baselineContexts, MARKT);
+const marketSummary = summarize(marketEval.map((e) => e.metrics));
 
 console.log(formatSummary("AUSGANG (Modell)", baselineSummary));
-console.log(formatSummary("ZIEL (reiner Markt)", marketSummary));
-console.log(
-  `\nZu schliessender Abstand: ${(baselineSummary.rps - marketSummary.rps).toFixed(4)} RPS\n`
-);
+console.log(formatSummary(`ZIEL (${BENCHMARK_LABELS[source]})`, marketSummary));
+
+const startGap = obj.of(baselineSummary) - obj.of(marketSummary);
+console.log(`\nZu schliessender Abstand auf ${obj.label}: ${startGap.toFixed(4)}\n`);
 
 // Die Teilmenge, in der sich alles entscheidet: wo Modell und Markt deutlich
 // auseinanderliegen, hatte bisher systematisch der Markt recht. Eine echte
@@ -107,33 +131,54 @@ function disagreementIndices(evaluations: MatchEvaluation[]): number[] {
   const idx: number[] = [];
   for (let i = 0; i < evaluations.length; i++) {
     const e = evaluations[i];
-    if (!e.marketProbs) continue;
+    const m = e.benchmarkProbs;
+    if (!m) continue;
     const d =
-      (Math.abs(e.modelProbs.homeWinProb - e.marketProbs.homeWinProb) +
-        Math.abs(e.modelProbs.drawProb - e.marketProbs.drawProb) +
-        Math.abs(e.modelProbs.awayWinProb - e.marketProbs.awayWinProb)) /
+      (Math.abs(e.probs.homeWinProb - m.homeWinProb) +
+        Math.abs(e.probs.drawProb - m.drawProb) +
+        Math.abs(e.probs.awayWinProb - m.awayWinProb)) /
       2;
     if (d >= 0.12) idx.push(i);
   }
   return idx;
 }
 
-const baseDisagree = disagreementIndices(baselineEval);
-const baseDisagreeGap =
-  summarize(baseDisagree.map((i) => toPerMatchMetrics(baselineEval[i]))).rps -
-  summarize(baseDisagree.map((i) => toPerMatchMetrics(marketEval[i]))).rps;
+function objectiveGapOn(indices: number[], evaluations: MatchEvaluation[]): number {
+  if (indices.length === 0) return 0;
+  return (
+    obj.of(summarize(indices.map((i) => evaluations[i].metrics))) -
+    obj.of(summarize(indices.map((i) => marketEval[i].metrics)))
+  );
+}
 
+const baseDisagree = disagreementIndices(baselineEval);
 console.log(
   `Widerspruchsfaelle (>12pp) im Ausgang: ${baseDisagree.length} Spiele, ` +
-    `RPS-Abstand zum Markt ${baseDisagreeGap >= 0 ? "+" : ""}${baseDisagreeGap.toFixed(4)}\n`
+    `Abstand zum Markt ${formatSigned(objectiveGapOn(baseDisagree, baselineEval))}\n`
 );
+
+function formatSigned(x: number): string {
+  return `${x >= 0 ? "+" : ""}${x.toFixed(4)}`;
+}
+
+// Gepaarte Differenzen der Zielgroesse gegen den Ausgang, nur ueber Spiele, auf denen
+// beide Laeufe die Metrik ueberhaupt liefern.
+function pairedDiffs(evaluations: MatchEvaluation[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < evaluations.length; i++) {
+    const a = obj.pick(baselineEval[i]);
+    const b = obj.pick(evaluations[i]);
+    if (a === null || b === null) continue;
+    out.push(a - b);
+  }
+  return out;
+}
 
 interface Scored {
   label: string;
   model: LeagueModelOptions;
-  rps: number;
-  points: number;
-  deltaRps: number;
+  value: number;
+  delta: number;
   pValue: number;
   gapToMarket: number;
   disagreeGap: number;
@@ -144,116 +189,87 @@ interface Scored {
 const results: Scored[] = [];
 
 for (const candidate of candidates) {
-  const contexts = buildContexts(seasons, candidate.model);
-  const evaluations = evaluateRun(contexts, RUN, scheme);
-  const summary = summarize(evaluations.map(toPerMatchMetrics));
-
-  const diffs = evaluations.map((e, i) => baselineEval[i].rps - e.rps);
-  const test = pairedBootstrap(diffs, { iterations: 4000 });
-
+  const contexts = buildContexts(seasons, candidate.model, allMatches, buildLeagueModel, source);
+  const evaluations = evaluateRun(contexts, RUN);
+  const summary = summarize(evaluations.map((e) => e.metrics));
+  const test = pairedBootstrap(pairedDiffs(evaluations), { iterations: 4000 });
   const disagree = disagreementIndices(evaluations);
-  const disagreeGap =
-    disagree.length > 0
-      ? summarize(disagree.map((i) => toPerMatchMetrics(evaluations[i]))).rps -
-        summarize(disagree.map((i) => toPerMatchMetrics(marketEval[i]))).rps
-      : 0;
 
   results.push({
     label: candidate.label,
     model: candidate.model,
-    rps: summary.rps,
-    points: summary.pointsPerMatch,
-    deltaRps: test.meanDiff,
+    value: obj.of(summary),
+    delta: test.meanDiff,
     pValue: test.pValue,
-    gapToMarket: summary.rps - marketSummary.rps,
-    disagreeGap,
+    gapToMarket: obj.of(summary) - obj.of(marketSummary),
+    disagreeGap: objectiveGapOn(disagree, evaluations),
     disagreeCount: disagree.length,
-    accepted: test.meanDiff > ACCEPT_THRESHOLD && test.pValue < 0.05,
+    accepted: test.meanDiff > threshold && test.pValue < 0.05,
   });
 }
 
-results.sort((a, b) => b.deltaRps - a.deltaRps);
+results.sort((a, b) => b.delta - a.delta);
 
-console.log(
-  "Kandidat                        RPS      Pkt      ΔRPS      p       Abst.Markt   Widerspruch"
-);
+console.log("Kandidat                          Wert       Δ         p       Abst.Markt   Widerspruch");
 console.log("".padEnd(100, "-"));
 for (const r of results) {
-  const mark = r.accepted ? "✓" : r.deltaRps > 0 ? "·" : " ";
+  const mark = r.accepted ? "✓" : r.delta > 0 ? "·" : " ";
   console.log(
-    `${mark} ${r.label.padEnd(30)} ${r.rps.toFixed(4)}  ${r.points.toFixed(3)}  ` +
-      `${r.deltaRps >= 0 ? "+" : ""}${r.deltaRps.toFixed(4)}  ${r.pValue.toFixed(3)}   ` +
-      `${r.gapToMarket >= 0 ? "+" : ""}${r.gapToMarket.toFixed(4)}      ` +
-      `${r.disagreeGap >= 0 ? "+" : ""}${r.disagreeGap.toFixed(4)} (${r.disagreeCount})`
+    `${mark} ${r.label.padEnd(30)} ${r.value.toFixed(4)}  ${formatSigned(r.delta)}  ` +
+      `${r.pValue.toFixed(3)}   ${formatSigned(r.gapToMarket)}      ` +
+      `${formatSigned(r.disagreeGap)} (${r.disagreeCount})`
   );
 }
 
 const accepted = results.filter((r) => r.accepted);
 console.log(
-  `\n${accepted.length} von ${results.length} Kandidaten ueberschreiten ${ACCEPT_THRESHOLD} RPS bei p < 0.05.`
+  `\n${accepted.length} von ${results.length} Kandidaten ueberschreiten ${threshold} bei p < 0.05.`
 );
 
 // ---------------------------------------------------------------------------
-// Matrixparameter. RHO = -0.15 und DRAW_BOOST = 1.2 sind seit jeher geraten und nie
-// gemessen worden. DRAW_BOOST ist dabei kein Wahrscheinlichkeitsmodell, sondern ein
-// Eingriff: er blaeht jede Unentschieden-Zelle auf und drueckt nach der Normalisierung
-// Heim- und Auswaertssieg. Auf einer Kalibrierungsmetrik wie dem RPS sollte sich das
-// zeigen.
+// Matrixparameter. Sie kosten keinen Refit und werden deshalb getrennt und feiner
+// durchsucht -- und zwar auf ALLEN Zielgroessen gleichzeitig, weil RHO und DRAW_BOOST
+// genau die Dimension betreffen, fuer die der RPS blind ist.
+
 console.log("\n\n=== Matrixparameter (kein Refit noetig) ===\n");
 
-function rpsOf(spec: RunSpec): { rps: number; points: number; diffs: number[] } {
-  const evaluations = evaluateRun(baselineContexts, spec, scheme);
-  const summary = summarize(evaluations.map(toPerMatchMetrics));
-  return {
-    rps: summary.rps,
-    points: summary.pointsPerMatch,
-    diffs: evaluations.map((e, i) => baselineEval[i].rps - e.rps),
-  };
+function scanRow(spec: RunSpec): string {
+  const evaluations = evaluateRun(baselineContexts, spec);
+  const s = summarize(evaluations.map((e) => e.metrics));
+  const test = pairedBootstrap(pairedDiffs(evaluations), { iterations: 4000 });
+  return (
+    `${s.rps.toFixed(4)}  ${s.logLoss.toFixed(4)}   ${s.totalsLogLoss.toFixed(4)}  ` +
+    `${s.scoreLogLoss.toFixed(4)}   ${formatSigned(test.meanDiff)}  ${test.pValue.toFixed(3)}`
+  );
 }
+
+const DRAW_BOOSTS = [0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25];
+const RHOS = [-0.3, -0.25, -0.2, -0.15, -0.1, -0.05, 0, 0.05];
 
 console.log("DRAW_BOOST (bei RHO = -0.15)");
-console.log("  Wert     RPS      Pkt      ΔRPS      p");
+console.log("  Wert      RPS   LogLoss     O/U     Score      Δ Ziel      p");
 for (const drawBoost of DRAW_BOOSTS) {
-  const r = rpsOf({ ...RUN, drawBoost });
-  const test = pairedBootstrap(r.diffs, { iterations: 4000 });
-  const mark = Math.abs(drawBoost - 1.2) < 1e-9 ? "  <- aktuell" : "";
-  console.log(
-    `  ${drawBoost.toFixed(2)}    ${r.rps.toFixed(4)}  ${r.points.toFixed(3)}  ` +
-      `${test.meanDiff >= 0 ? "+" : ""}${test.meanDiff.toFixed(4)}  ${test.pValue.toFixed(3)}${mark}`
-  );
+  const mark = Math.abs(drawBoost - 1.0) < 1e-9 ? "  <- aktuell" : "";
+  console.log(`  ${drawBoost.toFixed(2)}    ${scanRow({ ...RUN, drawBoost })}${mark}`);
 }
 
-console.log("\nRHO (bei bestem DRAW_BOOST)");
-const bestBoost = DRAW_BOOSTS.map((b) => ({ b, rps: rpsOf({ ...RUN, drawBoost: b }).rps })).sort(
-  (x, y) => x.rps - y.rps
-)[0].b;
-console.log(`  (bestes DRAW_BOOST: ${bestBoost})`);
-console.log("  Wert     RPS      Pkt      ΔRPS      p");
+console.log("\nRHO (bei DRAW_BOOST = 1.0)");
+console.log("  Wert      RPS   LogLoss     O/U     Score      Δ Ziel      p");
 for (const rho of RHOS) {
-  const r = rpsOf({ ...RUN, rho, drawBoost: bestBoost });
-  const test = pairedBootstrap(r.diffs, { iterations: 4000 });
   const mark = Math.abs(rho + 0.15) < 1e-9 ? "  <- aktuell" : "";
-  console.log(
-    `  ${rho >= 0 ? " " : ""}${rho.toFixed(2)}    ${r.rps.toFixed(4)}  ${r.points.toFixed(3)}  ` +
-      `${test.meanDiff >= 0 ? "+" : ""}${test.meanDiff.toFixed(4)}  ${test.pValue.toFixed(3)}${mark}`
-  );
+  console.log(`  ${rho >= 0 ? " " : ""}${rho.toFixed(2)}    ${scanRow({ ...RUN, rho })}${mark}`);
 }
 
 if (accepted.length > 0) {
   const best = accepted[0];
-  console.log(`\nBester: ${best.label}  ${JSON.stringify(best.model)}`);
+  console.log(`\nBester Kandidat: ${best.label}  ${JSON.stringify(best.model)}`);
   console.log(
-    `  modelOnly-RPS ${baselineSummary.rps.toFixed(4)} -> ${best.rps.toFixed(4)}  ` +
-      `(Markt: ${marketSummary.rps.toFixed(4)})`
+    `  ${obj.label}: ${obj.of(baselineSummary).toFixed(4)} -> ${best.value.toFixed(4)}  ` +
+      `(Markt: ${obj.of(marketSummary).toFixed(4)})`
   );
-  console.log(
-    `  Abstand zum Markt: ${(baselineSummary.rps - marketSummary.rps).toFixed(4)} -> ${best.gapToMarket.toFixed(4)}`
-  );
-  console.log(
-    `  In den Widerspruchsfaellen: ${baseDisagreeGap.toFixed(4)} -> ${best.disagreeGap.toFixed(4)}`
-  );
+  console.log(`  Abstand zum Markt: ${formatSigned(startGap)} -> ${formatSigned(best.gapToMarket)}`);
   console.log(
     `\nDer Gewinner ist als Maximum ueber ${results.length} Kandidaten optimistisch verzerrt.\n` +
-      `Ehrlich wird die Zahl erst im Testset-Report.`
+      `Ehrlich wird die Zahl erst auf dem Testset.`
   );
 }

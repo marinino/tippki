@@ -7,22 +7,36 @@
 //
 // Die Ergebnisse werden hier zur Laufzeit dazugejoint, nicht im Log gespeichert -- das
 // Log bleibt append-only und unveraenderlich, und damit ist es als Evidenz brauchbar.
+//
+// Ausgewertet werden dieselben Maerkte wie im Backtest: 1X2, Over/Under 2.5 und das
+// exakte Ergebnis. Die Frage ist immer dieselbe -- bringt der recherchierte Spielkontext
+// prospektiv etwas, oder nicht?
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
-import { formatSummary, outcomeOf, summarize, type PerMatchMetrics } from "../eval/metrics";
-import { rankedProbabilityScore, logLoss, brierScore, argmaxOutcome } from "../eval/metrics";
+import { loadAllMatches } from "../data/loadMatches";
+import {
+  argmaxOutcome,
+  binaryBrier,
+  binaryLogLoss,
+  brierScore,
+  formatSummary,
+  logLoss,
+  outcomeOf,
+  rankedProbabilityScore,
+  scoreLogLoss,
+  summarize,
+  type OutcomeProbs,
+  type PerMatchMetrics,
+} from "../eval/metrics";
 import { formatBootstrap, formatMcNemar, mcnemarExact, pairedBootstrap } from "../eval/significance";
-import { pointsFor, resolveScheme } from "../eval/scoringScheme";
 
 const LOG_PATH = join(process.cwd(), "data", "forward_log.jsonl");
 
 interface Variant {
-  tip: string;
-  expectedPoints: number;
-  probs: { homeWinProb: number; drawProb: number; awayWinProb: number };
-  constraints: string[];
+  probs: OutcomeProbs;
+  over25: number | null;
+  topScores: { score: string; prob: number }[];
 }
 
 interface LogEntry {
@@ -32,7 +46,6 @@ interface LogEntry {
   awayTeam: string;
   kickoff: string;
   configHash: string;
-  scheme: string;
   variants: Record<string, Variant>;
 }
 
@@ -58,7 +71,6 @@ if (entries.length === 0) {
   process.exit(0);
 }
 
-// Ergebnisse dazujoinen.
 const results = new Map<string, { homeGoals: number; awayGoals: number }>();
 for (const m of loadAllMatches()) {
   results.set(`${m.season}|${m.homeTeam}|${m.awayTeam}`, {
@@ -81,9 +93,15 @@ const groups = pool
   ? [{ hash: "alle (gepoolt)", entries }]
   : configs.map((hash) => ({ hash, entries: entries.filter((e) => e.configHash === hash) }));
 
-for (const group of groups) {
-  const scheme = resolveScheme(group.entries[0].scheme);
+// Aus den zehn geloggten Spitzenergebnissen. Steht das tatsaechliche Ergebnis nicht
+// darunter, ist seine Wahrscheinlichkeit unbekannt und die Zeile traegt zum
+// Correct-Score-Vergleich nichts bei -- lieber eine Luecke als eine erfundene Zahl.
+function scoreProbOf(variant: Variant, homeGoals: number, awayGoals: number): number | null {
+  const hit = variant.topScores?.find((s) => s.score === `${homeGoals}:${awayGoals}`);
+  return hit ? hit.prob : null;
+}
 
+for (const group of groups) {
   const settled: { entry: LogEntry; homeGoals: number; awayGoals: number }[] = [];
   let pending = 0;
   for (const entry of group.entries) {
@@ -95,7 +113,7 @@ for (const group of groups) {
     settled.push({ entry, ...result });
   }
 
-  console.log(`\n=== Konfiguration ${group.hash}, Schema "${scheme.label}" ===`);
+  console.log(`\n=== Konfiguration ${group.hash} ===`);
   console.log(
     `${group.entries.length} protokollierte Spiele, davon ${settled.length} ausgewertet, ` +
       `${pending} noch offen.`
@@ -117,68 +135,78 @@ for (const group of groups) {
     for (const s of settled) {
       const variant = s.entry.variants[name];
       if (!variant) continue;
-      const [tipHome, tipAway] = variant.tip.split(":").map(Number);
       const actual = outcomeOf(s.homeGoals, s.awayGoals);
+      const overHappened = s.homeGoals + s.awayGoals > 2.5;
+      const cellProb = scoreProbOf(variant, s.homeGoals, s.awayGoals);
+
       rows.push({
         predicted: argmaxOutcome(variant.probs),
         actual,
-        exactHit: tipHome === s.homeGoals && tipAway === s.awayGoals,
-        points: pointsFor(tipHome, tipAway, s.homeGoals, s.awayGoals, scheme),
-        expectedPoints: variant.expectedPoints,
         rps: rankedProbabilityScore(variant.probs, actual),
         logLoss: logLoss(variant.probs, actual),
         brier: brierScore(variant.probs, actual),
+        totals:
+          variant.over25 === null
+            ? null
+            : {
+                logLoss: binaryLogLoss(variant.over25, overHappened),
+                brier: binaryBrier(variant.over25, overHappened),
+              },
+        handicap: null,
+        scoreLogLoss: cellProb === null ? null : scoreLogLoss(cellProb),
       });
     }
     perVariant.set(name, rows);
     console.log(formatSummary(name, summarize(rows)));
   }
 
-  // Gepaarte Vergleiche gegen den Ausgangszustand.
-  const baseline = "legacyArgmax";
-  if (perVariant.has(baseline)) {
-    console.log(`\nGepaart gegen "${baseline}" (positiv = Variante besser):`);
-    const baseRows = perVariant.get(baseline)!;
-
-    for (const name of variantNames) {
-      if (name === baseline) continue;
-      const rows = perVariant.get(name)!;
-      if (rows.length !== baseRows.length) continue;
-
-      let onlyA = 0;
-      let onlyB = 0;
-      const pointsDiffs: number[] = [];
-      for (let i = 0; i < rows.length; i++) {
-        const aRight = rows[i].predicted === rows[i].actual;
-        const bRight = baseRows[i].predicted === baseRows[i].actual;
-        if (aRight && !bRight) onlyA++;
-        else if (!aRight && bRight) onlyB++;
-        pointsDiffs.push(rows[i].points - baseRows[i].points);
-      }
-
-      console.log(`  ${name}`);
-      console.log(`    ${formatMcNemar("Tendenz", mcnemarExact(onlyA, onlyB))}`);
-      console.log(`    ${formatBootstrap("Punkte/Spiel", pairedBootstrap(pointsDiffs))}`);
-    }
-  }
-
-  // Wie viel Evidenz braucht es ueberhaupt? Diese Zahl neben dem aktuellen n zu drucken
-  // verhindert, dass ein frueher, zufaellig positiver Zwischenstand ueberinterpretiert wird.
-  const fullRows = perVariant.get("full");
+  // Der eigentliche Zweck des Logs: bringt der Spielkontext etwas?
+  const baseline = "model";
+  const treatment = "withLlm";
   const baseRows = perVariant.get(baseline);
-  if (fullRows && baseRows && fullRows.length === baseRows.length && fullRows.length > 1) {
-    const diffs = fullRows.map((r, i) => r.points - baseRows[i].points);
-    const mean = diffs.reduce((s, d) => s + d, 0) / diffs.length;
-    const sd = Math.sqrt(
-      diffs.reduce((s, d) => s + (d - mean) ** 2, 0) / Math.max(1, diffs.length - 1)
-    );
-    const target = 0.3; // im Backtest gemessener Effekt
-    const needed = sd > 0 ? Math.ceil((1.96 * sd / target) ** 2) : 0;
+  const llmRows = perVariant.get(treatment);
+
+  if (baseRows && llmRows && baseRows.length === llmRows.length && baseRows.length > 0) {
+    let onlyA = 0;
+    let onlyB = 0;
+    const rpsDiffs: number[] = [];
+    const differing: number[] = [];
+
+    for (let i = 0; i < llmRows.length; i++) {
+      const aRight = llmRows[i].predicted === llmRows[i].actual;
+      const bRight = baseRows[i].predicted === baseRows[i].actual;
+      if (aRight && !bRight) onlyA++;
+      else if (!aRight && bRight) onlyB++;
+      const d = baseRows[i].rps - llmRows[i].rps;
+      rpsDiffs.push(d);
+      if (Math.abs(d) > 1e-9) differing.push(d);
+    }
+
+    console.log(`\nSpielkontext gegen Basismodell (positiv = Kontext besser):`);
+    console.log(`  ${formatMcNemar("Tendenz", mcnemarExact(onlyA, onlyB))}`);
+    console.log(`  ${formatBootstrap("RPS", pairedBootstrap(rpsDiffs))}`);
     console.log(
-      `\nStreuung der Punktedifferenz: ${sd.toFixed(2)}. Um einen Effekt von ${target} Punkten/Spiel\n` +
-        `mit 95% Sicherheit von Null zu trennen, braucht es rund ${needed} Spiele ` +
-        `(${(needed / 306).toFixed(1)} Saisons).\n` +
-        `Aktuell ausgewertet: ${fullRows.length}.`
+      `  Der Kontext hat auf ${differing.length} von ${rpsDiffs.length} Spielen ueberhaupt\n` +
+        `  etwas veraendert. Auf den uebrigen ist die Differenz exakt 0 und sie verduennen\n` +
+        `  den Mittelwert -- deshalb steht die Zahl hier daneben.`
     );
+
+    // Wie viel Evidenz braucht es ueberhaupt? Diese Zahl neben dem aktuellen n zu drucken
+    // verhindert, dass ein frueher, zufaellig positiver Zwischenstand ueberinterpretiert
+    // wird.
+    if (rpsDiffs.length > 1) {
+      const mean = rpsDiffs.reduce((s, d) => s + d, 0) / rpsDiffs.length;
+      const sd = Math.sqrt(
+        rpsDiffs.reduce((s, d) => s + (d - mean) ** 2, 0) / Math.max(1, rpsDiffs.length - 1)
+      );
+      const target = 0.005; // ein Effekt in der Groessenordnung, die den Marktabstand schliessen wuerde
+      const needed = sd > 0 ? Math.ceil(((1.96 * sd) / target) ** 2) : 0;
+      console.log(
+        `\n  Streuung der RPS-Differenz: ${sd.toFixed(4)}. Um einen Effekt von ${target} RPS mit\n` +
+          `  95% Sicherheit von Null zu trennen, braucht es rund ${needed} Spiele ` +
+          `(${(needed / 306).toFixed(1)} Saisons).\n` +
+          `  Aktuell ausgewertet: ${rpsDiffs.length}.`
+      );
+    }
   }
 }

@@ -1,18 +1,19 @@
 // Gemeinsamer Backtest-Kern.
 //
-// Ersetzt die bisher wortgleich duplizierte Logik in src/scripts/backtest.ts und
-// src/app/api/backtest/route.ts. Zwei Kopien derselben Auswertung heissen zwangslaeufig,
-// dass irgendwann nur eine davon gepflegt wird und UI und Konsole verschiedene Zahlen
-// zeigen.
-//
 // Aufbau in zwei Stufen, und das ist die wichtigste Entscheidung hier:
 //
 //   1. buildContexts() macht den teuren Teil -- Modell fitten, Formkurven berechnen,
-//      Marktquoten aufbereiten -- genau einmal pro Saison.
-//   2. evaluateVariant() ist danach reine Arithmetik ueber 121 Matrixzellen pro Spiel.
+//      Referenzquoten aufbereiten -- genau einmal pro Saison.
+//   2. evaluateRun() ist danach reine Arithmetik ueber 121 Matrixzellen pro Spiel.
 //
 // Dadurch kostet das Durchprobieren einer weiteren Parametrisierung Millisekunden statt
-// Sekunden. Ohne diese Trennung waere die Hyperparametersuche in Phase 2 nicht machbar.
+// Sekunden. Ohne diese Trennung waere die Hyperparametersuche nicht machbar.
+//
+// Bewertet werden VIER Maerkte statt einem: 1X2, Torsumme ueber 2.5, Asian Handicap auf
+// der Linie des Buchmachers und das exakte Ergebnis. Das ist der Unterschied zwischen
+// "das Modell trifft die Tendenz" und "das Modell kann eine Verteilung bepreisen". Auf
+// 1X2 allein sind Modell und Markt seit jeher fast gleichauf; die Frage, ob ein Heimsieg
+// eher 1:0 oder 3:1 ausfaellt, hat bisher schlicht niemand gemessen.
 
 import { loadAllMatches, parseMatchDate, type Match } from "../data/loadMatches";
 import {
@@ -22,34 +23,36 @@ import {
 } from "../model/teamStrength";
 import { baseLambdas } from "../model/predictMatch";
 import {
-  argmaxCell,
   buildDixonColesMatrix,
+  goalDifferenceMarginal,
   outcomeMasses,
-  reweightToOutcomeMasses,
+  scoreProb,
+  totalGoalsMarginal,
+  type ScoreMatrix,
 } from "../model/scoreMatrix";
-import { expectedPointsForTip, selectEvTip } from "../model/tipSelector";
-import {
-  applyConstraints,
-  devigTwoWay,
-  outcomeConstraint,
-  totalOverConstraint,
-  type MatrixConstraint,
-} from "../model/marketConstraints";
 import { XG_FORM_WEIGHT, computeXgForm, computeXgFormResidual } from "../model/xgForm";
-import { ODDS_BLEND_ALPHA, blendWithMarket, impliedProbabilities } from "../model/marketOdds";
+import {
+  benchmarkQuote,
+  DEFAULT_BENCHMARK,
+  type BenchmarkQuote,
+  type BenchmarkSource,
+} from "./benchmarkOdds";
 import {
   argmaxOutcome,
+  binaryBrier,
+  binaryLogLoss,
   brierScore,
   logLoss,
   outcomeOf,
   rankedProbabilityScore,
+  scoreLogLoss,
   summarize,
+  type BinaryScores,
   type MetricSummary,
   type Outcome,
   type OutcomeProbs,
   type PerMatchMetrics,
 } from "./metrics";
-import { resolveScheme, pointsFor, type ScoringScheme } from "./scoringScheme";
 import { seasonsFor, type SplitName } from "./splits";
 import {
   mcnemarExact,
@@ -57,6 +60,8 @@ import {
   type BootstrapResult,
   type McNemarResult,
 } from "./significance";
+
+export const TOTALS_LINE = 2.5;
 
 export interface PredictionContext {
   season: string;
@@ -66,6 +71,7 @@ export interface PredictionContext {
   actualHome: number;
   actualAway: number;
   actual: Outcome;
+  actualTotal: number;
   // Torerwartungen aus den gefitteten Staerken, Formexponent NOCH NICHT angewandt.
   baseLambdaHome: number;
   baseLambdaAway: number;
@@ -78,17 +84,27 @@ export interface PredictionContext {
   awayFormResidual: number;
   homeIsEstimated: boolean;
   awayIsEstimated: boolean;
-  market1x2: OutcomeProbs | null;
-  // Entvigte Marktwahrscheinlichkeit fuer "mehr als 2.5 Tore". Die einzige Totals-Linie
-  // in den historischen Daten; live gibt es eine ganze Leiter.
-  totalsOverProb: number | null;
+  // Die Messlatte. Wird NIE in eine Vorhersage eingespeist, nur danebengelegt.
+  benchmark: BenchmarkQuote | null;
+}
+
+// Empirische Verteilungen der Trainingsspiele. Referenz ohne jede Modellleistung -- wer
+// sie nicht schlaegt, hat nichts gelernt. Bisher gab es diese Untergrenze nur fuer 1X2;
+// jetzt fuer jeden bewerteten Markt, sonst waere zum Beispiel ein Correct-Score-LogLoss
+// von 2.9 eine Zahl ohne jeden Bezugspunkt.
+export interface BaseRates {
+  outcome: OutcomeProbs;
+  overProb: number;
+  // scoreProbs[h][a], auf dieselbe Kantenlaenge wie die Modellmatrix beschnitten.
+  scoreProbs: number[][];
+  // diffProbs[d + maxGoals] = P(Tordifferenz == d).
+  diffProbs: Float64Array;
 }
 
 export interface SeasonContexts {
   season: string;
   trainMatchCount: number;
-  // Empirische H/U/A-Haeufigkeit der Trainingsspiele -- Referenz ohne jede Modellleistung.
-  trainBaseRate: OutcomeProbs;
+  baseRates: BaseRates;
   contexts: PredictionContext[];
 }
 
@@ -99,7 +115,8 @@ export function buildContexts(
   allMatches = loadAllMatches(),
   // Injizierbar, damit der Konvergenz-Audit denselben Auswertungspfad mit dem alten
   // Gradientenfit durchlaufen lassen kann. Sonst waere der Vergleich nicht gepaart.
-  buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel
+  buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
+  benchmark: BenchmarkSource = DEFAULT_BENCHMARK
 ): SeasonContexts[] {
   return seasons.map((testSeason) => {
     const trainMatches = allMatches.filter((m) => m.season < testSeason);
@@ -118,6 +135,7 @@ export function buildContexts(
         actualHome: match.homeGoals,
         actualAway: match.awayGoals,
         actual: outcomeOf(match.homeGoals, match.awayGoals),
+        actualTotal: match.homeGoals + match.awayGoals,
         baseLambdaHome: base.lambdaHome,
         baseLambdaAway: base.lambdaAway,
         homeForm: computeXgForm(match.homeTeam, matchDate),
@@ -126,77 +144,80 @@ export function buildContexts(
         awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
         homeIsEstimated: base.homeIsEstimated,
         awayIsEstimated: base.awayIsEstimated,
-        market1x2: marketProbsOf(match),
-        totalsOverProb:
-          match.oddsOver25 && match.oddsUnder25
-            ? devigTwoWay(match.oddsOver25, match.oddsUnder25)
-            : null,
+        benchmark: benchmarkQuote(match, benchmark),
       };
     });
 
     return {
       season: testSeason,
       trainMatchCount: trainMatches.length,
-      trainBaseRate: baseRateOf(trainMatches),
+      baseRates: baseRatesOf(trainMatches),
       contexts,
     };
   });
 }
 
-function marketProbsOf(match: Match): OutcomeProbs | null {
-  if (!match.oddsHome || !match.oddsDraw || !match.oddsAway) return null;
-  return impliedProbabilities(match.oddsHome, match.oddsDraw, match.oddsAway);
-}
+const BASE_RATE_MAX_GOALS = 10;
 
-function baseRateOf(matches: Match[]): OutcomeProbs {
-  if (matches.length === 0) return { homeWinProb: 1 / 3, drawProb: 1 / 3, awayWinProb: 1 / 3 };
+// Laplace-Glaettung mit einem Pseudospiel je Zelle. Ohne sie bekaeme ein in den
+// Trainingsdaten nie vorgekommenes Ergebnis (etwa 7:5) die Wahrscheinlichkeit 0 und damit
+// LogLoss = 34.5 -- eine einzige solche Zelle wuerde den Mittelwert der Referenz
+// dominieren und den Vergleich wertlos machen.
+function baseRatesOf(matches: Match[]): BaseRates {
+  const size = BASE_RATE_MAX_GOALS + 1;
+  const counts = Array.from({ length: size }, () => new Array<number>(size).fill(1));
+  const diffCounts = new Float64Array(2 * BASE_RATE_MAX_GOALS + 1).fill(1);
+
   let home = 0;
   let draw = 0;
+  let over = 0;
+  let cellTotal = size * size;
+  let diffTotal = diffCounts.length;
+
   for (const m of matches) {
     const o = outcomeOf(m.homeGoals, m.awayGoals);
     if (o === "H") home++;
     else if (o === "D") draw++;
+    if (m.homeGoals + m.awayGoals > TOTALS_LINE) over++;
+
+    const h = Math.min(m.homeGoals, BASE_RATE_MAX_GOALS);
+    const a = Math.min(m.awayGoals, BASE_RATE_MAX_GOALS);
+    counts[h][a]++;
+    cellTotal++;
+    diffCounts[h - a + BASE_RATE_MAX_GOALS]++;
+    diffTotal++;
   }
+
   const n = matches.length;
+  const outcome: OutcomeProbs =
+    n === 0
+      ? { homeWinProb: 1 / 3, drawProb: 1 / 3, awayWinProb: 1 / 3 }
+      : { homeWinProb: home / n, drawProb: draw / n, awayWinProb: (n - home - draw) / n };
+
   return {
-    homeWinProb: home / n,
-    drawProb: draw / n,
-    awayWinProb: (n - home - draw) / n,
+    outcome,
+    overProb: n === 0 ? 0.5 : over / n,
+    scoreProbs: counts.map((row) => row.map((c) => c / cellTotal)),
+    diffProbs: diffCounts.map((c) => c / diffTotal) as Float64Array,
   };
 }
 
-// modelOnly   -- reines Modell, reproduziert die historische 52.5%-Zahl
-// blended     -- 50/50 Modell + Markt, reproduziert die historische 53.0%-Zahl
-// pureMarket  -- nur die entvigten Buchmacherquoten. Diese Zahl kannte bisher niemand,
-//                und sie entscheidet, ob das Modell zur 1X2-Prognose ueberhaupt etwas
-//                beitraegt oder ob der Blend nur den Markt verwaessert.
-// baseRate    -- Trainingshaeufigkeit von H/U/A. Ihr Argmax ist immer "H", die
-//                Trefferquote ist also gleichzeitig die "immer Heimsieg"-Untergrenze,
-//                und ihr RPS ist die kalibrierte Nullreferenz.
-export type VariantName = "modelOnly" | "blended" | "pureMarket" | "baseRate";
+// model      -- das eigenstaendige Modell. Die Zielgroesse dieses Projekts.
+// benchmark  -- die entvigte Buchmacher-Schlussquote. Die zu schlagende Messlatte.
+// baseRate   -- empirische Haeufigkeiten der Trainingsspiele. Die Untergrenze.
+export type VariantName = "model" | "benchmark" | "baseRate";
 
-export const ALL_VARIANTS: VariantName[] = ["modelOnly", "blended", "pureMarket", "baseRate"];
+export const ALL_VARIANTS: VariantName[] = ["model", "benchmark", "baseRate"];
 
-// Wie der abzugebende Tipp aus der Matrix gewaehlt wird.
-//
-// argmaxLegacy      Argmax der UNKORRIGIERTEN Modellmatrix. Das ist der Ist-Zustand --
-//                   der angezeigte Tipp ignoriert die Marktquoten vollstaendig, auch
-//                   wenn die 1X2-Balken daneben geblendet sind.
-// argmaxReweighted  Argmax der marktkorrigierten Matrix. Isoliert den reinen Effekt,
-//                   die Marktinformation ueberhaupt in den Tipp zu lassen.
-// ev                Punkte-Erwartungswert auf der marktkorrigierten Matrix. Das Ziel.
-export type TipMode = "argmaxLegacy" | "argmaxReweighted" | "ev";
+export const VARIANT_LABELS: Record<VariantName, string> = {
+  model: "Modell",
+  benchmark: "Buchmacher",
+  baseRate: "Grundrate",
+};
 
 export interface RunSpec {
   name: string;
   variant: VariantName;
-  tipMode: TipMode;
-  // Over/Under-2.5-Bedingung zusaetzlich auf die Score-Matrix legen. Der 1X2-Blend
-  // korrigiert nur, WIE das Spiel ausgeht -- diese Bedingung korrigiert, wie viele Tore
-  // dabei fallen. Genau das entscheidet ueber Exakt- und Tordifferenz-Punkte.
-  useTotals?: boolean;
-  // Staerke der Marktbedingungen im IPF: 0 = ignorieren, 1 = voll erzwingen.
-  marketStrength?: number;
   // Gewicht der Formkurve. Default ist der produktive Wert aus xgForm.ts.
   xgFormWeight?: number;
   // "diff" = rohe xG-Differenz (Ist-Zustand), "residual" = Abweichung vom Normalniveau.
@@ -214,90 +235,132 @@ export interface MatchEvaluation {
   actualHome: number;
   actualAway: number;
   actual: Outcome;
-  lambdaHome: number;
-  lambdaAway: number;
-  modelProbs: OutcomeProbs;
-  marketProbs: OutcomeProbs | null;
-  finalProbs: OutcomeProbs;
+  probs: OutcomeProbs;
   predicted: Outcome;
-  tip: string;
-  // Was das Modell fuer diesen Tipp an Punkten erwartet. Der Abstand zum tatsaechlichen
-  // Punkteschnitt ist ein direkter Kalibrierungstest.
-  expectedPoints: number;
-  points: number;
-  exactHit: boolean;
-  rps: number;
-  logLoss: number;
-  brier: number;
+  // Was die Variante auf den Zusatzmaerkten sagt. null = bepreist sie nicht.
+  overProb: number | null;
+  handicapLine: number | null;
+  handicapHomeProb: number | null;
+  exactScoreProb: number | null;
+  // Nur bei der Modellvariante gesetzt -- fuer Diagnose und fuer das Preisblatt.
+  matrix: ScoreMatrix | null;
+  // Die Referenz auf demselben Spiel, damit Skripte den Abstand direkt bilden koennen.
+  benchmarkProbs: OutcomeProbs | null;
+  metrics: PerMatchMetrics;
 }
 
-export function toPerMatchMetrics(e: MatchEvaluation): PerMatchMetrics {
+function binary(prob: number, happened: boolean): BinaryScores {
+  return { logLoss: binaryLogLoss(prob, happened), brier: binaryBrier(prob, happened) };
+}
+
+interface VariantPrediction {
+  probs: OutcomeProbs;
+  overProb: number | null;
+  handicapHomeProb: number | null;
+  exactScoreProb: number | null;
+  matrix: ScoreMatrix | null;
+}
+
+// P(Tordifferenz > -line), also die Seite, auf der Heim das Handicap deckt.
+function coverProbFromMarginal(
+  diffMarginal: Float64Array,
+  maxGoals: number,
+  line: number
+): number {
+  let sum = 0;
+  for (let d = Math.max(Math.ceil(-line), -maxGoals); d <= maxGoals; d++) {
+    sum += diffMarginal[d + maxGoals];
+  }
+  return sum;
+}
+
+function predictVariant(
+  variant: VariantName,
+  ctx: PredictionContext,
+  spec: RunSpec,
+  baseRates: BaseRates
+): VariantPrediction | null {
+  const line = ctx.benchmark?.handicap?.line ?? null;
+
+  if (variant === "benchmark") {
+    if (!ctx.benchmark) return null;
+    return {
+      probs: ctx.benchmark.probs,
+      overProb: ctx.benchmark.totalsOverProb,
+      handicapHomeProb: ctx.benchmark.handicap?.homeCoverProb ?? null,
+      exactScoreProb: null,
+      matrix: null,
+    };
+  }
+
+  if (variant === "baseRate") {
+    const h = Math.min(ctx.actualHome, BASE_RATE_MAX_GOALS);
+    const a = Math.min(ctx.actualAway, BASE_RATE_MAX_GOALS);
+    return {
+      probs: baseRates.outcome,
+      overProb: baseRates.overProb,
+      handicapHomeProb:
+        line === null
+          ? null
+          : coverProbFromMarginal(baseRates.diffProbs, BASE_RATE_MAX_GOALS, line),
+      exactScoreProb: baseRates.scoreProbs[h][a],
+      matrix: null,
+    };
+  }
+
+  const formWeight = spec.xgFormWeight ?? XG_FORM_WEIGHT;
+  const residual = spec.formMode === "residual";
+  const homeForm = residual ? ctx.homeFormResidual : ctx.homeForm;
+  const awayForm = residual ? ctx.awayFormResidual : ctx.awayForm;
+  const matrix = buildDixonColesMatrix(
+    ctx.baseLambdaHome * Math.exp(formWeight * homeForm),
+    ctx.baseLambdaAway * Math.exp(formWeight * awayForm),
+    { rho: spec.rho, drawBoost: spec.drawBoost }
+  );
+
+  const totalMarginal = totalGoalsMarginal(matrix);
+  let over = 0;
+  for (let k = Math.ceil(TOTALS_LINE); k < totalMarginal.length; k++) over += totalMarginal[k];
+
   return {
-    predicted: e.predicted,
-    actual: e.actual,
-    exactHit: e.exactHit,
-    points: e.points,
-    expectedPoints: e.expectedPoints,
-    rps: e.rps,
-    logLoss: e.logLoss,
-    brier: e.brier,
+    probs: outcomeMasses(matrix),
+    overProb: over,
+    handicapHomeProb:
+      line === null
+        ? null
+        : coverProbFromMarginal(goalDifferenceMarginal(matrix), matrix.maxGoals, line),
+    exactScoreProb: scoreProb(matrix, ctx.actualHome, ctx.actualAway),
+    matrix,
   };
+}
+
+export interface EvaluateOptions {
+  // Matrizen mitliefern. Kostet Speicher und ist fuer die Hyperparametersuche unnoetig.
+  keepMatrices?: boolean;
+  // Nur Spiele auswerten, fuer die eine Referenzquote vorliegt. Ohne das laufen Modell
+  // und Buchmacher auf verschiedenen Spielmengen und jeder gepaarte Test ist hinfaellig.
+  requireBenchmark?: boolean;
 }
 
 export function evaluateRun(
   seasonContexts: SeasonContexts[],
   spec: RunSpec,
-  scheme: ScoringScheme
+  options: EvaluateOptions = {}
 ): MatchEvaluation[] {
+  const requireBenchmark = options.requireBenchmark ?? true;
   const evaluations: MatchEvaluation[] = [];
 
   for (const season of seasonContexts) {
     for (const ctx of season.contexts) {
-      const formWeight = spec.xgFormWeight ?? XG_FORM_WEIGHT;
-      const residual = spec.formMode === "residual";
-      const homeForm = residual ? ctx.homeFormResidual : ctx.homeForm;
-      const awayForm = residual ? ctx.awayFormResidual : ctx.awayForm;
-      const lambdaHome = ctx.baseLambdaHome * Math.exp(formWeight * homeForm);
-      const lambdaAway = ctx.baseLambdaAway * Math.exp(formWeight * awayForm);
+      if (requireBenchmark && !ctx.benchmark) continue;
 
-      const modelMatrix = buildDixonColesMatrix(lambdaHome, lambdaAway, {
-        rho: spec.rho,
-        drawBoost: spec.drawBoost,
-      });
-      const modelProbs = outcomeMasses(modelMatrix);
-      const finalProbs = finalProbsFor(spec.variant, modelProbs, ctx.market1x2, season.trainBaseRate);
+      const p = predictVariant(spec.variant, ctx, spec, season.baseRates);
+      if (!p) continue;
 
-      // Marktbedingungen auf die Matrix legen. Mit nur der 1X2-Bedingung ist das
-      // beweisbar identisch zu reweightToOutcomeMasses (siehe selfCheck.ts), die alten
-      // Zahlen bleiben also erhalten; die Totals-Bedingung kommt additiv dazu.
-      const constraints: MatrixConstraint[] = [];
-      if (spec.tipMode !== "argmaxLegacy") {
-        if (finalProbs !== modelProbs) {
-          constraints.push(outcomeConstraint(modelMatrix.maxGoals, finalProbs));
-        }
-        if (spec.useTotals && ctx.totalsOverProb !== null) {
-          constraints.push(totalOverConstraint(modelMatrix.maxGoals, 2.5, ctx.totalsOverProb));
-        }
-      }
-
-      const tipMatrix =
-        constraints.length > 0
-          ? applyConstraints(modelMatrix, constraints, { strength: spec.marketStrength ?? 1 }).matrix
-          : modelMatrix;
-
-      let tip: string;
-      let expectedPoints: number;
-      if (spec.tipMode === "ev") {
-        const choice = selectEvTip(tipMatrix, scheme);
-        tip = choice.tip;
-        expectedPoints = choice.expectedPoints;
-      } else {
-        tip = argmaxCell(tipMatrix);
-        const [h, a] = tip.split(":").map(Number);
-        expectedPoints = expectedPointsForTip(tipMatrix, h, a, scheme);
-      }
-
-      const [tipHome, tipAway] = tip.split(":").map(Number);
+      const overHappened = ctx.actualTotal > TOTALS_LINE;
+      const line = ctx.benchmark?.handicap?.line ?? null;
+      const covered =
+        line === null ? null : ctx.actualHome - ctx.actualAway > -line;
 
       evaluations.push({
         season: ctx.season,
@@ -307,19 +370,27 @@ export function evaluateRun(
         actualHome: ctx.actualHome,
         actualAway: ctx.actualAway,
         actual: ctx.actual,
-        lambdaHome,
-        lambdaAway,
-        modelProbs,
-        marketProbs: ctx.market1x2,
-        finalProbs,
-        predicted: argmaxOutcome(finalProbs),
-        tip,
-        expectedPoints,
-        points: pointsFor(tipHome, tipAway, ctx.actualHome, ctx.actualAway, scheme),
-        exactHit: tipHome === ctx.actualHome && tipAway === ctx.actualAway,
-        rps: rankedProbabilityScore(finalProbs, ctx.actual),
-        logLoss: logLoss(finalProbs, ctx.actual),
-        brier: brierScore(finalProbs, ctx.actual),
+        probs: p.probs,
+        predicted: argmaxOutcome(p.probs),
+        overProb: p.overProb,
+        handicapLine: line,
+        handicapHomeProb: p.handicapHomeProb,
+        exactScoreProb: p.exactScoreProb,
+        matrix: options.keepMatrices ? p.matrix : null,
+        benchmarkProbs: ctx.benchmark?.probs ?? null,
+        metrics: {
+          predicted: argmaxOutcome(p.probs),
+          actual: ctx.actual,
+          rps: rankedProbabilityScore(p.probs, ctx.actual),
+          logLoss: logLoss(p.probs, ctx.actual),
+          brier: brierScore(p.probs, ctx.actual),
+          totals: p.overProb === null ? null : binary(p.overProb, overHappened),
+          handicap:
+            p.handicapHomeProb === null || covered === null
+              ? null
+              : binary(p.handicapHomeProb, covered),
+          scoreLogLoss: p.exactScoreProb === null ? null : scoreLogLoss(p.exactScoreProb),
+        },
       });
     }
   }
@@ -327,27 +398,11 @@ export function evaluateRun(
   return evaluations;
 }
 
-// Ohne Quoten faellt jede marktbasierte Variante auf das Modell zurueck. Dadurch bleiben
-// alle Varianten auf exakt derselben Spielmenge vergleichbar -- Voraussetzung fuer die
-// gepaarten Tests. runBacktest meldet, wie viele Spiele davon betroffen sind.
-function finalProbsFor(
-  variant: VariantName,
-  model: OutcomeProbs,
-  market: OutcomeProbs | null,
-  baseRate: OutcomeProbs
-): OutcomeProbs {
-  if (variant === "baseRate") return baseRate;
-  if (variant === "modelOnly" || market === null) return model;
-  if (variant === "pureMarket") return market;
-  return blendWithMarket(model, market, ODDS_BLEND_ALPHA);
-}
-
 export interface BacktestOptions {
   split?: SplitName;
   seasons?: string[];
   variant?: VariantName;
-  tipMode?: TipMode;
-  scheme?: ScoringScheme | string;
+  benchmark?: BenchmarkSource;
   includeEvaluations?: boolean;
 }
 
@@ -359,25 +414,26 @@ export interface SeasonSummary {
 
 export interface BacktestResult {
   seasons: string[];
-  scheme: ScoringScheme;
   variant: VariantName;
-  tipMode: TipMode;
+  benchmark: BenchmarkSource;
   perSeason: SeasonSummary[];
   overall: MetricSummary;
   baselines: Record<VariantName, MetricSummary>;
   evaluations: MatchEvaluation[];
-  matchesWithoutOdds: number;
+  // Spiele der Saison insgesamt und davon mit Referenzquote. Die Differenz ist die
+  // Menge, die aus dem gepaarten Vergleich herausfaellt.
+  totalMatches: number;
   totalEvaluated: number;
 }
 
 export function runBacktest(opts: BacktestOptions = {}): BacktestResult {
   const seasons = opts.seasons ?? seasonsFor(opts.split ?? "all");
-  const scheme = typeof opts.scheme === "object" ? opts.scheme : resolveScheme(opts.scheme);
-  const variant = opts.variant ?? "modelOnly";
-  const tipMode = opts.tipMode ?? "argmaxLegacy";
+  const variant = opts.variant ?? "model";
+  const benchmark = opts.benchmark ?? DEFAULT_BENCHMARK;
 
-  const seasonContexts = buildContexts(seasons);
-  const evaluations = evaluateRun(seasonContexts, { name: variant, variant, tipMode }, scheme);
+  const seasonContexts = buildContexts(seasons, {}, loadAllMatches(), buildLeagueModel, benchmark);
+  const spec: RunSpec = { name: variant, variant };
+  const evaluations = evaluateRun(seasonContexts, spec);
 
   const bySeason = new Map<string, MatchEvaluation[]>();
   for (const e of evaluations) {
@@ -389,31 +445,28 @@ export function runBacktest(opts: BacktestOptions = {}): BacktestResult {
   const perSeason: SeasonSummary[] = seasonContexts.map((s) => ({
     season: s.season,
     trainMatchCount: s.trainMatchCount,
-    summary: summarize((bySeason.get(s.season) ?? []).map(toPerMatchMetrics)),
+    summary: summarize((bySeason.get(s.season) ?? []).map((e) => e.metrics)),
   }));
 
   const baselines = {} as Record<VariantName, MetricSummary>;
   for (const name of ALL_VARIANTS) {
     baselines[name] =
       name === variant
-        ? summarize(evaluations.map(toPerMatchMetrics))
+        ? summarize(evaluations.map((e) => e.metrics))
         : summarize(
-            evaluateRun(seasonContexts, { name, variant: name, tipMode }, scheme).map(
-              toPerMatchMetrics
-            )
+            evaluateRun(seasonContexts, { name, variant: name }).map((e) => e.metrics)
           );
   }
 
   return {
     seasons,
-    scheme,
     variant,
-    tipMode,
+    benchmark,
     perSeason,
-    overall: summarize(evaluations.map(toPerMatchMetrics)),
+    overall: summarize(evaluations.map((e) => e.metrics)),
     baselines,
     evaluations: opts.includeEvaluations ? evaluations : [],
-    matchesWithoutOdds: evaluations.filter((e) => e.marketProbs === null).length,
+    totalMatches: seasonContexts.reduce((sum, s) => sum + s.contexts.length, 0),
     totalEvaluated: evaluations.length,
   };
 }
@@ -427,26 +480,24 @@ export interface RunComparison {
   // Tendenz: nur die Spiele zaehlen, auf denen sich die beiden Laeufe unterscheiden.
   tendency: McNemarResult;
   rps: BootstrapResult;
-  points: BootstrapResult;
-  // Auf wie vielen Spielen weicht der abgegebene Tipp ueberhaupt ab. Spiele mit
-  // identischem Tipp tragen null zur Punktedifferenz bei; ohne diese Zahl sieht ein
-  // kleiner Mittelwert nach schwachem Effekt aus, obwohl er auf wenigen Spielen
-  // konzentriert und dort gross sein kann.
-  tipsDiffering: number;
-  perSeasonPointsDiff: { season: string; diff: number }[];
+  logLoss: BootstrapResult;
+  // null, wenn einer der beiden Laeufe den Markt nicht bepreist.
+  totalsLogLoss: BootstrapResult | null;
+  handicapLogLoss: BootstrapResult | null;
+  scoreLogLoss: BootstrapResult | null;
+  perSeasonRpsDiff: { season: string; diff: number }[];
 }
 
-// Gepaarter Vergleich zweier Laeufe auf exakt denselben Spielen. Das ist der einzige Weg,
+// Gepaarter Vergleich zweier Laeufe auf exakt denselben Spielen. Der einzige Weg,
 // Unterschiede aufzuloesen, die kleiner sind als der Standardfehler der Trefferquote
 // (1.01pp bei n=2448) -- und das sind hier praktisch alle.
 export function compareRuns(
   seasonContexts: SeasonContexts[],
   specA: RunSpec,
-  specB: RunSpec,
-  scheme: ScoringScheme
+  specB: RunSpec
 ): RunComparison {
-  const evalA = evaluateRun(seasonContexts, specA, scheme);
-  const evalB = evaluateRun(seasonContexts, specB, scheme);
+  const evalA = evaluateRun(seasonContexts, specA);
+  const evalB = evaluateRun(seasonContexts, specB);
 
   if (evalA.length !== evalB.length) {
     throw new Error("Laeufe haben unterschiedlich viele Spiele -- gepaarter Test unmoeglich");
@@ -454,37 +505,52 @@ export function compareRuns(
 
   let onlyA = 0;
   let onlyB = 0;
-  let tipsDiffering = 0;
   const rpsDiffs: number[] = [];
-  const pointsDiffs: number[] = [];
-  const seasonTotals = new Map<string, number>();
+  const logLossDiffs: number[] = [];
+  const totalsDiffs: number[] = [];
+  const handicapDiffs: number[] = [];
+  const scoreDiffs: number[] = [];
+  const seasonTotals = new Map<string, { sum: number; n: number }>();
 
   for (let i = 0; i < evalA.length; i++) {
-    const ea = evalA[i];
-    const eb = evalB[i];
-    const aCorrect = ea.predicted === ea.actual;
-    const bCorrect = eb.predicted === eb.actual;
+    const a = evalA[i].metrics;
+    const b = evalB[i].metrics;
+    const aCorrect = a.predicted === a.actual;
+    const bCorrect = b.predicted === b.actual;
     if (aCorrect && !bCorrect) onlyA++;
     else if (!aCorrect && bCorrect) onlyB++;
-    if (ea.tip !== eb.tip) tipsDiffering++;
 
-    // Niedriger ist beim RPS besser, deshalb umgedreht: positiv = A ist besser.
-    rpsDiffs.push(eb.rps - ea.rps);
-    const pointsDiff = ea.points - eb.points;
-    pointsDiffs.push(pointsDiff);
-    seasonTotals.set(ea.season, (seasonTotals.get(ea.season) ?? 0) + pointsDiff);
+    // Niedriger ist bei allen diesen Metriken besser, deshalb umgedreht: positiv = A ist
+    // besser als B.
+    rpsDiffs.push(b.rps - a.rps);
+    logLossDiffs.push(b.logLoss - a.logLoss);
+    if (a.totals && b.totals) totalsDiffs.push(b.totals.logLoss - a.totals.logLoss);
+    if (a.handicap && b.handicap) handicapDiffs.push(b.handicap.logLoss - a.handicap.logLoss);
+    if (a.scoreLogLoss !== null && b.scoreLogLoss !== null) {
+      scoreDiffs.push(b.scoreLogLoss - a.scoreLogLoss);
+    }
+
+    const bucket = seasonTotals.get(evalA[i].season) ?? { sum: 0, n: 0 };
+    bucket.sum += b.rps - a.rps;
+    bucket.n++;
+    seasonTotals.set(evalA[i].season, bucket);
   }
 
   return {
     a: specA.name,
     b: specB.name,
     n: evalA.length,
-    summaryA: summarize(evalA.map(toPerMatchMetrics)),
-    summaryB: summarize(evalB.map(toPerMatchMetrics)),
+    summaryA: summarize(evalA.map((e) => e.metrics)),
+    summaryB: summarize(evalB.map((e) => e.metrics)),
     tendency: mcnemarExact(onlyA, onlyB),
     rps: pairedBootstrap(rpsDiffs),
-    points: pairedBootstrap(pointsDiffs),
-    tipsDiffering,
-    perSeasonPointsDiff: [...seasonTotals.entries()].map(([season, diff]) => ({ season, diff })),
+    logLoss: pairedBootstrap(logLossDiffs),
+    totalsLogLoss: totalsDiffs.length > 0 ? pairedBootstrap(totalsDiffs) : null,
+    handicapLogLoss: handicapDiffs.length > 0 ? pairedBootstrap(handicapDiffs) : null,
+    scoreLogLoss: scoreDiffs.length > 0 ? pairedBootstrap(scoreDiffs) : null,
+    perSeasonRpsDiff: [...seasonTotals.entries()].map(([season, b]) => ({
+      season,
+      diff: b.sum / b.n,
+    })),
   };
 }

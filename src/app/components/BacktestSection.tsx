@@ -4,10 +4,9 @@ import { CalibrationChart } from "./CalibrationChart";
 import { StatCard, StatGrid, StatUnit, StatValue } from "./StatCard";
 
 const BASELINE_LABELS: Record<string, string> = {
-  modelOnly: "Nur Modell",
-  blended: "Modell + Markt (50/50)",
-  pureMarket: "Nur Buchmacher",
-  baseRate: "Nur H/U/A-Häufigkeit",
+  model: "Modell",
+  benchmark: "Buchmacher (Schlussquote)",
+  baseRate: "H/U/A-Häufigkeit",
 };
 
 export function BacktestSection({
@@ -19,12 +18,19 @@ export function BacktestSection({
   loading: boolean;
   onRun: () => void;
 }) {
+  const gap =
+    backtest && backtest.baselines
+      ? backtest.overall.rps - backtest.baselines.benchmark.rps
+      : null;
+
   return (
     <section className="section">
       <div className="section-header">
         <div>
           <h2 className="section-title">Backtest</h2>
-          <p className="section-subtitle">Modellgüte auf historischen Saisons</p>
+          <p className="section-subtitle">
+            Modellgüte auf historischen Saisons, gemessen am Buchmacher
+          </p>
         </div>
         <button className="button" onClick={onRun} disabled={loading}>
           {loading ? "Läuft …" : backtest ? "Neu berechnen" : "Starten"}
@@ -38,24 +44,23 @@ export function BacktestSection({
               wide
               label={
                 <>
-                  Gesamt über {backtest.perSeason.length} Saisons ({backtest.totalEvaluated} Spiele) ·
-                  Schema {backtest.schemeLabel}
+                  Gesamt über {backtest.perSeason.length} Saisons ({backtest.totalEvaluated}{" "}
+                  Spiele) · Messlatte {backtest.benchmarkLabel}
                 </>
               }
             >
               <StatValue>
-                {num(backtest.overall.pointsPerMatch, 3)} <StatUnit>Punkte / Spiel</StatUnit>
+                {num(backtest.overall.rps, 4)} <StatUnit>RPS</StatUnit>
               </StatValue>
               <StatValue small style={{ color: "var(--text-secondary)", marginTop: 4 }}>
-                {pct(backtest.totalTendencyAccuracy)} Tendenz ·{" "}
-                {pct(backtest.totalExactScoreAccuracy)} exakt · RPS{" "}
-                {num(backtest.overall.rps, 4)}
+                LogLoss {num(backtest.overall.logLoss, 4)} · Brier{" "}
+                {num(backtest.overall.brier, 4)} · {pct(backtest.overall.tendencyAccuracy)} Tendenz
               </StatValue>
-              {backtest.overall.expectedPointsPerMatch != null && (
+              {gap != null && (
                 <p className="section-subtitle" style={{ marginTop: 6 }}>
-                  Modell erwartet {num(backtest.overall.expectedPointsPerMatch, 3)} Punkte/Spiel
-                  und holt {num(backtest.overall.pointsPerMatch, 3)} — die Differenz ist der
-                  Kalibrierungsfehler.
+                  {gap > 0
+                    ? `${num(gap, 4)} RPS hinter dem Buchmacher. Das ist die Zahl, um die es geht — der absolute RPS sagt für sich genommen nichts.`
+                    : `${num(-gap, 4)} RPS vor dem Buchmacher.`}
                 </p>
               )}
             </StatCard>
@@ -63,19 +68,14 @@ export function BacktestSection({
             {backtest.perSeason.map((s) => (
               <StatCard key={s.season} label={`Saison ${s.season}`}>
                 <StatValue small>
-                  {num(s.pointsPerMatch, 2)} <StatUnit>Pkt</StatUnit>
+                  {num(s.rps, 4)} <StatUnit>RPS</StatUnit>
                 </StatValue>
                 <p className="section-subtitle">
-                  {pct(s.tendencyAccuracy)} Tendenz · RPS {num(s.rps, 3)}
+                  {pct(s.tendencyAccuracy)} Tendenz · {s.evaluated} Spiele
                 </p>
               </StatCard>
             ))}
           </StatGrid>
-
-          <p className="section-subtitle" style={{ marginTop: 24 }}>
-            Kalibrierung
-          </p>
-          <CalibrationChart calibration={backtest.calibration} />
 
           {backtest.baselines && (
             <>
@@ -90,12 +90,25 @@ export function BacktestSection({
                     <StatValue small>
                       {num(b.rps, 4)} <StatUnit>RPS</StatUnit>
                     </StatValue>
-                    <p className="section-subtitle">{pct(b.tendencyAccuracy)} Tendenz</p>
+                    <p className="section-subtitle">
+                      {pct(b.tendencyAccuracy)} Tendenz
+                      {b.scoreN > 0 ? ` · Score ${num(b.scoreLogLoss, 3)}` : ""}
+                    </p>
                   </StatCard>
                 ))}
               </StatGrid>
             </>
           )}
+
+          <p className="section-subtitle" style={{ marginTop: 24 }}>
+            Kalibrierung — Modell
+          </p>
+          <CalibrationChart calibration={backtest.calibration} />
+
+          <p className="section-subtitle" style={{ marginTop: 24 }}>
+            Kalibrierung — Buchmacher, dieselben Spiele
+          </p>
+          <CalibrationChart calibration={backtest.benchmarkCalibration} />
         </>
       )}
     </section>
