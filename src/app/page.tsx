@@ -11,7 +11,6 @@ import { useBacktest } from "./hooks/useBacktest";
 import { usePredictions } from "./hooks/usePredictions";
 import { useSimulation } from "./hooks/useSimulation";
 import { readUrlState, writeUrlState } from "./lib/urlState";
-import { DEFAULT_SCHEME_KEY } from "../eval/scoringScheme";
 import type { Tab, TableResponse } from "./types";
 
 export default function Home() {
@@ -27,8 +26,8 @@ export default function Home() {
   const [table, setTable] = useState<TableResponse | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
 
-  const predictions = usePredictions(initial.scheme, initial.matchday);
-  const sim = useSimulation(predictions.scheme);
+  const predictions = usePredictions(initial.matchday);
+  const sim = useSimulation();
   const backtest = useBacktest();
 
   const loadTable = useCallback(async () => {
@@ -57,8 +56,8 @@ export default function Home() {
     );
   }, [hydrated, tab, predictions.scheme, predictions.data?.matchday]);
 
-  // Zuruecktaste: nur der Tab wird zurueckgesetzt. Spieltag und Schema mitzuziehen
-  // wuerde bei jedem Schritt neu rechnen lassen, und der Nutzen ist gering.
+  // Zuruecktaste: nur der Tab wird zurueckgesetzt. Den Spieltag mitzuziehen wuerde bei
+  // jedem Schritt neu rechnen lassen, und der Nutzen ist gering.
   useEffect(() => {
     const onPop = () => setTab(readUrlState("predictions").tab);
     window.addEventListener("popstate", onPop);
@@ -70,15 +69,6 @@ export default function Home() {
       sim.loadMatchday(sim.matchday, sim.resultsSoFar);
     }
   }, [tab, sim.restored, sim.data, sim.loadMatchday, sim.matchday, sim.resultsSoFar]);
-
-  // Das Punkteschema bestimmt den optimalen Tipp, nicht nur seine Bewertung -- ein
-  // Wechsel muss deshalb neu rechnen lassen, nicht nur die Anzeige umrechnen.
-  function changeScheme(schemeKey: string) {
-    predictions.setScheme(schemeKey);
-    predictions.load(predictions.data?.matchday ?? undefined, schemeKey);
-    if (tab === "simulate") sim.loadMatchday(sim.matchday, sim.resultsSoFar, schemeKey);
-    if (backtest.hasRun) backtest.run(schemeKey);
-  }
 
   async function refreshResults() {
     await predictions.refreshResults();
@@ -99,16 +89,14 @@ export default function Home() {
 
       <TabBar active={tab} onChange={setTab} />
 
-      {tab === "predictions" && (
-        <PredictionsSection predictions={predictions} onSchemeChange={changeScheme} />
-      )}
+      {tab === "predictions" && <PredictionsSection predictions={predictions} />}
       {tab === "table" && <TableSection table={table} loading={tableLoading} />}
       {tab === "simulate" && <SimulateSection sim={sim} />}
       {tab === "backtest" && (
         <BacktestSection
           backtest={backtest.result}
           loading={backtest.loading}
-          onRun={() => backtest.run(predictions.scheme)}
+          onRun={() => backtest.run()}
         />
       )}
     </main>

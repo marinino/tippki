@@ -1,6 +1,6 @@
 import type { SimPrediction } from "../types";
 import type { SimInput } from "../hooks/useSimulation";
-import { num } from "../lib/format";
+import { num, odds } from "../lib/format";
 import { ProbabilityBar } from "./ProbabilityBar";
 import { TeamName } from "./TeamName";
 import styles from "./SimulatorMatchRow.module.css";
@@ -49,8 +49,9 @@ export function SimulatorMatchRow({
         </div>
 
         <div className={cardStyles.verdict}>
-          <span className={cardStyles.tip}>{p.tip}</span>
-          <span className={cardStyles.meta}>{num(p.expectedPoints, 2)} EV</span>
+          <span className={cardStyles.tip}>{odds(favouriteOdds(p))}</span>
+          <span className={cardStyles.meta}>faire Quote Favorit</span>
+          <span className={cardStyles.meta}>Häufigstes {p.mostLikelyScore}</span>
           <span className={cardStyles.meta}>
             Ø {num(p.expectedHomeGoals, 1)}:{num(p.expectedAwayGoals, 1)}
           </span>
@@ -64,4 +65,13 @@ export function SimulatorMatchRow({
       />
     </article>
   );
+}
+
+function favouriteOdds(p: SimPrediction): number {
+  const o = p.prices.outcome;
+  return [
+    { prob: p.homeWinProb, fairOdds: o.home.fairOdds },
+    { prob: p.drawProb, fairOdds: o.draw.fairOdds },
+    { prob: p.awayWinProb, fairOdds: o.away.fairOdds },
+  ].reduce((best, x) => (x.prob > best.prob ? x : best)).fairOdds;
 }

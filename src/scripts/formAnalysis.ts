@@ -10,9 +10,9 @@
 //      Teamstaerke korrelieren, wird Staerke doppelt gezaehlt: einmal ueber attack/defense
 //      und einmal ueber die "Form".
 //
-//   2. Wie viel Formgewicht ist optimal -- mit und ohne Marktbedingungen? Der Markt preist
-//      Form bereits ein. Wenn die Marktbedingungen die Ergebnismatrix ohnehin auf die
-//      Marktverteilung zwingen, kann die Form dahinter kaum noch etwas beitragen.
+//   2. Wie viel Formgewicht ist optimal -- auf der 1X2-Verteilung und auf der Form der
+//      Ergebnismatrix? Die beiden koennen auseinanderlaufen: ein Formgewicht kann die
+//      Tendenz schaerfen und gleichzeitig das Torniveau verfehlen.
 //
 //   3. Wirkt Form spaeter in der Saison staerker? Am ersten Spieltag ist sie
 //      konstruktionsbedingt 0 und faehrt dann hoch.
@@ -22,11 +22,9 @@ import { computeXgForm } from "../model/xgForm";
 import { buildLeagueModel } from "../model/teamStrength";
 import { summarize, type PerMatchMetrics } from "../eval/metrics";
 import { pairedBootstrap } from "../eval/significance";
-import { resolveScheme } from "../eval/scoringScheme";
 import { seasonsFor, VALIDATION_SEASONS } from "../eval/splits";
-import { buildContexts, evaluateRun, toPerMatchMetrics, type RunSpec } from "../eval/backtestCore";
+import { buildContexts, evaluateRun, type RunSpec } from "../eval/backtestCore";
 
-const scheme = resolveScheme(undefined);
 const seasons = seasonsFor("validation");
 const contexts = buildContexts(seasons);
 
@@ -120,7 +118,7 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
-console.log("\n\n=== 2. Optimales Formgewicht, mit und ohne Marktbedingungen ===\n");
+console.log("\n\n=== 2. Optimales Formgewicht ===\n");
 
 const WEIGHTS = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.6];
 
@@ -131,56 +129,30 @@ interface Setup {
 
 const setups: Setup[] = [
   {
-    label: "ohne Markt, rohe xG-Differenz",
-    spec: (w) => ({ name: "m", variant: "modelOnly", tipMode: "ev", xgFormWeight: w }),
+    label: "rohe xG-Differenz",
+    spec: (w) => ({ name: "m", variant: "model", xgFormWeight: w }),
   },
   {
-    label: "ohne Markt, Abweichung vom Normalniveau",
-    spec: (w) => ({
-      name: "m",
-      variant: "modelOnly",
-      tipMode: "ev",
-      xgFormWeight: w,
-      formMode: "residual",
-    }),
-  },
-  {
-    label: "volle Pipeline, rohe xG-Differenz",
-    spec: (w) => ({
-      name: "m",
-      variant: "blended",
-      tipMode: "ev",
-      useTotals: true,
-      xgFormWeight: w,
-    }),
-  },
-  {
-    label: "volle Pipeline, Abweichung vom Normalniveau",
-    spec: (w) => ({
-      name: "m",
-      variant: "blended",
-      tipMode: "ev",
-      useTotals: true,
-      xgFormWeight: w,
-      formMode: "residual",
-    }),
+    label: "Abweichung vom Normalniveau",
+    spec: (w) => ({ name: "m", variant: "model", xgFormWeight: w, formMode: "residual" }),
   },
 ];
 
 for (const setup of setups) {
   console.log(`--- ${setup.label} ---`);
-  console.log("Gewicht    RPS      Pkt/Spiel   ΔRPS vs w=0    p");
+  console.log("Gewicht    RPS      O/U 2.5    Score    ΔRPS vs w=0    p");
 
-  const zeroEval = evaluateRun(contexts, setup.spec(0), scheme);
+  const zeroEval = evaluateRun(contexts, setup.spec(0));
 
   for (const w of WEIGHTS) {
-    const evaluations = evaluateRun(contexts, setup.spec(w), scheme);
-    const summary = summarize(evaluations.map(toPerMatchMetrics));
-    const diffs = evaluations.map((e, i) => zeroEval[i].rps - e.rps);
+    const evaluations = evaluateRun(contexts, setup.spec(w));
+    const summary = summarize(evaluations.map((e) => e.metrics));
+    const diffs = evaluations.map((e, i) => zeroEval[i].metrics.rps - e.metrics.rps);
     const test = pairedBootstrap(diffs, { iterations: 3000 });
     const mark = w === 0.2 ? " <- aktuell" : "";
     console.log(
-      `  ${w.toFixed(2)}    ${summary.rps.toFixed(4)}  ${summary.pointsPerMatch.toFixed(3)}      ` +
+      `  ${w.toFixed(2)}    ${summary.rps.toFixed(4)}  ${summary.totalsLogLoss.toFixed(4)}  ` +
+        `${summary.scoreLogLoss.toFixed(4)}   ` +
         `${test.meanDiff >= 0 ? "+" : ""}${test.meanDiff.toFixed(4)}       ${test.pValue.toFixed(3)}${mark}`
     );
   }
@@ -193,11 +165,11 @@ console.log("\n=== 3. Wirkt Form spaeter in der Saison staerker? ===\n");
 // Spieltag aus dem Datum rekonstruieren: die Spiele einer Saison chronologisch in
 // Bloecke zu 9 teilen. Das ist naeherungsweise der Spieltag und reicht fuer die Frage,
 // ob Form frueh oder spaet in der Saison mehr traegt.
-const withMarket: RunSpec = { name: "m", variant: "blended", tipMode: "ev", useTotals: true };
-const withoutForm: RunSpec = { ...withMarket, xgFormWeight: 0 };
+const withForm: RunSpec = { name: "m", variant: "model" };
+const withoutForm: RunSpec = { ...withForm, xgFormWeight: 0 };
 
-const evalForm = evaluateRun(contexts, withMarket, scheme);
-const evalNone = evaluateRun(contexts, withoutForm, scheme);
+const evalForm = evaluateRun(contexts, withForm);
+const evalNone = evaluateRun(contexts, withoutForm);
 
 const matchdayOf = new Map<string, number>();
 for (const season of seasons) {
@@ -216,7 +188,7 @@ const buckets: { label: string; from: number; to: number }[] = [
   { label: "Spieltag 29-34", from: 29, to: 34 },
 ];
 
-console.log("Phase             n     Pkt mit Form   Pkt ohne Form   Δ Punkte/Spiel     p");
+console.log("Phase             n     RPS mit Form   RPS ohne Form   Δ RPS              p");
 for (const bucket of buckets) {
   const withRows: PerMatchMetrics[] = [];
   const withoutRows: PerMatchMetrics[] = [];
@@ -226,17 +198,18 @@ for (const bucket of buckets) {
     const e = evalForm[i];
     const md = matchdayOf.get(`${e.season}|${e.homeTeam}|${e.awayTeam}`);
     if (md === undefined || md < bucket.from || md > bucket.to) continue;
-    withRows.push(toPerMatchMetrics(e));
-    withoutRows.push(toPerMatchMetrics(evalNone[i]));
-    diffs.push(e.points - evalNone[i].points);
+    withRows.push(e.metrics);
+    withoutRows.push(evalNone[i].metrics);
+    // Niedriger ist beim RPS besser, deshalb umgedreht: positiv = mit Form ist besser.
+    diffs.push(evalNone[i].metrics.rps - e.metrics.rps);
   }
 
   const a = summarize(withRows);
   const b = summarize(withoutRows);
   const test = pairedBootstrap(diffs, { iterations: 3000 });
   console.log(
-    `${bucket.label}   ${String(a.n).padStart(4)}   ${a.pointsPerMatch.toFixed(3).padStart(10)}   ` +
-      `${b.pointsPerMatch.toFixed(3).padStart(13)}   ${(test.meanDiff >= 0 ? "+" : "") + test.meanDiff.toFixed(4)}`.padEnd(20) +
+    `${bucket.label}   ${String(a.n).padStart(4)}   ${a.rps.toFixed(4).padStart(10)}   ` +
+      `${b.rps.toFixed(4).padStart(13)}   ${(test.meanDiff >= 0 ? "+" : "") + test.meanDiff.toFixed(4)}`.padEnd(20) +
       `   ${test.pValue.toFixed(3)}`
   );
 }

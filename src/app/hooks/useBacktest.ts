@@ -7,9 +7,9 @@ export function useBacktest() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const run = useCallback(async (schemeKey: string) => {
+  const run = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/backtest?scheme=${schemeKey}&tip=ev`);
+    const res = await fetch("/api/backtest");
     setResult(await res.json());
     setLoading(false);
   }, []);

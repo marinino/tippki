@@ -1,0 +1,70 @@
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.market {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.marketLabel {
+  font-size: var(--text-2xs);
+  color: var(--brass-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+/* Ein Linien-Paar bleibt zusammen: Ueber und Unter derselben Linie nebeneinander zu
+   lesen ist der ganze Sinn einer Leiter, und ein Umbruch dazwischen zerstoert das. */
+.pair {
+  display: inline-flex;
+  gap: 2px;
+  padding: 0 4px 0 0;
+  border-right: 1px solid var(--line);
+  margin-right: 4px;
+}
+
+.pair:last-child {
+  border-right: none;
+}
+
+.cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.name {
+  color: var(--text-3);
+}
+
+/* Tabellenziffern, sonst tanzen die Quoten in einer Reihe sichtbar auf und ab. */
+.value {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .market {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

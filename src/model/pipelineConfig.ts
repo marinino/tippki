@@ -5,9 +5,13 @@
 // gepaarter Vergleich sonst still zwei verschiedene Populationen vermischen und ein
 // Ergebnis liefern, das nichts bedeutet. forwardEval.ts gruppiert deshalb nach configHash
 // und weigert sich, ohne ausdrueckliches --pool darueber hinweg zu mitteln.
+//
+// Die frueheren Marktfelder (oddsBlendAlpha, useTotals, useSpread, marketStrength) sind
+// entfallen. Damit aendert sich der Hash gegenueber allen bisher geloggten Zeilen -- das
+// ist beabsichtigt und korrekt: es IST eine andere Pipeline, und die alten Zeilen duerfen
+// nicht mit den neuen in einen Topf.
 
 import { DEFAULT_DRAW_BOOST, DEFAULT_MAX_GOALS, DEFAULT_RHO } from "./scoreMatrix";
-import { ODDS_BLEND_ALPHA } from "./marketOdds";
 import { SEASON_RECENCY_WEIGHTS } from "./teamStrength";
 import { XG_FORM_WEIGHT, XG_FORM_WINDOW } from "./xgForm";
 
@@ -22,14 +26,9 @@ export interface PipelineConfig {
   maxGoals: number;
   rho: number;
   drawBoost: number;
-  // Markt
-  oddsBlendAlpha: number;
-  useTotals: boolean;
-  useSpread: boolean;
-  marketStrength: number;
 }
 
-// Exakt die aktuell produktiven Werte. Wird von tune.ts als Ausgangspunkt benutzt.
+// Exakt die aktuell produktiven Werte.
 export const DEFAULT_PIPELINE: PipelineConfig = {
   ridgePseudoMatches: 0,
   seasonRecencyWeights: SEASON_RECENCY_WEIGHTS,
@@ -38,10 +37,6 @@ export const DEFAULT_PIPELINE: PipelineConfig = {
   maxGoals: DEFAULT_MAX_GOALS,
   rho: DEFAULT_RHO,
   drawBoost: DEFAULT_DRAW_BOOST,
-  oddsBlendAlpha: ODDS_BLEND_ALPHA,
-  useTotals: true,
-  useSpread: true,
-  marketStrength: 1,
 };
 
 // FNV-1a, 32 Bit. Kurz genug zum Lesen im Log, kollisionsfrei genug fuer eine Handvoll
@@ -55,10 +50,6 @@ export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
     config.maxGoals,
     config.rho,
     config.drawBoost,
-    config.oddsBlendAlpha,
-    config.useTotals,
-    config.useSpread,
-    config.marketStrength,
   ]);
 
   let hash = 0x811c9dc5;

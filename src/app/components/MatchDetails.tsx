@@ -1,24 +1,19 @@
 import type { Prediction } from "../types";
-import { num } from "../lib/format";
 import { ScoreHeatmap } from "./ScoreHeatmap";
+import { PriceSheetView } from "./PriceSheetView";
 import styles from "./MatchDetails.module.css";
 
-// Quoten, Marktbedingungen und recherchierter Spielkontext lagen vorher als drei
-// gleichrangige 11-px-Zeilen unter jeder Karte und machten sie zur Textwand. Jetzt
-// stehen sie hinter einer Aufklappzeile -- als <details>, damit Tastatur und
-// Screenreader das ohne eigenen Zustand koennen.
+// Preisblatt, Ergebnisverteilung und recherchierter Spielkontext stehen hinter einer
+// Aufklappzeile -- als <details>, damit Tastatur und Screenreader das ohne eigenen
+// Zustand koennen. Vorn auf der Karte bleibt eine Zahl, hier liegt die ganze Verteilung.
 export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
-  const hasOdds = p.bookmakerOdds != null && p.bookmakerOdds.length > 0;
-  const hasConstraints = p.marketConstraints != null && p.marketConstraints.length > 0;
   const hasFactors = p.llmFactors != null && p.llmFactors.length > 0;
   const hasGrid = p.scoreGrid != null && p.scoreGrid.length > 0;
-  if (!hasOdds && !hasConstraints && !hasFactors && !hasGrid) return null;
 
   const summary = [
+    "Alle Märkte",
     hasGrid ? "Ergebnisverteilung" : null,
     hasFactors ? `${p.llmFactors.length} Kontextfaktoren` : null,
-    hasConstraints ? "Marktbedingungen" : null,
-    hasOdds ? `${p.bookmakerOdds!.length} Quoten` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -31,37 +26,18 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
       </summary>
 
       <div className={styles.content}>
+        <PriceSheetView prices={p.prices} />
+
         {hasGrid && (
           <div className={styles.row}>
             <span className={styles.rowLabel}>Verteilung</span>
             <span className={styles.rowValue}>
-              <ScoreHeatmap grid={p.scoreGrid} tip={p.tip} argmaxTip={p.argmaxTip} />
+              <ScoreHeatmap grid={p.scoreGrid} mostLikelyScore={p.mostLikelyScore} />
             </span>
           </div>
         )}
 
         {hasFactors && <ContextFactorList prediction={p} />}
-
-        {hasConstraints && (
-          <div className={styles.row}>
-            <span className={styles.rowLabel}>Markt im Tipp</span>
-            <span className={styles.rowValue}>{p.marketConstraints.join(" · ")}</span>
-          </div>
-        )}
-
-        {hasOdds && (
-          <div className={styles.row}>
-            <span className={styles.rowLabel}>Quoten</span>
-            <span className={styles.rowValue}>
-              {p.bookmakerOdds!.map((b) => (
-                <span key={b.bookmaker} className={styles.odds}>
-                  <span className={styles.bookmaker}>{b.bookmaker}</span>
-                  {num(b.oddsHome, 2)} / {num(b.oddsDraw, 2)} / {num(b.oddsAway, 2)}
-                </span>
-              ))}
-            </span>
-          </div>
-        )}
       </div>
     </details>
   );

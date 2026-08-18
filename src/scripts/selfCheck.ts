@@ -1,6 +1,7 @@
 // Ersatz fuer das fehlende Testframework: node:assert/strict plus ein tsx-Skript.
 // Deckt die Stellen ab, an denen ein Fehler still bleibt und trotzdem alle Zahlen
-// verschiebt -- vor allem die Unentschieden-Falle im Punkteschema.
+// verschiebt -- allen voran den Fall, dass eine Buchmacherquote in das Modell
+// zurueckkriecht, das sie schlagen soll.
 //
 //   npm run check
 
@@ -34,35 +35,36 @@ import { SEARCH_USD_PER_REQUEST, estimateCostUsd, resolveModelProfile } from "..
 import {
   argmaxCell,
   buildDixonColesMatrix,
+  goalDifferenceMarginal,
   outcomeMasses,
-  reweightToOutcomeMasses,
   scoreProb,
   toScoreMap,
-} from "../model/scoreMatrix";
-import { expectedPointsForTip, selectEvTip } from "../model/tipSelector";
-import {
-  applyConstraints,
-  constraintMasses,
-  devigTwoWay,
-  goalDifferenceConstraint,
-  outcomeConstraint,
-  totalGoalsConstraint,
   totalGoalsMarginal,
-  totalOverConstraint,
-} from "../model/marketConstraints";
+} from "../model/scoreMatrix";
+import { buildPriceSheet, priceOf } from "../model/priceSheet";
 import {
   argmaxOutcome,
+  binaryBrier,
+  binaryLogLoss,
   brierScore,
   logLoss,
   outcomeOf,
   rankedProbabilityScore,
+  scoreLogLoss,
   summarize,
   type OutcomeProbs,
   type PerMatchMetrics,
 } from "../eval/metrics";
 import { mcnemarExact, mulberry32, pairedBootstrap } from "../eval/significance";
-import { SCORING_SCHEMES, pointsFor, resolveScheme } from "../eval/scoringScheme";
+import {
+  benchmarkQuote,
+  devigThreeWay,
+  devigTwoWay,
+  overroundOf,
+  type BenchmarkSource,
+} from "../eval/benchmarkOdds";
 import { accuracyStandardError, seasonsFor } from "../eval/splits";
+import { readdirSync, statSync } from "node:fs";
 
 let sectionCount = 0;
 let checkCount = 0;
@@ -88,41 +90,45 @@ function closeTo(actual: number, expected: number, tolerance: number, message: s
 
 // ---------------------------------------------------------------------------
 
-section("Punkteschema (Unentschieden-Falle)", () => {
-  const s = SCORING_SCHEMES.kicktipp432;
+section("Modell kennt keine Buchmacherquote", () => {
+  // Der strukturelle Test dieses Projekts, und der einzige, der eine ganze Klasse von
+  // Fehlern faengt statt eines einzelnen. Das Ziel ist ein Modell, das den Markt schlaegt.
+  // Sobald irgendeine Datei unter src/model/ eine Quote liest, ist dieses Ziel still
+  // aufgehoben: die Zahlen sehen dann besser aus, gehoeren aber dem Buchmacher.
+  //
+  // Der Test prueft die Importe, nicht die Absicht. Absichten halten keine Refaktorierung
+  // aus.
+  const forbidden = ["benchmarkOdds", "closeOdds", "openOdds", "avgCloseOdds", "oddsApi"];
+  const modelDir = join(process.cwd(), "src", "model");
+  const offenders: string[] = [];
 
-  // Der Kern: ein Unentschieden-Tipp auf ein anderes Unentschieden hat zwar dieselbe
-  // Tordifferenz, darf aber trotzdem nur die Tendenz-Punktzahl geben.
-  check(() => assert.equal(pointsFor(1, 1, 2, 2, s), 2, "1:1 auf 2:2 muss 2 geben, nicht 3"));
-  check(() => assert.equal(pointsFor(0, 0, 3, 3, s), 2, "0:0 auf 3:3 muss 2 geben, nicht 3"));
-  check(() => assert.equal(pointsFor(1, 1, 1, 1, s), 4, "1:1 auf 1:1 ist exakt"));
+  // Kommentare vorher entfernen. Ohne das schlaegt der Test bei der Datei an, die
+  // ERKLAERT, warum sie den Markt nicht anfasst -- und ein Test, der sich an der
+  // Begruendung stoert statt am Code, wird beim ersten Mal entnervt geloescht.
+  function stripComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  }
 
-  // Nicht-Unentschieden: die Tordifferenz-Stufe greift wie erwartet.
-  check(() => assert.equal(pointsFor(2, 1, 2, 1, s), 4, "exakt"));
-  check(() => assert.equal(pointsFor(2, 1, 3, 2, s), 3, "gleiche Differenz +1"));
-  check(() => assert.equal(pointsFor(2, 1, 1, 0, s), 3, "gleiche Differenz +1"));
-  check(() => assert.equal(pointsFor(2, 1, 4, 0, s), 2, "nur Tendenz"));
-  check(() => assert.equal(pointsFor(2, 1, 0, 1, s), 0, "falsche Tendenz"));
-  check(() => assert.equal(pointsFor(1, 1, 2, 0, s), 0, "Remis getippt, Heimsieg real"));
-  check(() => assert.equal(pointsFor(2, 0, 1, 1, s), 0, "Heimsieg getippt, Remis real"));
+  for (const file of readdirSync(modelDir)) {
+    if (!file.endsWith(".ts")) continue;
+    const code = stripComments(readFileSync(join(modelDir, file), "utf-8"));
+    for (const needle of forbidden) {
+      if (code.includes(needle)) offenders.push(`${file} enthaelt "${needle}"`);
+    }
+  }
 
-  // Auswaertsseite spiegelbildlich.
-  check(() => assert.equal(pointsFor(0, 2, 1, 3, s), 3, "Auswaerts, gleiche Differenz"));
-  check(() => assert.equal(pointsFor(0, 2, 0, 4, s), 2, "Auswaerts, nur Tendenz"));
+  check(() =>
+    assert.deepEqual(offenders, [], `src/model/ darf keine Marktdaten beruehren: ${offenders.join(", ")}`)
+  );
 
-  // Andere Schemata.
-  const only = SCORING_SCHEMES.exactOnly;
-  check(() => assert.equal(pointsFor(2, 1, 2, 1, only), 1));
-  check(() => assert.equal(pointsFor(2, 1, 3, 2, only), 0));
+  // Und die Gegenprobe: die Pipeline darf keine Eingabe fuer Marktdaten mehr anbieten.
+  const pipelineSource = readFileSync(join(modelDir, "predictPipeline.ts"), "utf-8");
+  check(() =>
+    assert.ok(!/market1x2|marketTotals|marketSpread/.test(pipelineSource), "PipelineInput ist marktfrei")
+  );
 
-  const tend = SCORING_SCHEMES.tendencyOnly;
-  check(() => assert.equal(pointsFor(2, 1, 5, 0, tend), 1, "1/1/1: jede richtige Tendenz = 1"));
-  check(() => assert.equal(pointsFor(1, 1, 3, 3, tend), 1));
-  check(() => assert.equal(pointsFor(2, 1, 0, 1, tend), 0));
-
-  check(() => assert.equal(resolveScheme(undefined).key, "kicktipp432", "Default-Schema"));
-  check(() => assert.equal(resolveScheme("gibtsnicht").key, "kicktipp432", "Fallback"));
-  check(() => assert.equal(resolveScheme("kicktipp321").key, "kicktipp321"));
+  // statSync nur, damit der Import benutzt wird und der Pfad wirklich ein Verzeichnis ist.
+  check(() => assert.ok(statSync(modelDir).isDirectory()));
 });
 
 // ---------------------------------------------------------------------------
@@ -187,30 +193,53 @@ section("Metriken", () => {
   check(() => closeTo(brierScore(perfect, "H"), 0, 1e-12, "Brier perfekt"));
   check(() => closeTo(brierScore(uniform, "H"), 2 / 3, 1e-12, "Brier uniform"));
 
-  // summarize
+  // Zweiwertige Maerkte: dieselben Regeln, eine Dimension.
+  check(() => closeTo(binaryLogLoss(1, true), 0, 1e-12, "sicher und richtig"));
+  check(() => closeTo(binaryLogLoss(0.5, true), Math.log(2), 1e-12, "Muenzwurf"));
+  check(() => closeTo(binaryLogLoss(0.25, false), Math.log(4 / 3), 1e-12, "Gegenseite"));
+  check(() => closeTo(binaryBrier(0.7, true), 0.09, 1e-12, "Brier zweiwertig"));
+  check(() => closeTo(binaryBrier(0.7, false), 0.49, 1e-12, "Brier Gegenseite"));
+  check(() => assert.ok(Number.isFinite(binaryLogLoss(0, true)), "p=0 wird gedeckelt"));
+
+  check(() => closeTo(scoreLogLoss(0.1), Math.log(10), 1e-12, "Correct-Score-LogLoss"));
+
+  // summarize -- jeder Zusatzmarkt bringt seine eigene Fallzahl mit, weil er auf einer
+  // Teilmenge der Spiele definiert sein kann.
   const rows: PerMatchMetrics[] = [
-    { predicted: "H", actual: "H", exactHit: true, points: 4, rps: 0.1, logLoss: 0.5, brier: 0.2 },
-    { predicted: "H", actual: "A", exactHit: false, points: 0, rps: 0.5, logLoss: 1.5, brier: 1.0 },
+    {
+      predicted: "H",
+      actual: "H",
+      rps: 0.1,
+      logLoss: 0.5,
+      brier: 0.2,
+      totals: { logLoss: 0.6, brier: 0.2 },
+      handicap: null,
+      scoreLogLoss: 2.0,
+    },
+    {
+      predicted: "H",
+      actual: "A",
+      rps: 0.5,
+      logLoss: 1.5,
+      brier: 1.0,
+      totals: null,
+      handicap: { logLoss: 0.8, brier: 0.3 },
+      scoreLogLoss: null,
+    },
   ];
   const s = summarize(rows);
   check(() => assert.equal(s.n, 2));
   check(() => closeTo(s.tendencyAccuracy, 0.5, 1e-12, "Trefferquote"));
-  check(() => closeTo(s.exactScoreRate, 0.5, 1e-12, "Exaktquote"));
-  check(() => closeTo(s.pointsPerMatch, 2, 1e-12, "Punkte/Spiel"));
-  check(() => assert.equal(s.pointsTotal, 4));
   check(() => closeTo(s.rps, 0.3, 1e-12, "RPS-Mittel"));
-  check(() =>
-    assert.equal(
-      s.expectedPointsPerMatch,
-      null,
-      "Ohne expectedPoints auf jeder Zeile darf kein Mittelwert entstehen"
-    )
-  );
-
-  const withEv = summarize(rows.map((r) => ({ ...r, expectedPoints: 1.5 })));
-  check(() => closeTo(withEv.expectedPointsPerMatch!, 1.5, 1e-12, "EV-Mittel"));
+  check(() => assert.equal(s.totalsN, 1, "nur eine Zeile hat den Torsummen-Markt"));
+  check(() => closeTo(s.totalsLogLoss, 0.6, 1e-12, "und darf nur ueber die gemittelt werden"));
+  check(() => assert.equal(s.handicapN, 1));
+  check(() => closeTo(s.handicapLogLoss, 0.8, 1e-12, "Handicap-Mittel"));
+  check(() => assert.equal(s.scoreN, 1));
+  check(() => closeTo(s.scoreLogLoss, 2.0, 1e-12, "Correct-Score-Mittel"));
 
   check(() => assert.equal(summarize([]).n, 0, "Leere Eingabe darf nicht werfen"));
+  check(() => assert.equal(summarize([]).totalsN, 0));
 });
 
 // ---------------------------------------------------------------------------
@@ -354,141 +383,251 @@ section("Score-Matrix", () => {
     checkCount += legacy.scoreProbabilities.size;
   }
 
-  // reweightToOutcomeMasses
-  const target = { homeWinProb: 0.55, drawProb: 0.25, awayWinProb: 0.2 };
-  const rw = reweightToOutcomeMasses(m, target);
-  const rwMasses = outcomeMasses(rw);
-  check(() => closeTo(rwMasses.homeWinProb, target.homeWinProb, 1e-12, "Zielmasse Heim"));
-  check(() => closeTo(rwMasses.drawProb, target.drawProb, 1e-12, "Zielmasse Remis"));
-  check(() => closeTo(rwMasses.awayWinProb, target.awayWinProb, 1e-12, "Zielmasse Auswaerts"));
+  // Randverteilungen: sie muessen dieselbe Masse tragen wie die Matrix selbst, sonst
+  // stimmt jede daraus abgeleitete Quote nicht.
+  const totalMarginal = totalGoalsMarginal(m);
+  const diffMarginal = goalDifferenceMarginal(m);
 
-  let rwTotal = 0;
-  for (const c of rw.cells) rwTotal += c;
-  check(() => closeTo(rwTotal, 1, 1e-12, "Umgewichtete Matrix summiert auf 1"));
+  let totalSum = 0;
+  for (const v of totalMarginal) totalSum += v;
+  check(() => closeTo(totalSum, 1, 1e-12, "Torsummen-Randverteilung summiert auf 1"));
 
-  // Die Form innerhalb einer Gruppe muss exakt erhalten bleiben -- das ist die
-  // definierende Eigenschaft der KL-minimalen Projektion.
+  let diffSum = 0;
+  for (const v of diffMarginal) diffSum += v;
+  check(() => closeTo(diffSum, 1, 1e-12, "Tordifferenz-Randverteilung summiert auf 1"));
+
+  // Die drei Ausgangsmassen muessen sich aus der Tordifferenz rekonstruieren lassen.
+  let fromDiffHome = 0;
+  let fromDiffAway = 0;
+  for (let d = 1; d <= m.maxGoals; d++) fromDiffHome += diffMarginal[d + m.maxGoals];
+  for (let d = -m.maxGoals; d <= -1; d++) fromDiffAway += diffMarginal[d + m.maxGoals];
+  check(() => closeTo(fromDiffHome, masses.homeWinProb, 1e-12, "Heimsieg aus der Differenz"));
+  check(() => closeTo(fromDiffAway, masses.awayWinProb, 1e-12, "Auswaertssieg aus der Differenz"));
   check(() =>
-    closeTo(
-      scoreProb(rw, 2, 1) / scoreProb(rw, 3, 0),
-      scoreProb(m, 2, 1) / scoreProb(m, 3, 0),
-      1e-12,
-      "Verhaeltnis innerhalb der Heimsieg-Gruppe unveraendert"
-    )
-  );
-  check(() =>
-    closeTo(
-      scoreProb(rw, 1, 1) / scoreProb(rw, 0, 0),
-      scoreProb(m, 1, 1) / scoreProb(m, 0, 0),
-      1e-12,
-      "Verhaeltnis innerhalb der Remis-Gruppe unveraendert"
-    )
+    closeTo(diffMarginal[m.maxGoals], masses.drawProb, 1e-12, "Differenz 0 ist das Remis")
   );
 
-  // Umgewichtung auf die eigenen Massen ist die Identitaet.
-  const identity = reweightToOutcomeMasses(m, masses);
-  for (let i = 0; i < m.cells.length; i++) {
-    assert.ok(Math.abs(identity.cells[i] - m.cells[i]) < 1e-15, `Identitaet an Zelle ${i}`);
+  // Und die Torsumme gegen die direkte Summation ueber die Zellen.
+  let over25 = 0;
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) {
+      if (h + a > 2.5) over25 += scoreProb(m, h, a);
+    }
   }
-  checkCount += m.cells.length;
+  let over25FromMarginal = 0;
+  for (let k = 3; k < totalMarginal.length; k++) over25FromMarginal += totalMarginal[k];
+  check(() => closeTo(over25FromMarginal, over25, 1e-12, "Over 2.5 aus der Randverteilung"));
 });
 
 // ---------------------------------------------------------------------------
 
-section("EV-Tippselektor", () => {
+section("Preisblatt", () => {
   const rng = mulberry32(1234);
 
-  // Zufallsmatrizen: geschlossene Form gegen die naive Doppelschleife.
-  for (let trial = 0; trial < 200; trial++) {
+  check(() => closeTo(priceOf(0.5).fairOdds, 2, 1e-12, "50% ist Quote 2.00"));
+  check(() => closeTo(priceOf(0.25).fairOdds, 4, 1e-12, "25% ist Quote 4.00"));
+  check(() => assert.ok(Number.isFinite(priceOf(0).fairOdds), "p=0 wird gedeckelt, nicht Infinity"));
+
+  for (let trial = 0; trial < 100; trial++) {
     const lambdaHome = 0.2 + rng() * 3.5;
     const lambdaAway = 0.2 + rng() * 3.5;
     const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway);
-    const scheme = [
-      SCORING_SCHEMES.kicktipp432,
-      SCORING_SCHEMES.kicktipp321,
-      SCORING_SCHEMES.exactOnly,
-      SCORING_SCHEMES.tendencyOnly,
-    ][trial % 4];
+    const sheet = buildPriceSheet(matrix);
 
-    const choice = selectEvTip(matrix, scheme);
-    const naive = expectedPointsForTip(matrix, choice.tipHome, choice.tipAway, scheme);
+    // Jeder Markt muss auf 1 summieren -- das ist die definierende Eigenschaft einer
+    // fairen Quote. Waeren es 1.05, haetten wir versehentlich eine Marge eingebaut und
+    // wuerden uns gegen den Buchmacher besser rechnen, als wir sind.
+    const o = sheet.outcome;
     assert.ok(
-      Math.abs(choice.expectedPoints - naive) < 1e-12,
-      `Geschlossene Form weicht ab: ${choice.expectedPoints} vs ${naive}`
+      Math.abs(o.home.prob + o.draw.prob + o.away.prob - 1) < 1e-12,
+      `1X2 summiert nicht auf 1: ${o.home.prob + o.draw.prob + o.away.prob}`
     );
-
-    // Und der gewaehlte Tipp muss auch wirklich der beste sein.
-    let bestNaive = -Infinity;
-    for (let h = 0; h <= matrix.maxGoals; h++) {
-      for (let a = 0; a <= matrix.maxGoals; a++) {
-        bestNaive = Math.max(bestNaive, expectedPointsForTip(matrix, h, a, scheme));
-      }
+    assert.ok(
+      Math.abs(sheet.bothTeamsToScore.yes.prob + sheet.bothTeamsToScore.no.prob - 1) < 1e-12,
+      "BTTS summiert nicht auf 1"
+    );
+    for (const t of sheet.totals) {
+      assert.ok(Math.abs(t.over.prob + t.under.prob - 1) < 1e-12, `Total ${t.line} summiert nicht auf 1`);
     }
+    for (const h of sheet.handicaps) {
+      assert.ok(Math.abs(h.home.prob + h.away.prob - 1) < 1e-12, `Handicap ${h.line} summiert nicht auf 1`);
+    }
+
+    // Doppelte Chance ist die Summe zweier Ausgaenge, nicht eine eigene Schaetzung.
     assert.ok(
-      Math.abs(bestNaive - choice.expectedPoints) < 1e-12,
-      `Nicht das Maximum gewaehlt: ${choice.expectedPoints} statt ${bestNaive}`
+      Math.abs(sheet.doubleChance.homeOrDraw.prob - (o.home.prob + o.draw.prob)) < 1e-12,
+      "1X ist nicht die Summe von 1 und X"
     );
-  }
-  checkCount += 400;
 
-  // Orakel: unter 1/1/1 zaehlt nur die Tendenz, also muss der EV-Tipp dieselbe Tendenz
-  // haben wie der Argmax der aggregierten Wahrscheinlichkeiten -- die alte Logik.
-  const rng2 = mulberry32(99);
-  for (let trial = 0; trial < 200; trial++) {
-    const matrix = buildDixonColesMatrix(0.2 + rng2() * 3.5, 0.2 + rng2() * 3.5);
-    const choice = selectEvTip(matrix, SCORING_SCHEMES.tendencyOnly);
-    const tipOutcome = outcomeOf(choice.tipHome, choice.tipAway);
-    assert.equal(
-      tipOutcome,
-      argmaxOutcome(outcomeMasses(matrix)),
-      "Unter 1/1/1 muss der EV-Tipp der Argmax-Tendenz folgen"
-    );
-  }
-  checkCount += 200;
+    // Monotonie der Leitern. Ohne sie waere die Verteilung in sich widerspruechlich:
+    // "ueber 2.5 Tore" kann nicht wahrscheinlicher sein als "ueber 1.5".
+    for (let i = 1; i < sheet.totals.length; i++) {
+      assert.ok(
+        sheet.totals[i].over.prob <= sheet.totals[i - 1].over.prob + 1e-12,
+        `Torsummen-Leiter nicht monoton bei ${sheet.totals[i].line}`
+      );
+    }
+    for (let i = 1; i < sheet.handicaps.length; i++) {
+      assert.ok(
+        sheet.handicaps[i].home.prob >= sheet.handicaps[i - 1].home.prob - 1e-12,
+        `Handicap-Leiter nicht monoton bei ${sheet.handicaps[i].line}`
+      );
+    }
 
-  // Unter "nur exaktes Ergebnis" ist der EV-Tipp genau die Argmax-Zelle.
-  const rng3 = mulberry32(7);
-  for (let trial = 0; trial < 100; trial++) {
-    const matrix = buildDixonColesMatrix(0.2 + rng3() * 3.5, 0.2 + rng3() * 3.5);
-    const choice = selectEvTip(matrix, SCORING_SCHEMES.exactOnly);
-    assert.equal(choice.tip, argmaxCell(matrix), "Unter exactOnly == Argmax-Zelle");
-  }
-  checkCount += 100;
-
-  // Der EV-Tipp darf nie schlechter sein als der alte Argmax-Tipp -- das ist der ganze
-  // Punkt der Umstellung, und es gilt per Konstruktion.
-  const rng4 = mulberry32(555);
-  for (let trial = 0; trial < 200; trial++) {
-    const matrix = buildDixonColesMatrix(0.2 + rng4() * 3.5, 0.2 + rng4() * 3.5);
-    const scheme = SCORING_SCHEMES.kicktipp432;
-    const choice = selectEvTip(matrix, scheme);
-    const [ah, aa] = choice.argmaxCellTip.split(":").map(Number);
-    const argmaxEv = expectedPointsForTip(matrix, ah, aa, scheme);
+    // Handicap -0.5 ist definitionsgemaess der reine Heimsieg, +0.5 die doppelte Chance
+    // 1X. Faellt das auseinander, ist die Vorzeichenkonvention der Linie verdreht -- und
+    // das waere ein Fehler, den keine Aggregatzahl je zeigen wuerde.
+    const minusHalf = sheet.handicaps.find((h) => h.line === -0.5)!;
+    const plusHalf = sheet.handicaps.find((h) => h.line === 0.5)!;
+    assert.ok(Math.abs(minusHalf.home.prob - o.home.prob) < 1e-12, "AH -0.5 != Heimsieg");
     assert.ok(
-      choice.expectedPoints >= argmaxEv - 1e-12,
-      `EV-Tipp (${choice.expectedPoints}) schlechter als Argmax-Tipp (${argmaxEv})`
+      Math.abs(plusHalf.home.prob - (o.home.prob + o.draw.prob)) < 1e-12,
+      "AH +0.5 != Doppelte Chance 1X"
     );
-  }
-  checkCount += 200;
 
-  // Runner-up muss schlechter oder gleich gut sein und ein anderer Tipp.
-  const matrix = buildDixonColesMatrix(1.8, 1.0);
-  const choice = selectEvTip(matrix, SCORING_SCHEMES.kicktipp432);
-  check(() => assert.ok(choice.runnerUpExpectedPoints <= choice.expectedPoints));
-  check(() => assert.notEqual(choice.runnerUpTip, choice.tip, "Runner-up muss abweichen"));
+    // Correct Score: die gelistete Masse plus der Rest ist die ganze Verteilung, und die
+    // Liste ist absteigend sortiert.
+    const listed = sheet.correctScore.reduce((sum, c) => sum + c.price.prob, 0);
+    assert.ok(
+      Math.abs(listed + sheet.correctScoreOther.prob - 1) < 1e-12,
+      "Correct Score plus Rest ergibt nicht 1"
+    );
+    for (let i = 1; i < sheet.correctScore.length; i++) {
+      assert.ok(
+        sheet.correctScore[i].price.prob <= sheet.correctScore[i - 1].price.prob + 1e-15,
+        "Correct-Score-Liste nicht absteigend"
+      );
+    }
+    assert.equal(sheet.correctScore[0].score, argmaxCell(matrix), "Spitzenreiter != Argmax-Zelle");
+  }
+  checkCount += 100 * 10;
+
+  // BTTS ueber die Randzeilen, nicht ueber die Unabhaengigkeitsannahme: bei rho != 0
+  // muessen sich die beiden Wege unterscheiden, sonst wird die Dixon-Coles-Korrektur
+  // in genau den Zellen ignoriert, fuer die es sie gibt.
+  const correlated = buildDixonColesMatrix(1.5, 1.2, { rho: -0.15 });
+  const sheet = buildPriceSheet(correlated);
+  const naive = (1 - Math.exp(-1.5)) * (1 - Math.exp(-1.2));
   check(() =>
-    closeTo(
-      choice.runnerUpExpectedPoints,
-      expectedPointsForTip(
-        matrix,
-        Number(choice.runnerUpTip.split(":")[0]),
-        Number(choice.runnerUpTip.split(":")[1]),
-        SCORING_SCHEMES.kicktipp432
-      ),
-      1e-12,
-      "Runner-up-EV"
+    assert.ok(
+      Math.abs(sheet.bothTeamsToScore.yes.prob - naive) > 1e-4,
+      "BTTS darf nicht die naive Unabhaengigkeitsformel sein"
     )
   );
+});
+
+// ---------------------------------------------------------------------------
+
+section("Referenzquoten (Entvigen)", () => {
+  // Die Messlatte selbst muss stimmen, sonst misst das ganze Projekt gegen die falsche
+  // Zahl -- und zwar ohne dass irgendetwas auffaellt.
+  check(() => closeTo(devigTwoWay(2, 2), 0.5, 1e-12, "faire Zweiwegquote"));
+  check(() => closeTo(devigTwoWay(1.25, 5), 0.8, 1e-12, "1.25/5.00 ohne Marge"));
+  check(() =>
+    closeTo(devigTwoWay(1.9, 1.9), 0.5, 1e-12, "gleiche Quoten -> 50% trotz Overround")
+  );
+
+  const fair = devigThreeWay(3, 3, 3);
+  check(() => closeTo(fair.homeWinProb, 1 / 3, 1e-12, "drei gleiche Quoten -> Drittel"));
+  check(() => closeTo(fair.drawProb, 1 / 3, 1e-12, "Remis ebenso"));
+
+  const real = devigThreeWay(1.8, 3.9, 4.4);
+  const sum = real.homeWinProb + real.drawProb + real.awayWinProb;
+  check(() => closeTo(sum, 1, 1e-12, "entvigte Wahrscheinlichkeiten summieren auf 1"));
+  check(() =>
+    assert.ok(real.homeWinProb < 1 / 1.8, "Entvigen muss jede Rohwahrscheinlichkeit senken")
+  );
+
+  check(() => closeTo(overroundOf(2, 2), 1, 1e-12, "faire Zweiwegwette hat Overround 1"));
+  check(() => assert.ok(overroundOf(1.8, 3.9, 4.4) > 1, "echte Quoten tragen eine Marge"));
+
+  // Und der Weg von der CSV-Zeile zur Messlatte. Faellt eine Namenskette in loadMatches.ts
+  // still aus, laeuft der gepaarte Vergleich auf weniger Spielen, als die Ausgabe
+  // behauptet -- und niemand merkt es.
+  const matches = loadAllMatches();
+
+  interface SourceCoverage {
+    n: number;
+    withQuote: number;
+    overround: number;
+  }
+
+  function coverageOf(source: BenchmarkSource): Map<string, SourceCoverage> {
+    const bySeason = new Map<string, SourceCoverage>();
+    for (const match of matches) {
+      const e = bySeason.get(match.season) ?? { n: 0, withQuote: 0, overround: 0 };
+      e.n++;
+      const q = benchmarkQuote(match, source);
+      if (q) {
+        e.withQuote++;
+        e.overround += q.overround;
+      }
+      bySeason.set(match.season, e);
+    }
+    return bySeason;
+  }
+
+  const coverage: Record<BenchmarkSource, Map<string, SourceCoverage>> = {
+    pinnacleClose: coverageOf("pinnacleClose"),
+    marketAverageClose: coverageOf("marketAverageClose"),
+    marketAverageOpen: coverageOf("marketAverageOpen"),
+  };
+
+  // Jede Auswertungssaison muss von MINDESTENS einer Quelle praktisch vollstaendig
+  // abgedeckt sein. Keine einzelne Quelle schafft das ueber die ganze Historie: das
+  // Marktmittel-Schluss beginnt erst 2019, und Pinnacle bricht in 2025/26 zur
+  // Winterpause ab.
+  for (const season of seasonsFor("all")) {
+    const best = Math.max(
+      ...(Object.keys(coverage) as BenchmarkSource[]).map((src) => {
+        const e = coverage[src].get(season);
+        return e ? e.withQuote / e.n : 0;
+      })
+    );
+    assert.ok(best > 0.98, `Saison ${season}: keine Quelle deckt sie ab (beste ${best.toFixed(2)})`);
+  }
+  checkCount += seasonsFor("all").length;
+
+  // Die bekannte Luecke festnageln. Waechst sie, oder schliesst sich eine andere, soll das
+  // auffallen statt still die Fallzahlen zu verschieben.
+  const pinnacle2025 = coverage.pinnacleClose.get("2025");
+  check(() =>
+    assert.ok(
+      pinnacle2025 !== undefined && pinnacle2025.withQuote < pinnacle2025.n * 0.6,
+      "Die dokumentierte Pinnacle-Luecke in 2025/26 ist verschwunden -- Kommentar in " +
+        "benchmarkOdds.ts pruefen"
+    )
+  );
+
+  // Overround im erwartbaren Bereich. Ein Wert unter 1 waere ein Vorzeichenfehler, einer
+  // ueber 1.12 hiesse, dass wir versehentlich einen Freizeit-Buchmacher als "scharfe"
+  // Referenz benutzen.
+  for (const source of Object.keys(coverage) as BenchmarkSource[]) {
+    for (const [season, e] of coverage[source]) {
+      if (e.withQuote === 0) continue;
+      const mean = e.overround / e.withQuote;
+      assert.ok(
+        mean > 1 && mean < 1.12,
+        `${source} ${season}: Overround ${mean.toFixed(4)} ausserhalb des Erwartbaren`
+      );
+      checkCount++;
+    }
+  }
+
+  // Handicap nur auf Halblinien -- alles andere waere keine Zweiwegwette.
+  let withHandicap = 0;
+  for (const match of matches) {
+    const q = benchmarkQuote(match);
+    if (q?.handicap) {
+      withHandicap++;
+      assert.equal(
+        Math.abs(q.handicap.line % 1),
+        0.5,
+        `Handicap-Linie ${q.handicap.line} ist keine Halblinie`
+      );
+    }
+  }
+  check(() => assert.ok(withHandicap > 100, `zu wenige Handicap-Referenzen: ${withHandicap}`));
 });
 
 // ---------------------------------------------------------------------------
@@ -617,141 +756,6 @@ section("xG-Form == Referenzimplementierung", () => {
     )
   );
   check(() => assert.ok(rawBias > 0.2, `rohe Form traegt erwartungsgemaess Staerke: ${rawBias.toFixed(3)}`));
-});
-
-// ---------------------------------------------------------------------------
-
-section("Markt-Nebenbedingungen (IPF)", () => {
-  const m = buildDixonColesMatrix(1.7, 1.1);
-
-  check(() => closeTo(devigTwoWay(2, 2), 0.5, 1e-12, "faire Zweiwegquote"));
-  check(() => closeTo(devigTwoWay(1.25, 5), 0.8, 1e-12, "1.25/5.00 ohne Marge"));
-  check(() =>
-    closeTo(devigTwoWay(1.9, 1.9), 0.5, 1e-12, "gleiche Quoten -> 50% trotz Overround")
-  );
-
-  // Eine 1X2-Bedingung allein muss dasselbe liefern wie reweightToOutcomeMasses.
-  const target = { homeWinProb: 0.55, drawProb: 0.25, awayWinProb: 0.2 };
-  const viaIpf = applyConstraints(m, [outcomeConstraint(m.maxGoals, target)]);
-  const viaReweight = reweightToOutcomeMasses(m, target);
-  for (let i = 0; i < m.cells.length; i++) {
-    assert.ok(
-      Math.abs(viaIpf.matrix.cells[i] - viaReweight.cells[i]) < 1e-12,
-      `IPF mit einer Bedingung muss reweightToOutcomeMasses entsprechen (Zelle ${i})`
-    );
-  }
-  checkCount += m.cells.length;
-
-  // Zwei Bedingungen gleichzeitig: beide muessen am Ende erfuellt sein.
-  const overProb = 0.62;
-  const both = applyConstraints(m, [
-    outcomeConstraint(m.maxGoals, target),
-    totalOverConstraint(m.maxGoals, 2.5, overProb),
-  ]);
-  check(() => assert.ok(both.converged, `IPF konvergiert (Abweichung ${both.maxDeviation})`));
-
-  const masses = outcomeMasses(both.matrix);
-  check(() => closeTo(masses.homeWinProb, target.homeWinProb, 1e-8, "1X2 erfuellt"));
-  check(() => closeTo(masses.drawProb, target.drawProb, 1e-8, "Remis erfuellt"));
-
-  const totalMarginal = totalGoalsMarginal(both.matrix);
-  let over25 = 0;
-  for (let k = 3; k < totalMarginal.length; k++) over25 += totalMarginal[k];
-  check(() => closeTo(over25, overProb, 1e-8, "Over/Under gleichzeitig erfuellt"));
-
-  let sum = 0;
-  for (const c of both.matrix.cells) sum += c;
-  check(() => closeTo(sum, 1, 1e-12, "Ergebnis bleibt eine Verteilung"));
-
-  // Volle Totals-Leiter: Halblinien werden genutzt, Viertellinien verworfen.
-  const ladder = [
-    { line: 0.5, oddsOver: 1.006, oddsUnder: 29 },
-    { line: 1.5, oddsOver: 1.071, oddsUnder: 9 },
-    { line: 2.25, oddsOver: 1.16, oddsUnder: 5.25 }, // Viertellinie -> ignorieren
-    { line: 2.5, oddsOver: 1.24, oddsUnder: 3.9 },
-    { line: 3.5, oddsOver: 1.615, oddsUnder: 2.3 },
-    { line: 4.5, oddsOver: 2.375, oddsUnder: 1.571 },
-    { line: 5.5, oddsOver: 4, oddsUnder: 1.25 },
-  ];
-  const totalsConstraint = totalGoalsConstraint(m.maxGoals, ladder)!;
-  check(() => assert.ok(totalsConstraint !== null, "Leiter ergibt eine Bedingung"));
-  check(() =>
-    assert.ok(totalsConstraint.name.includes("6 Linien"), `Viertellinie verworfen: ${totalsConstraint.name}`)
-  );
-
-  let targetSum = 0;
-  for (const t of totalsConstraint.targets) {
-    assert.ok(t >= 0, "keine negativen Zielmassen");
-    targetSum += t;
-  }
-  checkCount += totalsConstraint.targets.length;
-  check(() => closeTo(targetSum, 1, 1e-12, "Zielmassen summieren auf 1"));
-
-  const fitted = applyConstraints(m, [totalsConstraint]);
-  const fittedMasses = constraintMasses(fitted.matrix, totalsConstraint);
-  for (let g = 0; g < totalsConstraint.groupCount; g++) {
-    assert.ok(
-      Math.abs(fittedMasses[g] - totalsConstraint.targets[g]) < 1e-8,
-      `Totals-Gruppe ${g}: ${fittedMasses[g]} statt ${totalsConstraint.targets[g]}`
-    );
-  }
-  checkCount += totalsConstraint.groupCount;
-
-  // Spread-Leiter, Vorzeichenkonvention: hdp -1.5 heisst "Heim gewinnt mit >= 2 Toren".
-  const spread = [
-    { line: -2.5, oddsHome: 2.6, oddsAway: 1.475 },
-    { line: -1.5, oddsHome: 1.725, oddsAway: 2.075 },
-    { line: -0.5, oddsHome: 1.3, oddsAway: 3.45 },
-    { line: 0.5, oddsHome: 1.105, oddsAway: 4.4 },
-    { line: 1.5, oddsHome: 1.05, oddsAway: 8 },
-  ];
-  const diffConstraint = goalDifferenceConstraint(m.maxGoals, spread)!;
-  check(() => assert.ok(diffConstraint !== null, "Spread-Leiter ergibt eine Bedingung"));
-
-  const withDiff = applyConstraints(m, [diffConstraint]);
-  const diffMasses = constraintMasses(withDiff.matrix, diffConstraint);
-  for (let g = 0; g < diffConstraint.groupCount; g++) {
-    assert.ok(
-      Math.abs(diffMasses[g] - diffConstraint.targets[g]) < 1e-8,
-      `Spread-Gruppe ${g}: ${diffMasses[g]} statt ${diffConstraint.targets[g]}`
-    );
-  }
-  checkCount += diffConstraint.groupCount;
-
-  // strength = 0 muss die Matrix unveraendert lassen.
-  const noop = applyConstraints(m, [outcomeConstraint(m.maxGoals, target)], { strength: 0 });
-  for (let i = 0; i < m.cells.length; i++) {
-    assert.equal(noop.matrix.cells[i], m.cells[i], `strength=0 darf nichts aendern (Zelle ${i})`);
-  }
-  checkCount += m.cells.length;
-
-  // Umgekehrt: Bedingungen, die schon erfuellt sind, duerfen nichts bewegen.
-  const identity = applyConstraints(m, [outcomeConstraint(m.maxGoals, outcomeMasses(m))]);
-  for (let i = 0; i < m.cells.length; i++) {
-    assert.ok(
-      Math.abs(identity.matrix.cells[i] - m.cells[i]) < 1e-14,
-      `bereits erfuellte Bedingung ist die Identitaet (Zelle ${i})`
-    );
-  }
-  checkCount += m.cells.length;
-
-  // Nicht genug Halblinien -> null statt Unsinn.
-  check(() =>
-    assert.equal(totalGoalsConstraint(m.maxGoals, [{ line: 2.25, oddsOver: 1.16, oddsUnder: 5.25 }]), null)
-  );
-  check(() => assert.equal(goalDifferenceConstraint(m.maxGoals, []), null));
-
-  // Monotonie-Korrektur: eine widerspruechliche Leiter darf keine negativen Massen erzeugen.
-  const inconsistent = totalGoalsConstraint(m.maxGoals, [
-    { line: 1.5, oddsOver: 2, oddsUnder: 2 }, // P(>=2) = 0.50
-    { line: 2.5, oddsOver: 1.2, oddsUnder: 6 }, // P(>=3) = 0.833 -- unmoeglich hoeher
-    { line: 3.5, oddsOver: 3, oddsUnder: 1.5 },
-  ]);
-  check(() => assert.ok(inconsistent !== null, "widerspruechliche Leiter wird geglaettet"));
-  if (inconsistent) {
-    for (const t of inconsistent.targets) assert.ok(t >= 0, "keine negativen Massen nach Glaettung");
-    checkCount += inconsistent.targets.length;
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1101,13 +1105,11 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
     model,
     homeTeam: "Bayern Munich",
     awayTeam: "Augsburg",
-    market1x2: null,
   });
   const withLlmContext = predictPipeline({
     model,
     homeTeam: "Bayern Munich",
     awayTeam: "Augsburg",
-    market1x2: null,
     llmContext: {
       ...empty,
       foundAnything: true,
