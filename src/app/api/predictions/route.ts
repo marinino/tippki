@@ -3,15 +3,12 @@ import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
-import { toScoreGrid } from "../../../model/scoreMatrix";
+import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
 import { computeXgForm } from "../../../model/xgForm";
-import { readOddsCache } from "../../../data/oddsApi";
-import { averageMarketProbabilities } from "../../../model/marketOdds";
-import { resolveScheme } from "../../../eval/scoringScheme";
 import { cacheKey, readLlmCache } from "../../../llm/llmCache";
 import { describeFactors } from "../../../llm/llmAdjustment";
 
-// 0 bis 5 Tore je Seite. Daueber traegt die Matrix zusammen weit unter einem Prozent.
+// 0 bis 5 Tore je Seite. Darueber traegt die Matrix zusammen weit unter einem Prozent.
 const DISPLAY_MAX_GOALS = 5;
 
 interface Fixture {
@@ -35,49 +32,35 @@ export async function GET(request: Request) {
   const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
 
   const params = new URL(request.url).searchParams;
-  const scheme = resolveScheme(params.get("scheme"));
-
   const requestedParam = params.get("matchday");
   const requestedMatchday = requestedParam ? Number(requestedParam) : null;
   const selectedMatchday =
-    requestedMatchday && availableMatchdays.includes(requestedMatchday) ? requestedMatchday : nextMatchday;
+    requestedMatchday && availableMatchdays.includes(requestedMatchday)
+      ? requestedMatchday
+      : nextMatchday;
 
   const fixtures = allFixtures.filter((f) => f.matchday === selectedMatchday);
 
   const matches = loadAllMatches();
   const model = buildLeagueModel(matches);
 
-  // Kein Live-Abruf hier -- nur lesen, was zuletzt ueber den manuellen "Quoten aktualisieren"-
-  // Knopf (POST /api/refresh-odds) geholt wurde. Nur verwenden, wenn der Cache zum angezeigten
-  // Spieltag passt (sonst wuerden veraltete Quoten eines anderen Spieltags einfliessen).
-  const oddsCache = readOddsCache();
-  const oddsByFixture = oddsCache && oddsCache.matchday === selectedMatchday ? oddsCache.odds : {};
-
-  // Gleiche Staleness-Pruefung wie bei den Quoten: ein Kontext aus einem anderen Spieltag
-  // waere schlimmer als keiner.
+  // Kein Live-Abruf hier -- nur lesen, was zuletzt ueber den manuellen Knopf geholt wurde.
+  // Ein Kontext aus einem anderen Spieltag waere schlimmer als keiner.
   const llmCache = readLlmCache();
   const llmByFixture =
     llmCache && llmCache.matchday === selectedMatchday ? llmCache.contexts : {};
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
     const matchDate = new Date(date);
-    const fixtureOdds = oddsByFixture[`${homeTeam}|${awayTeam}`];
     const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
 
-    // Die Marktquoten gehen jetzt in die Score-Matrix ein, nicht nur in die 1X2-Balken --
-    // vorher kam der angezeigte Tipp aus der ungeblendeten Modellmatrix und ignorierte
-    // die beste verfuegbare Information vollstaendig.
     const out = predictPipeline({
       model,
       homeTeam,
       awayTeam,
       homeForm: computeXgForm(homeTeam, matchDate),
       awayForm: computeXgForm(awayTeam, matchDate),
-      market1x2: fixtureOdds ? averageMarketProbabilities(fixtureOdds.bookmakers) : null,
-      marketTotals: fixtureOdds?.totals ?? null,
-      marketSpread: fixtureOdds?.spread ?? null,
       llmContext: cachedLlm?.context ?? null,
-      scheme,
     });
 
     return {
@@ -88,25 +71,14 @@ export async function GET(request: Request) {
       date,
       expectedHomeGoals: out.expectedHomeGoals,
       expectedAwayGoals: out.expectedAwayGoals,
-      // Die Verteilung, aus der der Tipp stammt. Bisher wurde sie pro Spiel gerechnet
-      // und dann auf eine einzige Zahl eingedampft -- die Heatmap zeigt, warum der
-      // EV-Tipp oft nicht das wahrscheinlichste Ergebnis ist.
       scoreGrid: toScoreGrid(out.matrix, DISPLAY_MAX_GOALS),
-      homeWinProb: out.finalProbs.homeWinProb,
-      drawProb: out.finalProbs.drawProb,
-      awayWinProb: out.finalProbs.awayWinProb,
-      tip: out.tip.tip,
-      expectedPoints: out.tip.expectedPoints,
-      runnerUpTip: out.tip.runnerUpTip,
-      runnerUpExpectedPoints: out.tip.runnerUpExpectedPoints,
-      argmaxTip: out.tip.argmaxCellTip,
-      // Altes Feld bleibt befuellt, damit aeltere Clients nicht brechen.
-      mostLikelyScore: out.tip.tip,
+      homeWinProb: out.probs.homeWinProb,
+      drawProb: out.probs.drawProb,
+      awayWinProb: out.probs.awayWinProb,
+      mostLikelyScore: argmaxCell(out.matrix),
+      prices: out.prices,
       homeIsEstimated: out.homeIsEstimated,
       awayIsEstimated: out.awayIsEstimated,
-      oddsBlended: out.marketApplied,
-      marketConstraints: out.marketConstraints,
-      bookmakerOdds: fixtureOdds?.bookmakers ?? null,
       llmApplied: out.llmAdjustment !== null && !out.llmAdjustment.blocked,
       llmBlocked: out.llmAdjustment?.blocked ?? false,
       llmShrinkFactor: out.llmAdjustment?.shrinkFactor ?? null,
@@ -121,9 +93,6 @@ export async function GET(request: Request) {
     matchday: selectedMatchday,
     nextMatchday,
     availableMatchdays,
-    scheme: scheme.key,
-    schemeLabel: scheme.label,
-    oddsFetchedAt: oddsCache && oddsCache.matchday === selectedMatchday ? oddsCache.fetchedAt : null,
     llmFetchedAt: llmCache && llmCache.matchday === selectedMatchday ? llmCache.fetchedAt : null,
     llmModel: llmCache && llmCache.matchday === selectedMatchday ? llmCache.model : null,
   });

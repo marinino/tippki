@@ -20,7 +20,7 @@ const fraunces = Fraunces({
 
 export const metadata = {
   title: "Tippki",
-  description: "Bundesliga-Tipps aus einem Dixon-Coles-Modell mit Markt- und Kontextkorrektur",
+  description: "Faire Bundesliga-Quoten aus einem Dixon-Coles-Modell, ohne Buchmacherdaten",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

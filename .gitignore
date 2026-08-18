@@ -5,3 +5,4 @@ next-env.d.ts
 tsconfig.tsbuildinfo
 .env
 .env.local
+data/forward_log.jsonl

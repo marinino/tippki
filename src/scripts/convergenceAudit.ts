@@ -26,9 +26,8 @@ import {
 } from "../model/teamStrength";
 import { formatSummary, summarize } from "../eval/metrics";
 import { formatBootstrap, formatMcNemar, mcnemarExact, pairedBootstrap } from "../eval/significance";
-import { resolveScheme } from "../eval/scoringScheme";
 import { parseSplit, seasonsFor, type SplitName } from "../eval/splits";
-import { buildContexts, evaluateRun, toPerMatchMetrics, type RunSpec } from "../eval/backtestCore";
+import { buildContexts, evaluateRun, type RunSpec } from "../eval/backtestCore";
 
 function flag(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -146,8 +145,7 @@ console.log(
 
 console.log("\n=== Wirkung in der vollen Pipeline (gepaart) ===\n");
 
-const scheme = resolveScheme(flag("scheme"));
-const RUN: RunSpec = { name: "voll", variant: "blended", tipMode: "ev", useTotals: true };
+const RUN: RunSpec = { name: "voll", variant: "model" };
 
 function buildLegacyModel(matches: Match[], _options: LeagueModelOptions): LeagueModel {
   const { avgHomeGoals, avgAwayGoals } = leagueAverages(matches);
@@ -202,29 +200,31 @@ function buildLegacyModel(matches: Match[], _options: LeagueModelOptions): Leagu
 const legacyContexts = buildContexts(seasons, {}, allMatches, buildLegacyModel);
 const modernContexts = buildContexts(seasons, {}, allMatches);
 
-const legacyEval = evaluateRun(legacyContexts, RUN, scheme);
-const modernEval = evaluateRun(modernContexts, RUN, scheme);
+const legacyEval = evaluateRun(legacyContexts, RUN);
+const modernEval = evaluateRun(modernContexts, RUN);
 
-console.log(formatSummary("alter Gradientenfit", summarize(legacyEval.map(toPerMatchMetrics))));
-console.log(formatSummary("neuer Coordinate Fit", summarize(modernEval.map(toPerMatchMetrics))));
+console.log(formatSummary("alter Gradientenfit", summarize(legacyEval.map((e) => e.metrics))));
+console.log(formatSummary("neuer Coordinate Fit", summarize(modernEval.map((e) => e.metrics))));
 
 let onlyModern = 0;
 let onlyLegacy = 0;
 const rpsDiffs: number[] = [];
-const pointsDiffs: number[] = [];
+const scoreDiffs: number[] = [];
 
 for (let i = 0; i < modernEval.length; i++) {
-  const a = modernEval[i];
-  const b = legacyEval[i];
+  const a = modernEval[i].metrics;
+  const b = legacyEval[i].metrics;
   const aRight = a.predicted === a.actual;
   const bRight = b.predicted === b.actual;
   if (aRight && !bRight) onlyModern++;
   else if (!aRight && bRight) onlyLegacy++;
   rpsDiffs.push(b.rps - a.rps);
-  pointsDiffs.push(a.points - b.points);
+  if (a.scoreLogLoss !== null && b.scoreLogLoss !== null) {
+    scoreDiffs.push(b.scoreLogLoss - a.scoreLogLoss);
+  }
 }
 
 console.log("\nPositiv = neuer Fit besser:");
 console.log(`  ${formatMcNemar("Tendenz (McNemar)", mcnemarExact(onlyModern, onlyLegacy))}`);
 console.log(`  ${formatBootstrap("RPS (Bootstrap)", pairedBootstrap(rpsDiffs))}`);
-console.log(`  ${formatBootstrap("Punkte/Spiel (Bootstrap)", pairedBootstrap(pointsDiffs))}`);
+console.log(`  ${formatBootstrap("Correct Score (Bootstrap)", pairedBootstrap(scoreDiffs))}`);

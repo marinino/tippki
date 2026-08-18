@@ -1,4 +1,4 @@
-// Tab, Spieltag und Schema in der Adresszeile.
+// Tab und Spieltag in der Adresszeile.
 //
 // Bewusst ueber history.pushState statt useSearchParams: der Next-Hook zwingt die
 // Seite in eine Suspense-Grenze und loest bei jeder Aenderung ein Router-Update aus.
@@ -22,26 +22,23 @@ const SLUG_TO_TAB: Record<string, Tab> = Object.fromEntries(
 
 export interface UrlState {
   tab: Tab;
-  scheme: string | null;
   matchday: number | null;
 }
 
 export function readUrlState(fallbackTab: Tab): UrlState {
-  if (typeof window === "undefined") return { tab: fallbackTab, scheme: null, matchday: null };
+  if (typeof window === "undefined") return { tab: fallbackTab, matchday: null };
   const params = new URLSearchParams(window.location.search);
   const matchday = Number(params.get("spieltag"));
   return {
     tab: SLUG_TO_TAB[params.get("tab") ?? ""] ?? fallbackTab,
-    scheme: params.get("schema"),
     matchday: Number.isInteger(matchday) && matchday > 0 ? matchday : null,
   };
 }
 
-export function writeUrlState(state: UrlState, defaultScheme: string): void {
+export function writeUrlState(state: UrlState): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
   if (state.tab !== "predictions") params.set("tab", TAB_SLUGS[state.tab]);
-  if (state.scheme && state.scheme !== defaultScheme) params.set("schema", state.scheme);
   if (state.matchday != null) params.set("spieltag", String(state.matchday));
 
   const query = params.toString();

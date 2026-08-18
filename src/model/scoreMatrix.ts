@@ -22,34 +22,27 @@ export const DEFAULT_RHO = -0.15;
 // Genereller Bonus fuer JEDES Unentschieden (0:0, 1:1, 2:2, ...), nicht nur die von
 // dixonColesTau abgedeckten Faelle. 1 = kein Effekt.
 //
-// Stand seit jeher auf 1.2 und war nie gemessen worden. `npm run tune-matrix` sucht
-// (RHO, DRAW_BOOST) gemeinsam ab, mit Punkten als Zielgroesse -- nicht mit RPS, denn der
-// bewertet nur die drei aggregierten Ausgaenge und ist fuer einen Parameter, der Masse
-// INNERHALB einer Tendenz verschiebt, bauartbedingt blind.
+// Stand seit jeher auf 1.2 und war nie gemessen worden. Der erste Messversuch lief auf
+// Tippspiel-Punkten, weil der RPS nur die drei aggregierten Ausgaenge bewertet und fuer
+// einen Parameter, der Masse INNERHALB einer Tendenz verschiebt, bauartbedingt blind ist.
+// Der Befund replizierte sich nicht: +0.052 Punkte/Spiel auf der Validation, +0.006 auf
+// dem Testset -- die Richtung stimmte, die Groessenordnung brach auf ein Neuntel ein.
 //
-// Befund, und der Ehrlichkeit halber vollstaendig:
-//   Validation: 1.20 -> 1.00 bringt +0.052 Punkte/Spiel, die Spalte B=1.20 ist dort im
-//               ganzen Gitter die schwaechste.
-//   Testset:    derselbe Wechsel bringt +0.006. Die Richtung stimmt, die Groessenordnung
-//               bricht auf ein Neuntel zusammen.
+// 1.0 steht hier deshalb nicht, weil es messbar besser waere, sondern weil die Daten 1.0
+// und 1.2 nicht unterscheiden konnten -- und bei Gleichstand gewinnt das einfachere
+// Modell. DRAW_BOOST ist kein Wahrscheinlichkeitsmodell, sondern ein Eingriff: er blaeht
+// jede Unentschieden-Zelle auf und drueckt nach der Normalisierung Masse aus Ergebnissen
+// wie 2:1 heraus. Mit 1.0 ist er weg, und die Unentschieden-Korrektur macht allein
+// dixonColesTau, wo sie hingehoert.
 //
-// Der Validation-Effekt hat sich also NICHT repliziert. 1.0 steht hier deshalb nicht,
-// weil es messbar besser waere, sondern weil die Daten 1.0 und 1.2 nicht unterscheiden
-// koennen -- und bei Gleichstand gewinnt das einfachere Modell. DRAW_BOOST ist kein
-// Wahrscheinlichkeitsmodell, sondern ein Eingriff: er blaeht jede Unentschieden-Zelle auf
-// und drueckt nach der Normalisierung Masse aus Ergebnissen wie 2:1 heraus. Mit 1.0 ist
-// er weg, und die Unentschieden-Korrektur macht allein dixonColesTau, wo sie hingehoert.
-//
-// Nicht das Gitter-Maximum (0.85) nehmen -- das waere die Selektionsfalle, und genau die
-// hat sich hier ja gerade als solche erwiesen.
+// Fuer eine Neumessung gibt es inzwischen die richtige Zielgroesse, und sie braucht kein
+// Punkteschema: `npm run tune-model -- --objective=score` bewertet den LogLoss auf dem
+// exakten Ergebnis. Das ist eine strikt propere Bewertungsregel, die genau die Dimension
+// sieht, um die es bei RHO und DRAW_BOOST geht.
 export const DEFAULT_DRAW_BOOST = 1.0;
 
 export function createScoreMatrix(maxGoals: number): ScoreMatrix {
   return { maxGoals, cells: new Float64Array((maxGoals + 1) * (maxGoals + 1)) };
-}
-
-export function cloneMatrix(m: ScoreMatrix): ScoreMatrix {
-  return { maxGoals: m.maxGoals, cells: Float64Array.from(m.cells) };
 }
 
 export function scoreProb(m: ScoreMatrix, h: number, a: number): number {
@@ -147,8 +140,28 @@ export function outcomeMasses(m: ScoreMatrix): OutcomeProbs {
   return { homeWinProb, drawProb, awayWinProb };
 }
 
-// Argmax-Zelle -- der bisherige "Tipp". Strikt groesser, damit bei Gleichstand die
-// zuerst besuchte Zelle gewinnt (h aufsteigend, dann a aufsteigend), genau wie vorher.
+// Randverteilung der Torsumme: out[k] = P(Heimtore + Auswaertstore == k).
+export function totalGoalsMarginal(m: ScoreMatrix): Float64Array {
+  const out = new Float64Array(2 * m.maxGoals + 1);
+  const size = m.maxGoals + 1;
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) out[h + a] += m.cells[h * size + a];
+  }
+  return out;
+}
+
+// Randverteilung der Tordifferenz aus Heimsicht: out[d + maxGoals] = P(Heim - Ausw == d).
+export function goalDifferenceMarginal(m: ScoreMatrix): Float64Array {
+  const out = new Float64Array(2 * m.maxGoals + 1);
+  const size = m.maxGoals + 1;
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) out[h - a + m.maxGoals] += m.cells[h * size + a];
+  }
+  return out;
+}
+
+// Wahrscheinlichste Einzelzelle. Strikt groesser, damit bei Gleichstand die zuerst
+// besuchte Zelle gewinnt (h aufsteigend, dann a aufsteigend).
 export function argmaxCell(m: ScoreMatrix): string {
   const size = m.maxGoals + 1;
   let best = -1;
@@ -167,10 +180,9 @@ export function argmaxCell(m: ScoreMatrix): string {
   return bestScore;
 }
 
-// Erwartungswert der Tore AUS der Matrix, also nach allen Marktbedingungen. Die
-// urspruenglichen Modell-Lambdas gelten nach der Umgewichtung nicht mehr -- sie daneben
-// anzuzeigen waere genau die Art Widerspruch zwischen Anzeige und Tipp, die vorher schon
-// zwischen Wahrscheinlichkeitsbalken und Ergebnistipp bestand.
+// Erwartungswert der Tore AUS der Matrix. Nach der Dixon-Coles-Korrektur sind das nicht
+// mehr exakt die eingesetzten Lambdas -- tau und der Draw-Boost verschieben Masse. Die
+// Lambdas daneben anzuzeigen waere deshalb ein Widerspruch zur Verteilung selbst.
 export function expectedGoals(m: ScoreMatrix): { home: number; away: number } {
   const size = m.maxGoals + 1;
   let home = 0;
@@ -198,49 +210,12 @@ export function toScoreMap(m: ScoreMatrix): Map<string, number> {
   return map;
 }
 
-// Verschiebt die Matrix so, dass die drei Ausgangsgruppen exakt die vorgegebenen Massen
-// tragen -- jede Zelle einer Gruppe wird mit target_g / aktuelleMasse_g multipliziert.
-//
-// Das ist keine Heuristik: unter allen Verteilungen, die diese drei Randbedingungen
-// erfuellen, ist das die eindeutige mit minimaler KL-Divergenz zur Ausgangsmatrix. Die
-// Form INNERHALB einer Gruppe bleibt exakt erhalten, nur das Gewicht zwischen den
-// Gruppen verschiebt sich.
-//
-// Damit landet die Marktinformation endlich auch im Ergebnistipp. Bisher wurden nur die
-// aggregierten 1X2-Balken geblendet, waehrend der angezeigte Tipp aus der unveraenderten
-// Modellmatrix kam -- die beiden Anzeigen konnten sich also widersprechen.
-export function reweightToOutcomeMasses(m: ScoreMatrix, target: OutcomeProbs): ScoreMatrix {
-  const current = outcomeMasses(m);
-
-  // Bei lambda > 0 kann keine Gruppenmasse 0 sein; falls doch, waere der Faktor
-  // undefiniert und wir liefern die Matrix unveraendert zurueck.
-  if (current.homeWinProb <= 0 || current.drawProb <= 0 || current.awayWinProb <= 0) {
-    return cloneMatrix(m);
-  }
-
-  const factorHome = target.homeWinProb / current.homeWinProb;
-  const factorDraw = target.drawProb / current.drawProb;
-  const factorAway = target.awayWinProb / current.awayWinProb;
-
-  const size = m.maxGoals + 1;
-  const out = createScoreMatrix(m.maxGoals);
-
-  for (let h = 0; h <= m.maxGoals; h++) {
-    for (let a = 0; a <= m.maxGoals; a++) {
-      const i = h * size + a;
-      out.cells[i] = m.cells[i] * (h > a ? factorHome : h === a ? factorDraw : factorAway);
-    }
-  }
-
-  return out;
-}
-
 // Die ersten (limit+1)^2 Zellen als dichtes Array -- fuer die Anzeige, nicht fuer die
 // Rechnung. Der Rest der Matrix (maxGoals = 10) traegt zusammen weit unter einem
 // Prozent und wuerde in einer Heatmap nur leere Zeilen erzeugen.
 //
 // Index: grid[h][a]. Bewusst KEINE Normalisierung auf den Ausschnitt -- die Zahlen
-// sollen dieselben sein wie die, aus denen der Tipp gewaehlt wurde.
+// sollen dieselben sein wie die, aus denen die Quoten abgeleitet wurden.
 export function toScoreGrid(m: ScoreMatrix, limit: number): number[][] {
   const rows: number[][] = [];
   const bound = Math.min(limit, m.maxGoals);

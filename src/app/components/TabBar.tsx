@@ -2,7 +2,7 @@ import type { Tab } from "../types";
 import styles from "./TabBar.module.css";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "predictions", label: "Tipps" },
+  { key: "predictions", label: "Quoten" },
   { key: "table", label: "Tabelle" },
   { key: "backtest", label: "Backtest" },
   { key: "simulate", label: "Simulieren" },

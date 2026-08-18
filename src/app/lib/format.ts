@@ -44,14 +44,19 @@ export function formatMatchDayTime(iso: string): string {
   );
 }
 
-// Woraus der Tipp entstanden ist. Ohne diese Zeile sieht ein Tipp aus reinem Modell
-// genauso aus wie einer, in den Quoten und recherchierter Kontext eingeflossen sind.
-export function describeProvenance(marketConstraints: string[], llmApplied: boolean): string {
-  const hasMarket = marketConstraints.length > 0;
-  if (hasMarket && llmApplied) return "Markt + Kontext";
-  if (hasMarket) return "Markt";
-  if (llmApplied) return "Kontext";
-  return "nur Modell";
+// Woraus die Quoten entstanden sind. Buchmacherquoten gehen bewusst nie ein -- der
+// einzige Unterschied ist, ob der recherchierte Spielkontext gegriffen hat.
+export function describeProvenance(llmApplied: boolean, llmBlocked: boolean): string {
+  if (llmBlocked) return "Kontext verworfen";
+  if (llmApplied) return "Modell + Kontext";
+  return "reines Modell";
+}
+
+// Dezimalquote, wie ein Buchmacher sie anschreibt. Ab 1000 wird die Stelligkeit unlesbar
+// und die genaue Zahl bedeutungslos.
+export function odds(fairOdds: number): string {
+  if (fairOdds >= 1000) return "999+";
+  return num(fairOdds, 2);
 }
 
 // Dezimalkomma statt Punkt. Die Oberflaeche formatierte Datumsangaben schon immer

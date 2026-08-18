@@ -1,19 +1,18 @@
 import { num } from "../lib/format";
 import styles from "./ScoreHeatmap.module.css";
 
-// Die Verteilung ueber alle Ergebnisse, aus der der Tipp gewaehlt wurde.
+// Die volle Verteilung ueber alle Ergebnisse -- die Groesse, aus der jede Quote des
+// Preisblatts abgeleitet ist.
 //
-// Der eigentliche Punkt dieser Darstellung: der abgegebene Tipp ist die Zelle mit dem
-// hoechsten Punkte-Erwartungswert, nicht die wahrscheinlichste. Beide sind markiert --
-// wo sie auseinanderfallen, sieht man dem Modell bei der Arbeit zu.
+// Sie steht hier, weil sie die Schwaeche eines jeden Torzahlmodells sichtbar macht: die
+// wahrscheinlichste Einzelzelle traegt selten mehr als zwoelf Prozent. Wer nur eine Zahl
+// sieht, haelt sie fuer eine Prognose; wer die Flaeche sieht, weiss, wie flach sie ist.
 export function ScoreHeatmap({
   grid,
-  tip,
-  argmaxTip,
+  mostLikelyScore,
 }: {
   grid: number[][];
-  tip: string;
-  argmaxTip: string;
+  mostLikelyScore: string;
 }) {
   if (!grid || grid.length === 0) return null;
 
@@ -26,9 +25,7 @@ export function ScoreHeatmap({
   // Angabe sieht das aus, als summierten sich die Zellen nicht.
   const covered = cells.reduce((acc, p) => acc + p, 0);
 
-  const [tipHome, tipAway] = tip.split(":").map(Number);
-  const [argHome, argAway] = argmaxTip.split(":").map(Number);
-  const sameCell = tipHome === argHome && tipAway === argAway;
+  const [bestHome, bestAway] = mostLikelyScore.split(":").map(Number);
 
   return (
     <div className={styles.wrap}>
@@ -54,14 +51,11 @@ export function ScoreHeatmap({
                   {h}
                 </th>
                 {row.map((p, a) => {
-                  const isTip = h === tipHome && a === tipAway;
-                  const isArgmax = h === argHome && a === argAway;
+                  const isBest = h === bestHome && a === bestAway;
                   return (
                     <td
                       key={a}
-                      className={`${styles.cell} ${isTip ? styles.tipCell : ""} ${
-                        isArgmax && !isTip ? styles.argmaxCell : ""
-                      }`}
+                      className={`${styles.cell} ${isBest ? styles.tipCell : ""}`}
                       // Deckkraft proportional zur Wahrscheinlichkeit, Wurzel als
                       // Kompression: linear verschwinden alle Zellen ausser 1:1 und 2:1.
                       style={{ "--fill": Math.sqrt(p / max) } as React.CSSProperties}
@@ -78,17 +72,10 @@ export function ScoreHeatmap({
       </div>
 
       <p className={styles.legend}>
-        <span className={styles.keyTip}>Tipp {tip}</span>
-        {sameCell ? (
-          <span className={styles.keyNote}>zugleich das wahrscheinlichste Ergebnis</span>
-        ) : (
-          <>
-            <span className={styles.keyArgmax}>wahrscheinlichster {argmaxTip}</span>
-            <span className={styles.keyNote}>
-              Der Tipp maximiert die erwarteten Punkte, nicht die Trefferwahrscheinlichkeit.
-            </span>
-          </>
-        )}
+        <span className={styles.keyTip}>Häufigstes {mostLikelyScore}</span>
+        <span className={styles.keyNote}>
+          mit {num(max * 100, 1)}% — jedes einzelne Ergebnis bleibt unwahrscheinlich.
+        </span>
       </p>
 
       <p className={styles.coverage}>

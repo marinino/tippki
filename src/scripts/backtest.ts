@@ -4,21 +4,22 @@
 //   npm run backtest
 //   npm run backtest -- --split=validation
 //   npm run backtest -- --split=all --baselines
-//   npm run backtest -- --variant=blended --scheme=kicktipp321
+//   npm run backtest -- --benchmark=marketAverageOpen
 
 import { formatSummary } from "../eval/metrics";
 import { formatBootstrap, formatMcNemar } from "../eval/significance";
-import { resolveScheme, SCORING_SCHEMES } from "../eval/scoringScheme";
-import { accuracyStandardError, parseSplit, warnIfTestSplit, type SplitName } from "../eval/splits";
+import { accuracyStandardError, parseSplit, seasonsFor, warnIfTestSplit, type SplitName } from "../eval/splits";
 import {
   ALL_VARIANTS,
+  VARIANT_LABELS,
   buildContexts,
   compareRuns,
   runBacktest,
-  type TipMode,
   type VariantName,
 } from "../eval/backtestCore";
-import { seasonsFor } from "../eval/splits";
+import { BENCHMARK_LABELS, parseBenchmarkSource } from "../eval/benchmarkOdds";
+import { buildLeagueModel } from "../model/teamStrength";
+import { loadAllMatches } from "../data/loadMatches";
 
 function flag(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -29,12 +30,9 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(`--${name}`);
 }
 
-// Ohne --split bleibt es bei allen acht Saisons, damit der Standardaufruf weiterhin die
-// historisch berichteten Zahlen liefert.
 const split: SplitName = flag("split") ? parseSplit(flag("split")) : "all";
-const variant = (flag("variant") ?? "modelOnly") as VariantName;
-const tipMode = (flag("tip") ?? "argmaxLegacy") as TipMode;
-const scheme = resolveScheme(flag("scheme"));
+const variant = (flag("variant") ?? "model") as VariantName;
+const benchmark = parseBenchmarkSource(flag("benchmark"));
 
 if (!ALL_VARIANTS.includes(variant)) {
   console.error(`Unbekannte Variante "${variant}". Moeglich: ${ALL_VARIANTS.join(", ")}`);
@@ -43,78 +41,78 @@ if (!ALL_VARIANTS.includes(variant)) {
 
 warnIfTestSplit(split);
 
-const result = runBacktest({ split, variant, tipMode, scheme });
+const result = runBacktest({ split, variant, benchmark });
 
 console.log(
-  `Split "${split}" (${result.seasons.join(", ")}), Variante "${variant}", ` +
-    `Tipp "${tipMode}", Punkteschema "${scheme.label}"\n`
+  `Split "${split}" (${result.seasons.join(", ")}), Variante "${VARIANT_LABELS[variant]}", ` +
+    `Messlatte "${BENCHMARK_LABELS[benchmark]}"\n`
 );
 
 for (const s of result.perSeason) {
   console.log(
     `Saison ${s.season} (${String(s.trainMatchCount).padStart(4)} Trainingsspiele, ` +
-      `${s.summary.n} Testspiele): ` +
-      `Tendenz ${(s.summary.tendencyAccuracy * 100).toFixed(1)}%  ` +
-      `Exakt ${(s.summary.exactScoreRate * 100).toFixed(1)}%  ` +
-      `Pkt/Spiel ${s.summary.pointsPerMatch.toFixed(3)}  ` +
-      `RPS ${s.summary.rps.toFixed(4)}`
+      `${String(s.summary.n).padStart(3)} bewertet): ` +
+      `RPS ${s.summary.rps.toFixed(4)}  ` +
+      `LogLoss ${s.summary.logLoss.toFixed(4)}  ` +
+      `Tendenz ${(s.summary.tendencyAccuracy * 100).toFixed(1)}%`
   );
 }
 
 const se = accuracyStandardError(result.overall.n) * 100;
-console.log(
-  `\nGesamt über ${result.seasons.length} Saisons (${result.overall.n} Spiele): ` +
-    `Tendenz ${(result.overall.tendencyAccuracy * 100).toFixed(1)}%  ` +
-    `Exakt ${(result.overall.exactScoreRate * 100).toFixed(1)}%  ` +
-    `Pkt/Spiel ${result.overall.pointsPerMatch.toFixed(3)}  ` +
-    `RPS ${result.overall.rps.toFixed(4)}`
-);
+console.log(`\n${formatSummary("GESAMT", result.overall)}`);
 console.log(
   `Standardfehler der Trefferquote bei n=${result.overall.n}: ±${se.toFixed(2)} Prozentpunkte. ` +
     `Unterschiede darunter sind ungepaart nicht aufloesbar.`
 );
 
-if (result.matchesWithoutOdds > 0) {
+const skipped = result.totalMatches - result.totalEvaluated;
+if (skipped > 0) {
   console.log(
-    `Hinweis: ${result.matchesWithoutOdds} von ${result.totalEvaluated} Spielen haben keine ` +
-      `Quoten; marktbasierte Varianten fallen dort auf das Modell zurueck.`
+    `${skipped} von ${result.totalMatches} Spielen ohne Referenzquote -- sie fallen aus dem ` +
+      `Vergleich heraus, damit alle Varianten auf derselben Spielmenge laufen.`
   );
 }
 
+console.log(
+  `\nZusatzmaerkte: Over/Under 2.5 auf ${result.overall.totalsN} Spielen, ` +
+    `Asian Handicap auf ${result.overall.handicapN} (nur Halblinien).`
+);
+
 if (hasFlag("baselines")) {
-  console.log("\n--- Baselines (identische Spiele, identischer Tipp) ---\n");
+  console.log("\n--- Varianten auf identischen Spielen ---\n");
   for (const name of ALL_VARIANTS) {
-    console.log(formatSummary(name, result.baselines[name]));
+    console.log(formatSummary(VARIANT_LABELS[name], result.baselines[name]));
   }
 
-  console.log(
-    "\nDer Tipp ist in dieser Phase immer der Argmax der Modell-Matrix. Punkte und\n" +
-      "Exaktquote sind deshalb ueber alle Varianten identisch -- vergleichbar sind hier\n" +
-      "nur Tendenz, RPS, LogLoss und Brier.\n"
+  const contexts = buildContexts(
+    seasonsFor(split),
+    {},
+    loadAllMatches(),
+    buildLeagueModel,
+    benchmark
   );
-
-  const contexts = buildContexts(seasonsFor(split));
   const pairs: [VariantName, VariantName][] = [
-    ["blended", "modelOnly"],
-    ["blended", "pureMarket"],
-    ["pureMarket", "modelOnly"],
-    ["modelOnly", "baseRate"],
+    ["model", "benchmark"],
+    ["model", "baseRate"],
+    ["benchmark", "baseRate"],
   ];
 
-  console.log("--- Gepaarte Tests (A gegen B, positiv = A besser) ---\n");
+  console.log("\n--- Gepaarte Tests (A gegen B, positiv = A besser) ---\n");
   for (const [a, b] of pairs) {
-    const c = compareRuns(
-      contexts,
-      { name: a, variant: a, tipMode },
-      { name: b, variant: b, tipMode },
-      scheme
-    );
-    console.log(`${a} vs ${b}`);
+    const c = compareRuns(contexts, { name: a, variant: a }, { name: b, variant: b });
+    console.log(`${VARIANT_LABELS[a]} vs ${VARIANT_LABELS[b]}  (n = ${c.n})`);
     console.log(`  ${formatMcNemar("Tendenz (McNemar)", c.tendency)}`);
-    console.log(`  ${formatBootstrap("RPS (Bootstrap)", c.rps)}`);
+    console.log(`  ${formatBootstrap("RPS", c.rps)}`);
+    console.log(`  ${formatBootstrap("LogLoss", c.logLoss)}`);
+    if (c.totalsLogLoss) console.log(`  ${formatBootstrap("O/U 2.5 LogLoss", c.totalsLogLoss)}`);
+    if (c.handicapLogLoss) console.log(`  ${formatBootstrap("AH LogLoss", c.handicapLogLoss)}`);
+    if (c.scoreLogLoss) console.log(`  ${formatBootstrap("Correct Score", c.scoreLogLoss)}`);
     console.log("");
   }
 }
 
-console.log(`Zum Vergleich: reines Raten der Tendenz läge bei ca. 33%.`);
-console.log(`Verfuegbare Punkteschemata: ${Object.keys(SCORING_SCHEMES).join(", ")}`);
+console.log(
+  `\nDie Zahl, auf die es ankommt, ist der Abstand zum Buchmacher -- nicht der absolute\n` +
+    `RPS. Wie viel von einem Fussballspiel ueberhaupt vorhersagbar ist, weiss niemand;\n` +
+    `wie gut die schaerfste oeffentliche Schaetzung ist, sieht man in der Zeile darueber.`
+);
