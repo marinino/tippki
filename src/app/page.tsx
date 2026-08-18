@@ -50,11 +50,8 @@ export default function Home() {
   // und der wuerde den Tab aus einem geteilten Link aus der Adresse loeschen.
   useEffect(() => {
     if (!hydrated) return;
-    writeUrlState(
-      { tab, scheme: predictions.scheme, matchday: predictions.data?.matchday ?? null },
-      DEFAULT_SCHEME_KEY
-    );
-  }, [hydrated, tab, predictions.scheme, predictions.data?.matchday]);
+    writeUrlState({ tab, matchday: predictions.data?.matchday ?? null });
+  }, [hydrated, tab, predictions.data?.matchday]);
 
   // Zuruecktaste: nur der Tab wird zurueckgesetzt. Den Spieltag mitzuziehen wuerde bei
   // jedem Schritt neu rechnen lassen, und der Nutzen ist gering.
