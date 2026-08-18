@@ -16,9 +16,14 @@ import type { Tab, TableResponse } from "./types";
 
 export default function Home() {
   // Einmal synchron beim ersten Rendern lesen, damit ein geteilter Link nicht erst mit
-  // den Vorgabewerten laedt und dann nachkorrigiert.
+  // den Vorgabewerten laedt und dann nachkorrigiert: der Abruf unten startet direkt mit
+  // Spieltag und Schema aus der Adresse.
   const [initial] = useState(() => readUrlState("predictions"));
-  const [tab, setTab] = useState<Tab>(initial.tab);
+  // Gerendert wird der Tab aus der Adresse dagegen erst nach dem Mounten. Der Server
+  // kennt die Adresszeile nicht und liefert immer "predictions"; ein davon abweichender
+  // erster Client-Rendergang zerbricht die Hydration.
+  const [tab, setTab] = useState<Tab>("predictions");
+  const [hydrated, setHydrated] = useState(false);
   const [table, setTable] = useState<TableResponse | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
 
@@ -38,11 +43,19 @@ export default function Home() {
   }, [tab, table, loadTable]);
 
   useEffect(() => {
+    setTab(initial.tab);
+    setHydrated(true);
+  }, [initial.tab]);
+
+  // Erst ab dem zweiten Rendergang schreiben: davor steht im Tab noch der Vorgabewert,
+  // und der wuerde den Tab aus einem geteilten Link aus der Adresse loeschen.
+  useEffect(() => {
+    if (!hydrated) return;
     writeUrlState(
       { tab, scheme: predictions.scheme, matchday: predictions.data?.matchday ?? null },
       DEFAULT_SCHEME_KEY
     );
-  }, [tab, predictions.scheme, predictions.data?.matchday]);
+  }, [hydrated, tab, predictions.scheme, predictions.data?.matchday]);
 
   // Zuruecktaste: nur der Tab wird zurueckgesetzt. Spieltag und Schema mitzuziehen
   // wuerde bei jedem Schritt neu rechnen lassen, und der Nutzen ist gering.
