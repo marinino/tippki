@@ -1,0 +1,59 @@
+/* Die Design-Tokens der Oberflaeche. Eigene Datei, damit ein Farb- oder Radienwechsel
+   genau hier stattfindet und nicht verstreut in den Komponentenmodulen.
+
+   Richtung "Matchday": blaugraue Tinte statt reinem Schwarz, ein einziger Messing-Akzent,
+   und eine Tonwertskala fuer die drei Spielausgaenge statt einer Ampel. Gruen/Gelb/Rot
+   fuer Heim/Unentschieden/Auswaerts las sich als gut/mittel/schlecht -- dabei sind das
+   drei gleichwertige Ausgaenge. */
+
+:root {
+  /* Flaechen, von unten nach oben */
+  --ink-900: #08090b;
+  --ink-800: #0b0c0f;
+  --ink-700: #101216;
+  --ink-600: #171a20;
+  --ink-500: #1e222a;
+
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+
+  --text: rgba(255, 255, 255, 0.94);
+  --text-2: rgba(255, 255, 255, 0.58);
+  --text-3: rgba(255, 255, 255, 0.36);
+
+  /* Der einzige Akzent. Traegt Tipp, aktive Zustaende und den Heim-Anteil. */
+  --brass: #e3c77a;
+  --brass-dim: #8c7a4e;
+  --brass-wash: rgba(227, 199, 122, 0.12);
+
+  /* Nur fuer Dinge, die tatsaechlich gut oder schlecht sind -- Form-Pillen,
+     Tordifferenz, Fehlermeldungen. Entsaettigt, damit sie den Messington nicht
+     ueberschreien. */
+  --pos: #6e9b70;
+  --neg: #a85e52;
+
+  /* Tonwertskala der drei Ausgaenge. Eine Farbfamilie, drei Helligkeiten. */
+  --prob-home: var(--brass);
+  --prob-draw: rgba(255, 255, 255, 0.26);
+  --prob-away: rgba(255, 255, 255, 0.11);
+
+  /* Kanten statt Rundungen: der editoriale Eindruck lebt von Haarlinien.
+     Vorher 20/14/10 px -- das las sich als iOS-Widget. */
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 4px;
+
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+
+  --text-display: 34px;
+  --text-title: 20px;
+  --text-body: 16px;
+  --text-sm: 14px;
+  --text-xs: 13px;
+  --text-2xs: 11px;
+
+  --page-width: 1040px;
+  --page-width-narrow: 860px;
+}

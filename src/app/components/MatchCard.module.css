@@ -1,0 +1,114 @@
+.card {
+  background: var(--ink-700);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px 18px;
+  transition: border-color 0.2s ease;
+}
+
+.card:hover {
+  border-color: var(--line-strong);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* Versalien mit weitem Sperrsatz: das ist der Redaktionston, den die Richtung tragen
+   soll, und er kostet keine vertikale Hoehe. */
+.kickoff {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brass-dim);
+  white-space: nowrap;
+}
+
+.provenance {
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.body {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.teams {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.verdict {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+  min-width: 132px;
+}
+
+/* Der Tipp ist das, wofuer es die Seite gibt -- er darf als einziges Element gross
+   und farbig sein. */
+.tip {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  font-variation-settings: "opsz" 48, "SOFT" 20, "WONK" 0;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--brass);
+  margin-bottom: 4px;
+}
+
+.meta {
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+/* Unter 768 px rutscht der Tipp-Block unter die Paarung und wird zur Zeile: als
+   Seitenschiene bliebe fuer die Teamnamen keine lesbare Breite uebrig. */
+@media (max-width: 767px) {
+  .card {
+    padding: 14px 16px 16px;
+  }
+
+  .body {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .verdict {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+    padding-left: 0;
+    padding-top: 12px;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .tip {
+    font-size: 26px;
+    margin-bottom: 0;
+    margin-right: 4px;
+  }
+}

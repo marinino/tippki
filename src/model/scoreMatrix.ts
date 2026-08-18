@@ -234,3 +234,20 @@ export function reweightToOutcomeMasses(m: ScoreMatrix, target: OutcomeProbs): S
 
   return out;
 }
+
+// Die ersten (limit+1)^2 Zellen als dichtes Array -- fuer die Anzeige, nicht fuer die
+// Rechnung. Der Rest der Matrix (maxGoals = 10) traegt zusammen weit unter einem
+// Prozent und wuerde in einer Heatmap nur leere Zeilen erzeugen.
+//
+// Index: grid[h][a]. Bewusst KEINE Normalisierung auf den Ausschnitt -- die Zahlen
+// sollen dieselben sein wie die, aus denen der Tipp gewaehlt wurde.
+export function toScoreGrid(m: ScoreMatrix, limit: number): number[][] {
+  const rows: number[][] = [];
+  const bound = Math.min(limit, m.maxGoals);
+  for (let h = 0; h <= bound; h++) {
+    const row: number[] = [];
+    for (let a = 0; a <= bound; a++) row.push(scoreProb(m, h, a));
+    rows.push(row);
+  }
+  return rows;
+}

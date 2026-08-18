@@ -1,0 +1,30 @@
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Ersetzt das alert() beim Absenden: eine Inline-Meldung laesst sich lesen, ohne den
+   Eingabefluss zu unterbrechen, und verschwindet bei der naechsten Korrektur. */
+.error {
+  font-size: 13px;
+  color: var(--loss);
+  margin: 12px 0 0;
+}
+
+.tableBlock {
+  margin-top: 24px;
+}
+
+.tableTitle {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 767px) {
+  .controls {
+    flex-wrap: wrap;
+  }
+}

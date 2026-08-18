@@ -1,0 +1,54 @@
+.teams {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.teamRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.score {
+  width: 42px;
+  flex-shrink: 0;
+  text-align: center;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  /* Hiess vorher var(--text-primary) -- ein Token, das es nie gab. Die Ziffern erbten
+     deshalb ihre Farbe vom Elternelement. */
+  color: var(--text);
+  background: var(--ink-600);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 2px;
+  transition: border-color 0.15s ease;
+}
+
+.score:hover {
+  border-color: var(--brass-dim);
+}
+
+.score:focus-visible {
+  outline: none;
+  border-color: var(--brass);
+  box-shadow: 0 0 0 2px var(--brass-wash);
+}
+
+.score::-webkit-outer-spin-button,
+.score::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (max-width: 767px) {
+  .teams {
+    gap: 10px;
+  }
+}

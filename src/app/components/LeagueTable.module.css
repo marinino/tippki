@@ -1,0 +1,98 @@
+.wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--ink-700);
+  transition: opacity 0.2s ease;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: 11px 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.table th {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--brass-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.table td {
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pos {
+  color: var(--text-3);
+  width: 40px;
+  font-size: var(--text-xs);
+}
+
+.table .teamCol {
+  text-align: left;
+  color: var(--text);
+  padding-left: 16px;
+}
+
+.points {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Sp/S/U/N sind auf dem Handy die verzichtbaren Spalten: Position, Team, Differenz
+   und Punkte tragen die Tabelle allein. */
+@media (max-width: 700px) {
+  .table th,
+  .table td {
+    padding: 10px 8px;
+  }
+
+  .table .collapsible {
+    display: none;
+  }
+
+  .table .teamCol {
+    padding-left: 12px;
+  }
+}
+
+/* Gleiche Spezifitaet wie .table td, sonst gewinnt dessen padding-Kurzform. */
+.table .formCol {
+  width: 108px;
+  padding-right: 16px;
+}
+
+/* Unter 480 px faellt die Formspalte weg -- dann traegt die Punktespalte den
+   rechten Rand. */
+@media (max-width: 480px) {
+  .table .formCol {
+    display: none;
+  }
+
+  .table .points {
+    padding-right: 16px;
+  }
+}

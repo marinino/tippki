@@ -3,12 +3,16 @@ import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
+import { toScoreGrid } from "../../../model/scoreMatrix";
 import { computeXgForm } from "../../../model/xgForm";
 import { readOddsCache } from "../../../data/oddsApi";
 import { averageMarketProbabilities } from "../../../model/marketOdds";
 import { resolveScheme } from "../../../eval/scoringScheme";
 import { cacheKey, readLlmCache } from "../../../llm/llmCache";
 import { describeFactors } from "../../../llm/llmAdjustment";
+
+// 0 bis 5 Tore je Seite. Daueber traegt die Matrix zusammen weit unter einem Prozent.
+const DISPLAY_MAX_GOALS = 5;
 
 interface Fixture {
   homeTeam: string;
@@ -84,6 +88,10 @@ export async function GET(request: Request) {
       date,
       expectedHomeGoals: out.expectedHomeGoals,
       expectedAwayGoals: out.expectedAwayGoals,
+      // Die Verteilung, aus der der Tipp stammt. Bisher wurde sie pro Spiel gerechnet
+      // und dann auf eine einzige Zahl eingedampft -- die Heatmap zeigt, warum der
+      // EV-Tipp oft nicht das wahrscheinlichste Ergebnis ist.
+      scoreGrid: toScoreGrid(out.matrix, DISPLAY_MAX_GOALS),
       homeWinProb: out.finalProbs.homeWinProb,
       drawProb: out.finalProbs.drawProb,
       awayWinProb: out.finalProbs.awayWinProb,
