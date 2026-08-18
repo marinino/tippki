@@ -1,0 +1,61 @@
+.team {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-body);
+  font-weight: 500;
+  letter-spacing: -0.011em;
+  color: var(--text);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* Auswaertsteam eine Stufe leiser. Das ersetzt das "vs" als Trenner: die Paarung ist
+   auch ohne Wort lesbar, sobald Heim und Auswaerts verschieden gewichtet sind. */
+.muted {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.sm {
+  font-size: var(--text-sm);
+  gap: 8px;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+
+.sm .badge {
+  width: 21px;
+  height: 21px;
+}
+
+/* Platzhalter statt Einrueckungssprung, wenn ein Wappen fehlt. */
+.badgeEmpty {
+  background: var(--ink-500);
+}
+
+.logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.estimated {
+  color: var(--brass-dim);
+  font-weight: 400;
+}

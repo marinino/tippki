@@ -3,8 +3,12 @@ import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
+import { toScoreGrid } from "../../../model/scoreMatrix";
 import { computeSimulatedForm, type SimpleResult } from "../../../model/simulateForm";
 import { resolveScheme } from "../../../eval/scoringScheme";
+
+// 0 bis 5 Tore je Seite -- gleiche Aufloesung wie im Tipps-Tab.
+const DISPLAY_MAX_GOALS = 5;
 
 interface Fixture {
   homeTeam: string;
@@ -115,6 +119,7 @@ export async function POST(request: Request) {
       date,
       homeLogo: logosByTeam[homeTeam] ?? null,
       awayLogo: logosByTeam[awayTeam] ?? null,
+      scoreGrid: toScoreGrid(out.matrix, DISPLAY_MAX_GOALS),
       expectedHomeGoals: out.expectedHomeGoals,
       expectedAwayGoals: out.expectedAwayGoals,
       homeWinProb: out.finalProbs.homeWinProb,

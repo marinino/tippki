@@ -1,0 +1,122 @@
+.details {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+  transition: color 0.15s ease;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary:hover {
+  color: var(--brass);
+}
+
+.chevron {
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+}
+
+.details[open] .chevron {
+  transform: rotate(45deg);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* Label-Spalte fest, Wert flexibel: dadurch stehen die drei Bloecke untereinander
+   auf einer Kante, statt als Fliesstext zu verlaufen. */
+.row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+}
+
+.rowLabel {
+  color: var(--brass-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding-top: 1px;
+}
+
+.rowValue {
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.factors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factors li {
+  position: relative;
+  padding-left: 12px;
+}
+
+.factors li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 4px;
+  height: 1px;
+  background: var(--text-3);
+}
+
+.status {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-3);
+}
+
+.applied {
+  color: var(--brass-dim);
+}
+
+.blocked {
+  color: var(--neg);
+}
+
+.odds {
+  display: inline-block;
+  margin-right: 14px;
+  white-space: nowrap;
+}
+
+.bookmaker {
+  color: var(--text-3);
+  margin-right: 5px;
+}
+
+/* Auf schmalen Schirmen kostet die feste Label-Spalte zu viel Breite -- dann stapeln
+   Bezeichnung und Wert. */
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}

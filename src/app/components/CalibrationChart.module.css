@@ -1,0 +1,91 @@
+.figure {
+  margin: 16px 0 0;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  background: var(--ink-700);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 20px 22px;
+}
+
+.svg {
+  width: 260px;
+  height: 260px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.diagonal {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.curve {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.point {
+  fill: var(--brass);
+  stroke: var(--ink-700);
+  stroke-width: 1.5;
+}
+
+.tick {
+  fill: var(--text-3);
+  font-size: 10px;
+  font-family: var(--font-sans);
+}
+
+.caption {
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.axisX,
+.axisY {
+  color: var(--brass-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.axisX::before {
+  content: "→ ";
+}
+
+.axisY::before {
+  content: "↑ ";
+}
+
+.ece {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .figure {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .svg {
+    width: 100%;
+    max-width: 260px;
+    height: auto;
+  }
+}

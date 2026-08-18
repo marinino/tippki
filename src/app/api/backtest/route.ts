@@ -3,6 +3,7 @@
 // irgendwann verschiedene Zahlen geliefert haetten.
 
 import { runBacktest, type TipMode, type VariantName } from "../../../eval/backtestCore";
+import { calibrationBins } from "../../../eval/calibration";
 import { resolveScheme } from "../../../eval/scoringScheme";
 import { parseSplit } from "../../../eval/splits";
 
@@ -13,7 +14,13 @@ export async function GET(request: Request) {
   const tipMode = (params.get("tip") ?? "ev") as TipMode;
   const scheme = resolveScheme(params.get("scheme"));
 
-  const result = runBacktest({ split, variant, tipMode, scheme });
+  // includeEvaluations kostet keine zusaetzliche Rechenzeit -- die Auswertungen
+  // entstehen ohnehin, sie wurden bisher nur verworfen. Ueber die Leitung gehen davon
+  // nur die zehn Klassen des Reliability-Diagramms, nicht die 2448 Spiele.
+  const result = runBacktest({ split, variant, tipMode, scheme, includeEvaluations: true });
+  const calibration = calibrationBins(
+    result.evaluations.map((e) => ({ probs: e.finalProbs, actual: e.actual }))
+  );
 
   return Response.json({
     // Bestehende Felder unveraendert, damit das Frontend nicht bricht.
@@ -38,5 +45,6 @@ export async function GET(request: Request) {
     overall: result.overall,
     baselines: result.baselines,
     matchesWithoutOdds: result.matchesWithoutOdds,
+    calibration,
   });
 }

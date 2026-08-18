@@ -1,0 +1,37 @@
+.row {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pill {
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Hier ist die Ampel tatsaechlich die richtige Kodierung -- ein Sieg IST besser als
+   eine Niederlage. Entsaettigt, damit sie den Messington nicht ueberschreit. */
+.win {
+  background: color-mix(in srgb, var(--pos) 30%, transparent);
+  color: var(--pos);
+}
+
+.draw {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+}
+
+.loss {
+  background: color-mix(in srgb, var(--neg) 26%, transparent);
+  color: var(--neg);
+}
+
+.empty {
+  color: var(--text-3);
+}
