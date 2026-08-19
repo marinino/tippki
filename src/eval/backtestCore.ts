@@ -23,6 +23,8 @@ import {
 } from "../model/teamStrength";
 import { baseLambdas } from "../model/predictMatch";
 import {
+  DEFAULT_OUTCOME_TEMPERATURE,
+  applyOutcomeTemperature,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
   outcomeMasses,
@@ -225,6 +227,8 @@ export interface RunSpec {
   // Matrixparameter. Ohne Angabe die produktiven Werte aus scoreMatrix.ts.
   rho?: number;
   drawBoost?: number;
+  // Kalibrierungstemperatur auf den 1X2-Massen. Ohne Angabe der produktive Wert.
+  outcomeTemperature?: number;
 }
 
 export interface MatchEvaluation {
@@ -317,6 +321,9 @@ function predictVariant(
     ctx.baseLambdaAway * Math.exp(formWeight * awayForm),
     { rho: spec.rho, drawBoost: spec.drawBoost }
   );
+  // Vor allem anderen: Totals, Handicap und exaktes Ergebnis werden aus derselben Matrix
+  // gelesen und muessen dieselbe Temperatur gesehen haben wie die 1X2-Massen.
+  applyOutcomeTemperature(matrix, spec.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE);
 
   const totalMarginal = totalGoalsMarginal(matrix);
   let over = 0;

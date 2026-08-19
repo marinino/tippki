@@ -43,16 +43,18 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
   );
 }
 
-// Die Statuszeile ist der wichtige Teil: eine Korrektur, die verworfen oder gedaempft
-// wurde, ist eine andere Aussage als eine, die voll durchschlug.
+// Die Statuszeile ist der wichtige Teil: sie sagt, wie GROSS die Korrektur ausgefallen ist.
+// Seit dem Ausbau der Favoritensicherung wird nichts mehr gedaempft oder verworfen -- die
+// Klammerung bei +/-16 Prozent ist die einzige Grenze, und ob der Layer ueberhaupt etwas
+// bewegt, sieht man nur hier.
 function ContextFactorList({ prediction: p }: { prediction: Prediction }) {
-  const status = p.llmBlocked
-    ? "Korrektur verworfen — hätte die Tendenz gedreht"
-    : p.llmShrinkFactor != null && p.llmShrinkFactor < 1
-      ? `Korrektur auf ${Math.round(p.llmShrinkFactor * 100)}% gedämpft (Favoritenschutz)`
-      : "Korrektur angewandt";
+  const signed = (pct: number) => `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)} %`;
+  const status =
+    p.llmHomeAdjustmentPct == null || p.llmAwayAdjustmentPct == null
+      ? "Keine Korrektur"
+      : `Torerwartung Heim ${signed(p.llmHomeAdjustmentPct)}, Auswärts ${signed(p.llmAwayAdjustmentPct)}`;
 
-  const tone = p.llmBlocked ? styles.blocked : p.llmApplied ? styles.applied : "";
+  const tone = p.llmApplied ? styles.applied : "";
 
   return (
     <div className={styles.row}>

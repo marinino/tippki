@@ -79,9 +79,17 @@ export async function GET(request: Request) {
       prices: out.prices,
       homeIsEstimated: out.homeIsEstimated,
       awayIsEstimated: out.awayIsEstimated,
-      llmApplied: out.llmAdjustment !== null && !out.llmAdjustment.blocked,
-      llmBlocked: out.llmAdjustment?.blocked ?? false,
-      llmShrinkFactor: out.llmAdjustment?.shrinkFactor ?? null,
+      llmApplied: out.llmAdjustment !== null,
+      // Relative Aenderung der Torerwartung je Seite, in Prozent. Seit dem Ausbau der
+      // Favoritensicherung ist das die einzige Groesse, die zwischen zwei Korrekturen noch
+      // variiert -- und damit die, an der sich beobachten laesst, ob der Layer ueberhaupt
+      // etwas tut.
+      llmHomeAdjustmentPct: out.llmAdjustment
+        ? (Math.exp(out.llmAdjustment.homeLogAdj) - 1) * 100
+        : null,
+      llmAwayAdjustmentPct: out.llmAdjustment
+        ? (Math.exp(out.llmAdjustment.awayLogAdj) - 1) * 100
+        : null,
       llmFactors: cachedLlm ? describeFactors(cachedLlm.context) : [],
       llmSummary: cachedLlm?.context.summary ?? null,
       llmSources: cachedLlm?.sources ?? [],

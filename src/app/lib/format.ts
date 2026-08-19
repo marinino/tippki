@@ -46,10 +46,8 @@ export function formatMatchDayTime(iso: string): string {
 
 // Woraus die Quoten entstanden sind. Buchmacherquoten gehen bewusst nie ein -- der
 // einzige Unterschied ist, ob der recherchierte Spielkontext gegriffen hat.
-export function describeProvenance(llmApplied: boolean, llmBlocked: boolean): string {
-  if (llmBlocked) return "Kontext verworfen";
-  if (llmApplied) return "Modell + Kontext";
-  return "reines Modell";
+export function describeProvenance(llmApplied: boolean): string {
+  return llmApplied ? "Modell + Kontext" : "reines Modell";
 }
 
 // Dezimalquote, wie ein Buchmacher sie anschreibt. Ab 1000 wird die Stelligkeit unlesbar

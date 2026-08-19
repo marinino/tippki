@@ -115,6 +115,71 @@ export function buildDixonColesMatrix(
   return matrix;
 }
 
+// Kalibrierungstemperatur auf den 1X2-Massen. 1 = aus.
+//
+// Gemessen auf 2290 Spielen: mittlerer Kalibrierungsfehler 2,78 Prozentpunkte gegen 1,11
+// beim Buchmacher, auf denselben Spielen. Das Muster ist monoton und einseitig -- hohe
+// Wahrscheinlichkeiten zu hoch, niedrige zu niedrig, in der Mitte sitzt es gut. Oberhalb
+// von 90 Prozent gibt Pinnacle praktisch nie eine Quote ab (n = 4), das Modell 94-mal.
+//
+// Gescannt am 2026-08-19 auf VALIDATION (2018-2022, 1529 Spiele), Testset unangetastet:
+//
+//   T       RPS      LogLoss   O/U      Score     ECE      ΔLogLoss   p
+//   1.00    0.2055   1.0035    0.6905   3.1298   2.62pp    —          —
+//   1.15    0.2045   0.9966    0.6903   3.1229   1.25pp    +0.0069    <0.0001
+//   1.20    0.2044   0.9954    0.6903   3.1218   1.21pp    +0.0080    <0.0001
+//   1.30    0.2044   0.9944    0.6902   3.1207   1.80pp    +0.0091    0.0055
+//   1.50    0.2049   0.9952    0.6901   3.1216   2.39pp    +0.0082    0.1055
+//   Markt   0.2007   0.9802    0.6485      —     1.50pp
+//
+// Gewaehlt wurde 1.20: das Minimum des Kalibrierungsfehlers, und es liegt auf dem flachen
+// Stueck der LogLoss-Kurve (1.15 bis 1.30 sind praktisch gleichauf) statt am Rand des
+// Suchbereichs. Die LogLoss-Verbesserung traegt jede einzelne der fuenf Saisons: +0.0059,
+// +0.0065, +0.0097, +0.0103, +0.0077 -- keine wird von einer anderen getragen.
+//
+// Der Kalibrierungsfehler liegt damit UNTER dem des Buchmachers (1.21pp gegen 1.50pp). Das
+// heisst ausdruecklich NICHT, dass das Modell den Buchmacher schlaegt: LogLoss und RPS
+// bleiben klar schlechter. Kalibrierung sagt, ob 70 Prozent auch in 70 Prozent der Faelle
+// eintreten; Trennschaerfe sagt, ob ueberhaupt die richtigen Spiele 70 Prozent bekommen.
+// Repariert ist hier nur das Erste.
+export const DEFAULT_OUTCOME_TEMPERATURE = 1.2;
+
+// p_i' proportional zu p_i^(1/T), danach renormalisiert. T > 1 zieht zur Gleichverteilung,
+// T < 1 schaerft. Der Standardgriff gegen genau diese Verzerrung, und ein einziger
+// Parameter -- er kann die REIHENFOLGE der drei Ausgaenge nicht aendern, nur ihren Abstand.
+//
+// Angewandt wird sie auf die Matrix, nicht auf drei Zahlen daneben: jede Zelle wird mit dem
+// Faktor ihres Tendenzblocks multipliziert. Damit bleibt die Form INNERHALB einer Tendenz
+// unangetastet (ein Heimsieg faellt weiter eher 2:1 als 5:0 aus), und Preisblatt, Totals,
+// Handicap und exaktes Ergebnis bleiben mit den 1X2-Massen konsistent. Drei Zahlen separat
+// zu temperieren wuerde dagegen ein Produkt liefern, dessen Teile sich widersprechen.
+export function applyOutcomeTemperature(m: ScoreMatrix, temperature: number): void {
+  if (!Number.isFinite(temperature) || Math.abs(temperature - 1) < 1e-12) return;
+
+  const before = outcomeMasses(m);
+  const raw = [
+    before.homeWinProb ** (1 / temperature),
+    before.drawProb ** (1 / temperature),
+    before.awayWinProb ** (1 / temperature),
+  ];
+  const sum = raw[0] + raw[1] + raw[2];
+  if (!(sum > 0)) return;
+
+  // Ein Block ohne Masse laesst sich nicht skalieren -- dann bleibt die Matrix, wie sie ist,
+  // statt durch eine Division durch Null unbrauchbar zu werden.
+  const masses = [before.homeWinProb, before.drawProb, before.awayWinProb];
+  if (masses.some((p) => p <= 0)) return;
+  const factors = raw.map((r, i) => r / sum / masses[i]);
+
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) {
+      const block = h > a ? 0 : h === a ? 1 : 2;
+      m.cells[h * (m.maxGoals + 1) + a] *= factors[block];
+    }
+  }
+  normalize(m);
+}
+
 export function normalize(m: ScoreMatrix): void {
   let total = 0;
   for (let i = 0; i < m.cells.length; i++) total += m.cells[i];
