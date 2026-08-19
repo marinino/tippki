@@ -25,8 +25,8 @@ export interface Prediction {
   awayIsEstimated: boolean;
   // Recherchierter Spielkontext (Ausfaelle, Belastung, Motivation).
   llmApplied: boolean;
-  llmBlocked: boolean;
-  llmShrinkFactor: number | null;
+  llmHomeAdjustmentPct: number | null;
+  llmAwayAdjustmentPct: number | null;
   llmFactors: string[];
   llmSummary: string | null;
   llmSources: string[];

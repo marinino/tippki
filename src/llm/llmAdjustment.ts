@@ -2,10 +2,32 @@
 //
 // Der Layer greift eine Informationsluecke an, die real ist -- aber er tut es mit einer
 // schlechteren Basis als der Markt. Deshalb darf er nur nachjustieren, nie umstossen.
-// Vier Schichten, in dieser Reihenfolge.
+// Drei Schichten, in dieser Reihenfolge: daempfen, klammern, anwenden.
+//
+// ENTFERNT am 2026-08-19: die Favoritensicherung, die eine Korrektur zurueckgedreht oder
+// verworfen hat, sobald sie die wahrscheinlichste Tendenz gekippt haette. Sie war ein
+// Ueberbleibsel der Kicktipp-Zeit, als das Tendenz-Etikett das Produkt war. Seit dem Umbau
+// wird an der VERTEILUNG gemessen (RPS, LogLoss) -- siehe die Begruendung oben in
+// eval/metrics.ts, die die Trefferquote ausdruecklich absetzt. Eine Tendenzumkehr ist darin
+// nichts Besonderes, nur eine Verschiebung wie jede andere.
+//
+// Gemessen vor dem Ausbau, volle erlaubte Korrektur gegen die Heimmannschaft:
+//
+//   Ausgangslage      vorher            ohne Sicherung     mit Sicherung      Faktor
+//   klarer Favorit    63,6/22,7/13,7    53,6/26,3/20,1     53,6/26,3/20,1     greift nicht
+//   deutlich          53,3/26,4/20,3    43,2/28,6/28,2     43,2/28,6/28,2     greift nicht
+//   leichter Favorit  43,6/28,7/27,7    34,0/29,3/36,7     35,3/29,3/35,3     0,85
+//   knapp             38,0/29,6/32,4    28,9/29,2/41,9     35,2/29,6/35,2     0,30
+//   Gleichstand       35,3/29,5/35,3    26,4/28,6/45,0     35,3/29,5/35,3     0,00
+//
+// Sie griff also ausgerechnet dort am haertesten, wo das Etikett am wenigsten bedeutet: im
+// Gleichstand hat sie die GESAMTE Korrektur verworfen, um einen Muenzwurf zu schuetzen --
+// und dabei eine reale Verschiebung von 35,3 auf 26,4 mitgenommen. Vor einer Falschmeldung
+// schuetzt ohnehin die Klammerung: sie begrenzt die Bewegung auf rund zehn Prozentpunkte,
+// egal was recherchiert wurde. Wer sie wieder einbauen will, braucht ein Argument, das
+// diese Tabelle schlaegt.
 
 import type { OutcomeProbs } from "../eval/metrics";
-import { argmaxOutcome } from "../eval/metrics";
 import { buildDixonColesMatrix, outcomeMasses } from "../model/scoreMatrix";
 import { aggregateFactors, toLambdaExponents, type AggregatedDelta } from "./factMapping";
 import type { LlmMatchContext } from "./matchContext";
@@ -25,9 +47,6 @@ export interface LlmAdjustment {
   awayLogAdj: number;
   // Nachvollziehbarkeit fuer Log und UI.
   aggregated: AggregatedDelta;
-  // Wie stark die Favoritensicherung zurueckgedreht hat: 1 = unveraendert, 0 = blockiert.
-  shrinkFactor: number;
-  blocked: boolean;
 }
 
 export interface LlmAdjustmentOptions {
@@ -54,8 +73,6 @@ export function toLlmAdjustment(
     homeLogAdj: clamp(exponents.home * gain, limit),
     awayLogAdj: clamp(exponents.away * gain, limit),
     aggregated,
-    shrinkFactor: 1,
-    blocked: false,
   };
 }
 
@@ -65,71 +82,19 @@ export interface AppliedAdjustment {
   adjustment: LlmAdjustment;
 }
 
-const SHRINK_STEPS = 12;
-
-// Schritt 4: Favoritensicherung.
-//
-// Das LLM darf niemals allein aus einem Heimsieg einen Auswaertssieg machen. Kippt die
-// wahrscheinlichste Tendenz, wird die Korrektur per Binaersuche so weit zurueckgedreht,
-// bis sie es nicht mehr tut; kippt sie selbst beim kleinsten Schritt, wird gar nichts
-// angewandt.
-//
-// Begruendung: eine Tendenzumkehr ist die folgenreichste Einzelaenderung, die dieser Layer
-// ausloesen kann, und seine Informationsbasis rechtfertigt sie nicht. Ausfaelle verschieben
-// Wahrscheinlichkeiten, sie drehen keine Spiele.
-export function applyWithGuardrails(
+// Schritt 3: anwenden. Die Korrektur wirkt multiplikativ auf die Torerwartung, weil sie im
+// Log-Raum gedacht ist -- "15 Prozent weniger" ist unabhaengig davon, ob eine Mannschaft
+// 0,8 oder 2,4 Tore erwarten laesst. Nach der Klammerung steht die Groesse bereits fest;
+// hier wird nichts mehr entschieden.
+export function applyAdjustment(
   baseLambdaHome: number,
   baseLambdaAway: number,
-  adjustment: LlmAdjustment,
-  matrixOptions?: Parameters<typeof buildDixonColesMatrix>[2]
+  adjustment: LlmAdjustment
 ): AppliedAdjustment {
-  const noChange =
-    adjustment.homeLogAdj === 0 && adjustment.awayLogAdj === 0
-      ? { lambdaHome: baseLambdaHome, lambdaAway: baseLambdaAway, adjustment }
-      : null;
-  if (noChange) return noChange;
-
-  const baseOutcome = argmaxOutcome(
-    outcomeMasses(buildDixonColesMatrix(baseLambdaHome, baseLambdaAway, matrixOptions))
-  );
-
-  function withFactor(factor: number): { lambdaHome: number; lambdaAway: number; outcome: ReturnType<typeof argmaxOutcome> } {
-    const lambdaHome = baseLambdaHome * Math.exp(adjustment.homeLogAdj * factor);
-    const lambdaAway = baseLambdaAway * Math.exp(adjustment.awayLogAdj * factor);
-    return {
-      lambdaHome,
-      lambdaAway,
-      outcome: argmaxOutcome(outcomeMasses(buildDixonColesMatrix(lambdaHome, lambdaAway, matrixOptions))),
-    };
-  }
-
-  const full = withFactor(1);
-  if (full.outcome === baseOutcome) {
-    return { lambdaHome: full.lambdaHome, lambdaAway: full.lambdaAway, adjustment };
-  }
-
-  // Binaersuche nach dem groessten Faktor, der die Tendenz nicht kippt.
-  let low = 0;
-  let high = 1;
-  for (let i = 0; i < SHRINK_STEPS; i++) {
-    const mid = (low + high) / 2;
-    if (withFactor(mid).outcome === baseOutcome) low = mid;
-    else high = mid;
-  }
-
-  const smallest = withFactor(low);
-  if (low <= 0 || smallest.outcome !== baseOutcome) {
-    return {
-      lambdaHome: baseLambdaHome,
-      lambdaAway: baseLambdaAway,
-      adjustment: { ...adjustment, shrinkFactor: 0, blocked: true },
-    };
-  }
-
   return {
-    lambdaHome: smallest.lambdaHome,
-    lambdaAway: smallest.lambdaAway,
-    adjustment: { ...adjustment, shrinkFactor: low },
+    lambdaHome: baseLambdaHome * Math.exp(adjustment.homeLogAdj),
+    lambdaAway: baseLambdaAway * Math.exp(adjustment.awayLogAdj),
+    adjustment,
   };
 }
 

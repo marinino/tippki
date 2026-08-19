@@ -50,7 +50,6 @@ function flag(name: string): string | undefined {
 }
 
 const allFixtures: Fixture[] = JSON.parse(readFileSync(join(DATA_DIR, "fixtures.json"), "utf-8"));
-const hash = configHash(DEFAULT_PIPELINE);
 
 const now = new Date();
 const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
@@ -90,6 +89,20 @@ if (existsSync(LOG_PATH)) {
 const llmCache = readLlmCache();
 const llmMatchesMatchday = llmCache !== null && llmCache.matchday === matchday;
 const llmByFixture = llmMatchesMatchday ? llmCache!.contexts : {};
+
+// Das Modell aus dem Cache, nicht das gerade in der Umgebung eingestellte: geloggt wird,
+// womit der Spielkontext tatsaechlich geholt wurde. Steht LLM_MODEL beim Loggen auf etwas
+// anderes als beim Refresh, wuerde der Hash sonst ein Modell behaupten, das nie gelaufen
+// ist -- genau die stille Vermischung, gegen die er gebaut ist.
+const effectiveModel = llmMatchesMatchday ? llmCache!.model : DEFAULT_PIPELINE.llmModel;
+const hash = configHash({ ...DEFAULT_PIPELINE, llmModel: effectiveModel });
+
+if (effectiveModel !== DEFAULT_PIPELINE.llmModel) {
+  console.warn(
+    `Hinweis: der Spielkontext stammt von "${effectiveModel}", eingestellt ist derzeit\n` +
+      `         "${DEFAULT_PIPELINE.llmModel}". Geloggt wird das Modell aus dem Cache.\n`
+  );
+}
 
 if (!llmMatchesMatchday) {
   console.warn(
@@ -172,8 +185,6 @@ for (const fixture of fixtures) {
           sources: cachedLlm.sources,
           homeLogAdj: withLlm.llmAdjustment?.homeLogAdj ?? 0,
           awayLogAdj: withLlm.llmAdjustment?.awayLogAdj ?? 0,
-          shrinkFactor: withLlm.llmAdjustment?.shrinkFactor ?? 1,
-          blocked: withLlm.llmAdjustment?.blocked ?? false,
         }
       : null,
     variants: {
@@ -197,4 +208,7 @@ console.log(
   `\nSpieltag ${matchday}: ${written} protokolliert, ${skipped} uebersprungen ` +
     `(bereits im Log oder angepfiffen), ${withContext} mit Spielkontext.`
 );
-console.log(`Konfiguration ${hash}. Log: data/forward_log.jsonl`);
+console.log(
+  `Konfiguration ${hash} (Prompt ${DEFAULT_PIPELINE.llmPromptFingerprint}, Modell ` +
+    `${effectiveModel}). Log: data/forward_log.jsonl`
+);

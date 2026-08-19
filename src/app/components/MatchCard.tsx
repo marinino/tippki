@@ -16,7 +16,7 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
       <header className={styles.head}>
         <span className={styles.kickoff}>{formatMatchDayTime(p.date)}</span>
         <span className={styles.provenance}>
-          {describeProvenance(p.llmApplied, p.llmBlocked)}
+          {describeProvenance(p.llmApplied)}
         </span>
       </header>
 

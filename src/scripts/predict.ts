@@ -79,7 +79,7 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
   console.log(`${homeLabel} vs ${awayLabel}`);
   console.log(
     `  erwartete Tore ${out.expectedHomeGoals.toFixed(2)} : ${out.expectedAwayGoals.toFixed(2)}` +
-      (out.llmAdjustment && !out.llmAdjustment.blocked ? "  (mit Spielkontext)" : "")
+      (out.llmAdjustment ? "  (mit Spielkontext)" : "")
   );
   console.log(
     `  1X2       1 ${formatOdds(p.outcome.home)} (${(p.outcome.home.prob * 100).toFixed(1)}%)   ` +

@@ -12,6 +12,14 @@ import { join } from "node:path";
 import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
 import { mergeMarketRows } from "../data/refreshMarketOdds";
+import {
+  DEFAULT_PIPELINE,
+  canonicalUserPrompt,
+  configHash,
+  llmMappingFingerprint,
+  llmPromptFingerprint,
+  type PipelineConfig,
+} from "../model/pipelineConfig";
 import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
 import { XG_FORM_WINDOW, computeXgForm, computeXgFormResidual } from "../model/xgForm";
@@ -22,18 +30,21 @@ import { predictPipeline } from "../model/predictPipeline";
 import { aggregateFactors, toLambdaExponents } from "../llm/factMapping";
 import {
   DEFAULT_LLM_MAX_LOG_ADJUSTMENT,
-  applyWithGuardrails,
+  applyAdjustment,
   outcomeProbsOf,
   toLlmAdjustment,
 } from "../llm/llmAdjustment";
 import {
+  FACT_CATEGORIES,
   isValidMatchContext,
   isValidMatchdayContext,
   type LlmKeyFactor,
   type LlmMatchContext,
+  type PlayerRole,
 } from "../llm/matchContext";
 import { SEARCH_USD_PER_REQUEST, estimateCostUsd, resolveModelProfile } from "../llm/modelProfile";
 import {
+  applyOutcomeTemperature,
   argmaxCell,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
@@ -1021,7 +1032,7 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
   check(() => assert.equal(noAdj.homeLogAdj, 0));
   check(() => assert.equal(noAdj.awayLogAdj, 0));
 
-  const untouched = applyWithGuardrails(1.8, 1.0, noAdj);
+  const untouched = applyAdjustment(1.8, 1.0, noAdj);
   check(() => assert.equal(untouched.lambdaHome, 1.8, "ohne Faktoren bleibt lambda gleich"));
   check(() => assert.equal(untouched.lambdaAway, 1.0));
 
@@ -1041,8 +1052,8 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
     )
   );
 
-  // Favoritenschutz: eine Korrektur, die die Tendenz drehen wuerde, wird zurueckgedreht
-  // oder verworfen. Das LLM darf aus einem Heimsieg keinen Auswaertssieg machen.
+  // Anwendung: die geklammerte Korrektur wirkt multiplikativ und exakt. Nichts zwischen
+  // Klammerung und Torerwartung darf noch an der Groesse drehen.
   const tight: LlmMatchContext = {
     ...empty,
     foundAnything: true,
@@ -1053,27 +1064,27 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
     ],
   };
   const tightAdj = toLlmAdjustment(tight);
-
-  // Ein knappes Spiel, bei dem Heim gerade eben vorn liegt.
-  const baseHome = 1.34;
-  const baseAway = 1.3;
-  const baseOutcome = argmaxOutcome(outcomeProbsOf(baseHome, baseAway));
-  const guarded = applyWithGuardrails(baseHome, baseAway, tightAdj);
-  const guardedOutcome = argmaxOutcome(outcomeProbsOf(guarded.lambdaHome, guarded.lambdaAway));
+  const applied = applyAdjustment(1.34, 1.3, tightAdj);
   check(() =>
-    assert.equal(guardedOutcome, baseOutcome, "die wahrscheinlichste Tendenz darf nicht kippen")
+    closeTo(applied.lambdaHome, 1.34 * Math.exp(tightAdj.homeLogAdj), 1e-12, "Heim exakt angewandt")
   );
   check(() =>
-    assert.ok(
-      guarded.adjustment.shrinkFactor >= 0 && guarded.adjustment.shrinkFactor <= 1,
-      "Shrink-Faktor im Intervall"
-    )
+    closeTo(applied.lambdaAway, 1.3 * Math.exp(tightAdj.awayLogAdj), 1e-12, "Auswaerts exakt angewandt")
   );
 
-  // Systematisch: ueber viele Lambda-Paare und Faktorlisten darf die Tendenz NIE kippen.
+  // Die Favoritensicherung ist am 2026-08-19 ausgebaut worden -- Begruendung und Messtabelle
+  // stehen im Kopf von llmAdjustment.ts. Sie schuetzte das Tendenz-Etikett, das seit dem
+  // Umbau gar nicht mehr bewertet wird, und verwarf dafuer in Tossup-Spielen die gesamte
+  // Korrektur. Was bleibt, ist die Klammerung -- und die ist der Schutz, den dieser Test
+  // festnagelt: egal welche Faktoren recherchiert werden, keine einzelne Ausgangs-
+  // wahrscheinlichkeit darf sich um mehr als 20 Punkte bewegen. Ueber ein dichtes Raster
+  // aller Lambda-Paare von 0,4 bis 3,0 liegt das gemessene Maximum bei 14,6 Punkten (bei
+  // 3,00/3,00, also einem torreichen Gleichstand). Reisst dieser Test, ist die Klammerung
+  // defekt.
+  const MAX_SHIFT = 0.2;
   const rng = mulberry32(4242);
   let flipped = 0;
-  let shrunk = 0;
+  let worstShift = 0;
   for (let trial = 0; trial < 300; trial++) {
     const lh = 0.4 + rng() * 2.6;
     const la = 0.4 + rng() * 2.6;
@@ -1088,16 +1099,30 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
       })
     );
     const adj = toLlmAdjustment({ ...empty, foundAnything: true, keyFactors: factors });
-    const before = argmaxOutcome(outcomeProbsOf(lh, la));
-    const applied = applyWithGuardrails(lh, la, adj);
-    const after = argmaxOutcome(outcomeProbsOf(applied.lambdaHome, applied.lambdaAway));
-    if (before !== after) flipped++;
-    if (applied.adjustment.shrinkFactor < 1) shrunk++;
+    const out = applyAdjustment(lh, la, adj);
+    const before = outcomeProbsOf(lh, la);
+    const after = outcomeProbsOf(out.lambdaHome, out.lambdaAway);
+    worstShift = Math.max(
+      worstShift,
+      Math.abs(after.homeWinProb - before.homeWinProb),
+      Math.abs(after.drawProb - before.drawProb),
+      Math.abs(after.awayWinProb - before.awayWinProb)
+    );
+    if (argmaxOutcome(before) !== argmaxOutcome(after)) flipped++;
   }
   checkCount += 300;
-  check(() => assert.equal(flipped, 0, `${flipped} von 300 Tendenzen gekippt -- Guardrail defekt`));
-  // Waere nie gedaempft worden, wuerde der Guardrail nichts pruefen.
-  check(() => assert.ok(shrunk > 0, "in mindestens einem Fall muss der Guardrail eingreifen"));
+  check(() =>
+    assert.ok(
+      worstShift <= MAX_SHIFT,
+      `groesste Verschiebung ${(worstShift * 100).toFixed(1)} Punkte -- Klammerung defekt`
+    )
+  );
+  // Die Gegenprobe zum Ausbau: in knappen Spielen MUSS die Tendenz jetzt kippen koennen.
+  // Baut jemand die Sicherung wieder ein, ohne die Messtabelle zu schlagen, faellt genau
+  // dieser Check.
+  check(() =>
+    assert.ok(flipped > 0, "keine einzige Tendenz gekippt -- ist die Favoritensicherung zurueck?")
+  );
 
   // Die Pipeline muss den Kontext auch tatsaechlich verwenden -- und ohne ihn identisch
   // rechnen wie vorher.
@@ -1327,6 +1352,176 @@ section("Quoten-Merge der laufenden Saison", () => {
     check(() => assert.equal(back.addedRows, 1, "Rueckspiel ist eine eigene Zeile"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Kalibrierungstemperatur", () => {
+  // Sie greift auf der Matrix, nicht auf drei Zahlen daneben. Was dabei erhalten bleiben
+  // MUSS: die Normierung, die Reihenfolge der drei Ausgaenge und die Form innerhalb einer
+  // Tendenz. Bricht eines davon, ist nicht die Kalibrierung schlecht, sondern das Preisblatt
+  // widerspruechlich -- und das faellt in der UI zuerst am exakten Ergebnis auf.
+  function matrixOf(lh: number, la: number) {
+    return buildDixonColesMatrix(lh, la);
+  }
+  function sumOf(m: ReturnType<typeof matrixOf>) {
+    let total = 0;
+    for (let i = 0; i < m.cells.length; i++) total += m.cells[i];
+    return total;
+  }
+
+  // T = 1 ist ein exakter Nulldurchgang, kein "fast gleich".
+  const untouched = matrixOf(1.7, 1.1);
+  const copy = Float64Array.from(untouched.cells);
+  applyOutcomeTemperature(untouched, 1.0);
+  check(() => assert.deepEqual(Array.from(untouched.cells), Array.from(copy), "T = 1 aendert nichts"));
+
+  for (const [lh, la] of [
+    [2.1, 0.9],
+    [1.7, 1.1],
+    [1.35, 1.35],
+    [0.8, 2.2],
+  ]) {
+    const m = matrixOf(lh, la);
+    const before = outcomeMasses(m);
+    const shapeBefore = scoreProb(m, 3, 1) / scoreProb(m, 2, 0); // beide im Heimsieg-Block
+    applyOutcomeTemperature(m, 1.2);
+    const after = outcomeMasses(m);
+    const shapeAfter = scoreProb(m, 3, 1) / scoreProb(m, 2, 0);
+
+    check(() => closeTo(sumOf(m), 1, 1e-9, "Matrix bleibt normiert"));
+    check(() => closeTo(shapeAfter, shapeBefore, 1e-9, "Form innerhalb der Tendenz unveraendert"));
+    // T > 1 zieht zur Gleichverteilung: jede Masse rueckt naeher an ein Drittel.
+    const closer = (a: number, b: number) => Math.abs(a - 1 / 3) <= Math.abs(b - 1 / 3) + 1e-12;
+    check(() => assert.ok(closer(after.homeWinProb, before.homeWinProb), "Heim rueckt zur Mitte"));
+    check(() => assert.ok(closer(after.awayWinProb, before.awayWinProb), "Auswaerts rueckt zur Mitte"));
+    // Sie darf Abstaende verkleinern, aber nie die Rangfolge drehen: p^(1/T) ist streng
+    // monoton in p. Paare, die vorher praktisch gleichauf lagen, bleiben aussen vor -- bei
+    // lambda_heim == lambda_ausw sind Heim- und Auswaertsmasse bis auf die letzte
+    // Gleitkommastelle identisch, und welche davon "vorn" liegt, entscheidet dann die
+    // Rundung. Das ist keine Eigenschaft der Temperatur, sondern derselbe Muenzwurf, der
+    // im Gleichstand ohnehin hinter jedem Tendenz-Etikett steckt.
+    const massesOf = (p: typeof before) => [p.homeWinProb, p.drawProb, p.awayWinProb];
+    const pairs: [number, number][] = [
+      [0, 1],
+      [0, 2],
+      [1, 2],
+    ];
+    for (const [i, j] of pairs) {
+      const gapBefore = massesOf(before)[i] - massesOf(before)[j];
+      const gapAfter = massesOf(after)[i] - massesOf(after)[j];
+      if (Math.abs(gapBefore) <= 1e-9) continue;
+      check(() =>
+        assert.equal(Math.sign(gapAfter), Math.sign(gapBefore), `Rangfolge ${i} zu ${j} haelt`)
+      );
+    }
+  }
+
+  // Gegenrichtung: T < 1 schaerft.
+  const sharp = matrixOf(2.1, 0.9);
+  const beforeSharp = outcomeMasses(sharp).homeWinProb;
+  applyOutcomeTemperature(sharp, 0.8);
+  check(() =>
+    assert.ok(outcomeMasses(sharp).homeWinProb > beforeSharp, "T < 1 macht ueberzeugter")
+  );
+
+  // Unsinnige Eingaben duerfen die Matrix nicht zerstoeren -- lieber nichts tun.
+  const robust = matrixOf(1.5, 1.5);
+  const robustCopy = Float64Array.from(robust.cells);
+  applyOutcomeTemperature(robust, Number.NaN);
+  check(() =>
+    assert.deepEqual(Array.from(robust.cells), Array.from(robustCopy), "NaN laesst die Matrix in Ruhe")
+  );
+});
+
+// ---------------------------------------------------------------------------
+
+section("Konfigurations-Hash", () => {
+  // Der Hash steht in jeder Zeile des Vorwaerts-Logs und entscheidet, welche Vorhersagen
+  // spaeter miteinander verglichen werden duerfen. Faengt er eine Aenderung nicht, sammelt
+  // das Log still zwei Populationen unter derselben Kennung -- und der gepaarte Test darauf
+  // ist wertlos, ohne dass es jemandem auffaellt.
+
+  // Die Nutzeranweisung wird mit festen Platzhaltern gerendert und danach ziffernmaskiert.
+  // Bliebe eine Ziffer stehen, waere es das Tagesdatum, und der Fingerabdruck waere am
+  // naechsten Morgen ein anderer -- 34 Populationen statt einer.
+  const canonical = canonicalUserPrompt();
+  check(() =>
+    assert.ok(!/\d/.test(canonical), `Ziffer im kanonischen Prompt: ${canonical.match(/.{0,20}\d.{0,20}/)?.[0]}`)
+  );
+  check(() => assert.ok(canonical.length > 200, "der kanonische Prompt ist nicht leer"));
+  check(() =>
+    assert.equal(llmPromptFingerprint(), llmPromptFingerprint(), "Fingerabdruck ist deterministisch")
+  );
+  check(() =>
+    assert.equal(
+      llmMappingFingerprint(),
+      llmMappingFingerprint(),
+      "Fingerabdruck der Faktenzuordnung ist deterministisch"
+    )
+  );
+  // Die Gegenprobe, dass der Abdruck das Verhalten wirklich abtastet: lieferte die
+  // Zuordnung fuer jede Kombination dieselbe Zahl, waere der Abdruck konstant und wuerde
+  // auch keine Aenderung mehr treffen. Torwart und Stuermer muessen sich unterscheiden.
+  const withRole = (role: PlayerRole) =>
+    toLlmAdjustment({
+      homeTeam: "A",
+      awayTeam: "B",
+      foundAnything: true,
+      summary: "",
+      keyFactors: [
+        {
+          team: "home",
+          category: FACT_CATEGORIES[0],
+          subject: "X",
+          role,
+          importance: "key",
+          direction: "weakens",
+          certainty: "confirmed",
+          note: "",
+          source: "",
+        },
+      ],
+    });
+  check(() =>
+    assert.notEqual(
+      withRole("goalkeeper").homeLogAdj,
+      withRole("forward").homeLogAdj,
+      "die Zuordnung unterscheidet Positionen -- sonst taste der Abdruck nichts ab"
+    )
+  );
+
+  check(() => assert.equal(configHash(DEFAULT_PIPELINE), configHash(DEFAULT_PIPELINE), "Hash ist stabil"));
+
+  // Jede einzelne Stellschraube muss den Hash bewegen. Ohne diese Schleife faellt es nicht
+  // auf, wenn ein neues Feld zwar in PipelineConfig steht, aber in configHash vergessen
+  // wurde -- der haeufigste Weg, wie so ein Hash still nutzlos wird.
+  const variations: [string, Partial<PipelineConfig>][] = [
+    ["ridgePseudoMatches", { ridgePseudoMatches: DEFAULT_PIPELINE.ridgePseudoMatches + 1 }],
+    ["seasonRecencyWeights", { seasonRecencyWeights: [...DEFAULT_PIPELINE.seasonRecencyWeights, 0.1] }],
+    ["xgFormWindow", { xgFormWindow: DEFAULT_PIPELINE.xgFormWindow + 1 }],
+    ["xgFormWeight", { xgFormWeight: DEFAULT_PIPELINE.xgFormWeight + 0.01 }],
+    ["maxGoals", { maxGoals: DEFAULT_PIPELINE.maxGoals + 1 }],
+    ["rho", { rho: DEFAULT_PIPELINE.rho + 0.01 }],
+    ["drawBoost", { drawBoost: DEFAULT_PIPELINE.drawBoost + 0.01 }],
+    ["outcomeTemperature", { outcomeTemperature: DEFAULT_PIPELINE.outcomeTemperature + 0.05 }],
+    ["llmGain", { llmGain: 0.8 }],
+    ["llmMaxLogAdjustment", { llmMaxLogAdjustment: 0.2 }],
+    ["llmPromptFingerprint", { llmPromptFingerprint: "anders01" }],
+    ["llmMappingFingerprint", { llmMappingFingerprint: "anders02" }],
+    ["llmModel", { llmModel: "claude-opus-5" }],
+  ];
+
+  const base = configHash(DEFAULT_PIPELINE);
+  for (const [name, override] of variations) {
+    check(() =>
+      assert.notEqual(
+        configHash({ ...DEFAULT_PIPELINE, ...override }),
+        base,
+        `${name} veraendert den Hash nicht -- fehlt es in configHash?`
+      )
+    );
   }
 });
 

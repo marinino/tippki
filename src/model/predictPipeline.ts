@@ -24,6 +24,8 @@ import { XG_FORM_WEIGHT } from "./xgForm";
 import { baseLambdas } from "./predictMatch";
 import { buildPriceSheet, type PriceSheet, type PriceSheetOptions } from "./priceSheet";
 import {
+  DEFAULT_OUTCOME_TEMPERATURE,
+  applyOutcomeTemperature,
   buildDixonColesMatrix,
   expectedGoals,
   outcomeMasses,
@@ -31,7 +33,7 @@ import {
   type ScoreMatrix,
 } from "./scoreMatrix";
 import {
-  applyWithGuardrails,
+  applyAdjustment,
   toLlmAdjustment,
   type LlmAdjustment,
   type LlmAdjustmentOptions,
@@ -49,6 +51,7 @@ export interface PipelineInput {
   // Korrektur der Torerwartungen.
   llmContext?: LlmMatchContext | null;
   llmOptions?: LlmAdjustmentOptions;
+  outcomeTemperature?: number;
   matrixOptions?: MatrixOptions;
   priceSheetOptions?: PriceSheetOptions;
 }
@@ -82,11 +85,10 @@ export function predictPipeline(input: PipelineInput): PipelineOutput {
   let lambdaAway = formLambdaAway;
 
   if (input.llmContext && input.llmContext.keyFactors.length > 0) {
-    const applied = applyWithGuardrails(
+    const applied = applyAdjustment(
       formLambdaHome,
       formLambdaAway,
-      toLlmAdjustment(input.llmContext, input.llmOptions),
-      input.matrixOptions
+      toLlmAdjustment(input.llmContext, input.llmOptions)
     );
     lambdaHome = applied.lambdaHome;
     lambdaAway = applied.lambdaAway;
@@ -94,6 +96,9 @@ export function predictPipeline(input: PipelineInput): PipelineOutput {
   }
 
   const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway, input.matrixOptions);
+  // Schritt 4: Kalibrierungstemperatur. Auf der Matrix, damit das Preisblatt darunter
+  // konsistent bleibt -- Begruendung in scoreMatrix.ts.
+  applyOutcomeTemperature(matrix, input.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE);
   const expected = expectedGoals(matrix);
 
   return {
