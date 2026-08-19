@@ -24,7 +24,7 @@ fünf Saisons einzeln. Details und Messtabelle in `scoreMatrix.ts`.
 
 Die Reihenfolge ist nicht kosmetisch.
 
-**Donnerstag, vor dem Spieltag**
+**Drei Stunden vor dem ersten Anpfiff des Spieltags** — freitags also gegen 17:30.
 
 ```bash
 npm run refresh-llm
@@ -33,6 +33,27 @@ npm run refresh-llm
 Recherchiert Ausfälle, Belastung und Motivation für alle neun Partien. Kostet rund 0,11 USD
 je Aufruf. Nur von Hand, nie automatisch — der inhaltliche Wert hängt am Zeitpunkt, und ein
 Aufruf zehn Tage vorher überschreibt den Cache mit einem leeren Befund.
+
+Warum genau drei Stunden, und warum ein einziger Aufruf für den ganzen Spieltag:
+
+- **Ein Aufruf**, weil gebündelt 6–8 Suchen und ein Systemprompt anfallen statt 27–36 Suchen
+  und neun Systemprompts. Der Cache ist entsprechend gebaut — ein `matchday`, ein
+  `fetchedAt` —, ein zweiter Aufruf überschreibt den ersten.
+- **So spät wie vertretbar**, weil ein Spieltag sich über 45 Stunden zieht (Fr 20:30 bis
+  So 17:30). Ein Aufruf am Donnerstag hätte der Freitagspartie 27 Stunden Vorlauf gelassen
+  und den Sonntagsspielen 72 — ausgerechnet die Hälfte des Spieltags ohne das, was den
+  Layer wertvoll macht. Bei drei Stunden sind es 3 bis 46.
+- **Nicht später**, aus zwei Gründen. `forward-log` überspringt jede Partie, die schon
+  angepfiffen ist, und das Log ist append-only: eine übersprungene Partie fehlt dauerhaft.
+  In das Fenster müssen aber Recherche, ein Blick in die `failures` des Caches, eventuell ein
+  zweiter Versuch und `forward-log` passen. Und: Aufstellungen erscheinen 60–75 Minuten vor
+  Anpfiff. Drei Stunden vorher liegt verlässlich davor — jeder Spieltag sieht dasselbe
+  Informationsregime, statt mal mit und mal ohne Aufstellung.
+
+**Dieser Zeitpunkt ist Teil des Eingefrorenen.** Er steht nicht im `configHash` und kann
+dort auch nicht stehen — er ist eine Handlung, kein Parameter. Er verändert den
+Informationsgehalt der Eingabe aber erheblich: wer zehn Spieltage früh recherchiert und
+danach spät, sammelt zwei Populationen, die kein Hash je auseinanderhalten wird.
 
 ```bash
 npm run forward-log
