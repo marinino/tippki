@@ -63,7 +63,9 @@ export function usePredictions(initialMatchday?: number | null) {
     const result = await runRefresh(
       "/api/refresh",
       setResults,
-      (r) => `${r.resultsCount} Ergebnisse, ${r.xgCount} xG-Spiele aktualisiert`,
+      (r) =>
+        `${r.resultsCount} Ergebnisse, ${r.xgCount} xG-Spiele aktualisiert` +
+        (r.oddsCount === null ? "" : `, ${r.oddsCount} Spiele mit Buchmacher-Schlussquote`),
       "Fehler beim Aktualisieren"
     );
     if (result) await load(data?.matchday ?? undefined);

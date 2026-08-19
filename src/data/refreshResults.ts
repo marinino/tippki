@@ -2,6 +2,8 @@ import { parse } from "csv-parse/sync";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { OPENLIGADB_TO_OUR_NAME } from "./openligaTeamNames";
+import { seasonToFilenameSuffix } from "./loadMatches";
+import { refreshMarketOdds } from "./refreshMarketOdds";
 
 const DATA_DIR = join(process.cwd(), "data");
 
@@ -11,13 +13,6 @@ interface OpenLigaMatchResult {
   team2: { teamName: string };
   matchIsFinished: boolean;
   matchResults: { resultTypeID: number; pointsTeam1: number; pointsTeam2: number }[];
-}
-
-// Saison-Code wie "2026" -> Dateiname-Suffix "2627" (Startjahr + Folgejahr, je zwei Ziffern),
-// passend zur bestehenden football-data.co.uk-Namenskonvention unserer CSV-Dateien.
-function seasonToFilenameSuffix(season: string): string {
-  const startYear = Number(season);
-  return String(startYear % 100).padStart(2, "0") + String((startYear + 1) % 100).padStart(2, "0");
 }
 
 function formatDateForCsv(iso: string): string {
@@ -189,9 +184,26 @@ export interface RefreshSummary {
   season: string;
   resultsCount: number;
   xgCount: number;
+  // Spiele der laufenden Saison, die nach dem Abruf eine Buchmacher-Schlussquote tragen.
+  // null = football-data fuehrt die Saison noch nicht oder war nicht erreichbar.
+  oddsCount: number | null;
 }
 
 export async function refreshSeasonData(season: string): Promise<RefreshSummary> {
   const [resultsCount, xgCount] = await Promise.all([refreshCsvResults(season), refreshXgResults(season)]);
-  return { season, resultsCount, xgCount };
+
+  // Bewusst NACH den Ergebnissen und bewusst nicht-fatal: die Quoten sind Massstab, nicht
+  // Betriebsgrundlage. Faellt football-data aus, laeuft die App vollstaendig weiter, nur der
+  // Vergleich mit dem Buchmacher fehlt fuer die betroffenen Spieltage.
+  let oddsCount: number | null = null;
+  try {
+    const market = await refreshMarketOdds(season);
+    if (market.published) {
+      oddsCount = Math.max(market.withPinnacleClose, market.withAverageClose);
+    }
+  } catch {
+    oddsCount = null;
+  }
+
+  return { season, resultsCount, xgCount, oddsCount };
 }

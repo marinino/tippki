@@ -19,7 +19,8 @@
     "predict": "tsx src/scripts/predict.ts",
     "refresh-llm": "tsx src/scripts/refreshLlm.ts",
     "simulate-season": "tsx src/scripts/simulateSeason.ts",
-    "dev": "next dev"
+    "dev": "next dev",
+    "refresh-market": "tsx src/scripts/refreshMarket.ts"
   },
   "repository": {
     "type": "git",

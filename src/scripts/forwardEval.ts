@@ -1,20 +1,26 @@
 // Wertet das Vorwaerts-Log gegen die tatsaechlichen Ergebnisse aus.
 //
 //   npm run forward-eval
-//   npm run forward-eval -- --pool      (ueber Konfigurationsaenderungen hinweg mitteln)
+//   npm run forward-eval -- --pool                            (ueber Konfigurationsaenderungen hinweg mitteln)
+//   npm run forward-eval -- --benchmark=marketAverageClose    (anderer Gegner)
+//   npm run forward-eval -- --matches                         (Quoten Spiel fuer Spiel erzwingen)
 //
-// Vorher "npm run refresh" laufen lassen, damit die Ergebnisse in den CSVs stehen.
+// Vorher "npm run refresh" und "npm run refresh-market" laufen lassen -- das erste bringt die
+// Ergebnisse, das zweite die Schlussquoten der Buchmacher.
 //
-// Die Ergebnisse werden hier zur Laufzeit dazugejoint, nicht im Log gespeichert -- das
-// Log bleibt append-only und unveraenderlich, und damit ist es als Evidenz brauchbar.
+// Die Ergebnisse UND die Quoten werden hier zur Laufzeit dazugejoint, nicht im Log
+// gespeichert -- das Log bleibt append-only und unveraenderlich, und genau das macht es als
+// Evidenz brauchbar. Die eigene Vorhersage steht fest, bevor irgendetwas davon existiert.
 //
-// Ausgewertet werden dieselben Maerkte wie im Backtest: 1X2, Over/Under 2.5 und das
-// exakte Ergebnis. Die Frage ist immer dieselbe -- bringt der recherchierte Spielkontext
-// prospektiv etwas, oder nicht?
+// Zwei Fragen werden getrennt beantwortet:
+//   1. Bringt der recherchierte Spielkontext etwas? (Modell gegen Modell+LLM)
+//   2. Wo stehen wir gegen den Buchmacher? (beide Varianten gegen die Schlussquote)
+// Frage 2 laeuft nur auf den Spielen, fuer die eine Referenzquote vorliegt -- alle Varianten
+// auf derselben Spielmenge, sonst vergleicht die Zahl zwei verschiedene Stichproben.
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { loadAllMatches } from "../data/loadMatches";
+import { loadAllMatches, type Match } from "../data/loadMatches";
 import {
   argmaxOutcome,
   binaryBrier,
@@ -30,6 +36,12 @@ import {
   type PerMatchMetrics,
 } from "../eval/metrics";
 import { formatBootstrap, formatMcNemar, mcnemarExact, pairedBootstrap } from "../eval/significance";
+import {
+  BENCHMARK_LABELS,
+  benchmarkQuote,
+  parseBenchmarkSource,
+  type BenchmarkQuote,
+} from "../eval/benchmarkOdds";
 
 const LOG_PATH = join(process.cwd(), "data", "forward_log.jsonl");
 
@@ -54,7 +66,14 @@ if (!existsSync(LOG_PATH)) {
   process.exit(0);
 }
 
+function flag(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+}
+
 const pool = process.argv.includes("--pool");
+const forceMatchList = process.argv.includes("--matches");
+const benchmark = parseBenchmarkSource(flag("benchmark"));
 
 const entries: LogEntry[] = [];
 for (const line of readFileSync(LOG_PATH, "utf-8").split("\n")) {
@@ -71,12 +90,9 @@ if (entries.length === 0) {
   process.exit(0);
 }
 
-const results = new Map<string, { homeGoals: number; awayGoals: number }>();
+const results = new Map<string, Match>();
 for (const m of loadAllMatches()) {
-  results.set(`${m.season}|${m.homeTeam}|${m.awayTeam}`, {
-    homeGoals: m.homeGoals,
-    awayGoals: m.awayGoals,
-  });
+  results.set(`${m.season}|${m.homeTeam}|${m.awayTeam}`, m);
 }
 
 const configs = [...new Set(entries.map((e) => e.configHash))];
@@ -101,16 +117,65 @@ function scoreProbOf(variant: Variant, homeGoals: number, awayGoals: number): nu
   return hit ? hit.prob : null;
 }
 
+interface Settled {
+  entry: LogEntry;
+  match: Match;
+  homeGoals: number;
+  awayGoals: number;
+}
+
+function metricsOf(
+  probs: OutcomeProbs,
+  over25: number | null | undefined,
+  cellProb: number | null,
+  homeGoals: number,
+  awayGoals: number
+): PerMatchMetrics {
+  const actual = outcomeOf(homeGoals, awayGoals);
+  const overHappened = homeGoals + awayGoals > 2.5;
+  return {
+    predicted: argmaxOutcome(probs),
+    actual,
+    rps: rankedProbabilityScore(probs, actual),
+    logLoss: logLoss(probs, actual),
+    brier: brierScore(probs, actual),
+    // Bewusst == statt ===: aeltere Logzeilen kennen das Feld gar nicht, und undefined
+    // durchzulassen erzeugt stillschweigend NaN in der Zusammenfassung.
+    totals:
+      over25 == null
+        ? null
+        : {
+            logLoss: binaryLogLoss(over25, overHappened),
+            brier: binaryBrier(over25, overHappened),
+          },
+    handicap: null,
+    scoreLogLoss: cellProb === null ? null : scoreLogLoss(cellProb),
+  };
+}
+
+function fairOdds(prob: number): string {
+  if (prob <= 0) return "  —  ";
+  return (1 / prob).toFixed(2).padStart(5);
+}
+
+function oddsLine(label: string, probs: OutcomeProbs, trailer: string): string {
+  return (
+    `      ${label.padEnd(8)} ` +
+    `${fairOdds(probs.homeWinProb)} / ${fairOdds(probs.drawProb)} / ${fairOdds(probs.awayWinProb)}` +
+    `   ${trailer}`
+  );
+}
+
 for (const group of groups) {
-  const settled: { entry: LogEntry; homeGoals: number; awayGoals: number }[] = [];
+  const settled: Settled[] = [];
   let pending = 0;
   for (const entry of group.entries) {
-    const result = results.get(`${entry.season}|${entry.homeTeam}|${entry.awayTeam}`);
-    if (!result) {
+    const match = results.get(`${entry.season}|${entry.homeTeam}|${entry.awayTeam}`);
+    if (!match) {
       pending++;
       continue;
     }
-    settled.push({ entry, ...result });
+    settled.push({ entry, match, homeGoals: match.homeGoals, awayGoals: match.awayGoals });
   }
 
   console.log(`\n=== Konfiguration ${group.hash} ===`);
@@ -135,32 +200,23 @@ for (const group of groups) {
     for (const s of settled) {
       const variant = s.entry.variants[name];
       if (!variant) continue;
-      const actual = outcomeOf(s.homeGoals, s.awayGoals);
-      const overHappened = s.homeGoals + s.awayGoals > 2.5;
-      const cellProb = scoreProbOf(variant, s.homeGoals, s.awayGoals);
-
-      rows.push({
-        predicted: argmaxOutcome(variant.probs),
-        actual,
-        rps: rankedProbabilityScore(variant.probs, actual),
-        logLoss: logLoss(variant.probs, actual),
-        brier: brierScore(variant.probs, actual),
-        totals:
-          variant.over25 === null
-            ? null
-            : {
-                logLoss: binaryLogLoss(variant.over25, overHappened),
-                brier: binaryBrier(variant.over25, overHappened),
-              },
-        handicap: null,
-        scoreLogLoss: cellProb === null ? null : scoreLogLoss(cellProb),
-      });
+      rows.push(
+        metricsOf(
+          variant.probs,
+          variant.over25,
+          scoreProbOf(variant, s.homeGoals, s.awayGoals),
+          s.homeGoals,
+          s.awayGoals
+        )
+      );
     }
     perVariant.set(name, rows);
     console.log(formatSummary(name, summarize(rows)));
   }
 
-  // Der eigentliche Zweck des Logs: bringt der Spielkontext etwas?
+  // -------------------------------------------------------------------------
+  // Frage 1: bringt der Spielkontext etwas?
+  // -------------------------------------------------------------------------
   const baseline = "model";
   const treatment = "withLlm";
   const baseRows = perVariant.get(baseline);
@@ -208,5 +264,122 @@ for (const group of groups) {
           `  Aktuell ausgewertet: ${rpsDiffs.length}.`
       );
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Frage 2: wo stehen wir gegen den Buchmacher?
+  // -------------------------------------------------------------------------
+  const quoted: { s: Settled; quote: BenchmarkQuote }[] = [];
+  for (const s of settled) {
+    const quote = benchmarkQuote(s.match, benchmark);
+    if (quote) quoted.push({ s, quote });
+  }
+
+  console.log(`\n--- Gegen den Buchmacher (${BENCHMARK_LABELS[benchmark]}) ---`);
+
+  if (quoted.length === 0) {
+    console.log(
+      `Fuer keines der ${settled.length} ausgewerteten Spiele liegt eine Referenzquote vor.\n` +
+        `Die Ergebnisse der laufenden Saison kommen aus OpenLigaDB und bringen keine Quoten mit.\n` +
+        `"npm run refresh-market" holt sie von football-data nach -- dort erscheinen sie ein bis\n` +
+        `drei Tage nach dem Spieltag.`
+    );
+    continue;
+  }
+
+  if (quoted.length < settled.length) {
+    console.log(
+      `${quoted.length} von ${settled.length} Spielen haben eine Referenzquote. Die uebrigen ` +
+        `fallen aus\nallen Varianten heraus, damit der Vergleich auf derselben Spielmenge laeuft.` +
+        (benchmark === "pinnacleClose"
+          ? `\nPinnacle ist in den Dateien loechrig geworden -- "--benchmark=marketAverageClose" ` +
+            `deckt\nmehr Spiele ab, ist als Gegner aber etwas weicher.`
+          : "")
+    );
+  }
+
+  // Alle drei Varianten auf exakt dieser Teilmenge, in identischer Reihenfolge.
+  const marketRows: PerMatchMetrics[] = [];
+  const ourRows = new Map<string, PerMatchMetrics[]>();
+  for (const name of variantNames) ourRows.set(name, []);
+
+  for (const { s, quote } of quoted) {
+    marketRows.push(
+      metricsOf(quote.probs, quote.totalsOverProb, null, s.homeGoals, s.awayGoals)
+    );
+    for (const name of variantNames) {
+      const variant = s.entry.variants[name];
+      if (!variant) continue;
+      ourRows
+        .get(name)!
+        .push(
+          metricsOf(
+            variant.probs,
+            variant.over25,
+            scoreProbOf(variant, s.homeGoals, s.awayGoals),
+            s.homeGoals,
+            s.awayGoals
+          )
+        );
+    }
+  }
+
+  console.log("");
+  for (const name of variantNames) {
+    const rows = ourRows.get(name)!;
+    if (rows.length === quoted.length) console.log(formatSummary(name, summarize(rows)));
+  }
+  console.log(formatSummary("markt", summarize(marketRows)));
+
+  console.log(`\nAbstand zum Buchmacher (positiv = wir besser):`);
+  for (const name of variantNames) {
+    const rows = ourRows.get(name)!;
+    if (rows.length !== quoted.length) continue;
+    const rpsDiffs = rows.map((r, i) => marketRows[i].rps - r.rps);
+    const llDiffs = rows.map((r, i) => marketRows[i].logLoss - r.logLoss);
+    console.log(`  ${formatBootstrap(`${name}: RPS`, pairedBootstrap(rpsDiffs))}`);
+    console.log(`  ${formatBootstrap(`${name}: LogLoss`, pairedBootstrap(llDiffs))}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Die Gegenueberstellung Spiel fuer Spiel. Alle Quoten sind FAIRE Quoten (1/p): beim
+  // Buchmacher ist die Marge herausgerechnet, sonst saehe seine Seite systematisch
+  // schaerfer aus, als sie ist. Die Marge steht daneben, damit sichtbar bleibt, wie viel
+  // herausgerechnet wurde.
+  // -------------------------------------------------------------------------
+  const listLimit = 60;
+  if (!forceMatchList && quoted.length > listLimit) {
+    console.log(
+      `\n${quoted.length} Spiele -- die Einzelaufstellung bleibt aus. Mit --matches erzwingen.`
+    );
+    continue;
+  }
+
+  console.log(`\nQuoten Spiel fuer Spiel (faire Quoten 1/p, Marge herausgerechnet):`);
+  let currentMatchday = -1;
+  for (const { s, quote } of quoted) {
+    if (s.entry.matchday !== currentMatchday) {
+      currentMatchday = s.entry.matchday;
+      console.log(`\n  Spieltag ${currentMatchday}`);
+    }
+    const actual = outcomeOf(s.homeGoals, s.awayGoals);
+    console.log(
+      `    ${`${s.entry.homeTeam} – ${s.entry.awayTeam}`.padEnd(40)}` +
+        `${s.homeGoals}:${s.awayGoals} (${actual})`
+    );
+    for (const name of variantNames) {
+      const variant = s.entry.variants[name];
+      if (!variant) continue;
+      const rps = rankedProbabilityScore(variant.probs, actual);
+      console.log(oddsLine(name, variant.probs, `RPS ${rps.toFixed(4)}`));
+    }
+    console.log(
+      oddsLine(
+        "markt",
+        quote.probs,
+        `RPS ${rankedProbabilityScore(quote.probs, actual).toFixed(4)}   ` +
+          `Marge ${((quote.overround - 1) * 100).toFixed(1)} %`
+      )
+    );
   }
 }

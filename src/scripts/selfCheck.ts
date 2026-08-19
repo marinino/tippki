@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
+import { mergeMarketRows } from "../data/refreshMarketOdds";
 import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
 import { XG_FORM_WINDOW, computeXgForm, computeXgFormResidual } from "../model/xgForm";
@@ -1207,6 +1208,123 @@ section("CSV-Merge erhaelt Quotenspalten", () => {
     });
     check(() => assert.equal(freshRows.length, 1));
     check(() => assert.equal(freshRows[0].FTR, "D"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Quoten-Merge der laufenden Saison", () => {
+  // Die Gegenrichtung zum Test darueber: dort kommen Ergebnisse zu einer Datei mit Quoten,
+  // hier kommen Quoten zu einer Datei mit Ergebnissen. Der Merge schreibt die Saisondatei
+  // vollstaendig neu und ist damit der einzige Schritt des Quotenabrufs, bei dem etwas
+  // verloren gehen kann.
+  const dir = mkdtempSync(join(tmpdir(), "tippki-market-"));
+  const file = join(dir, "D1_2627.csv");
+
+  try {
+    // Ausgangslage wie nach einem OpenLigaDB-Refresh: sieben Spalten, keine Quote.
+    writeFileSync(
+      file,
+      "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\n" +
+        "D1,28/08/2026,Bayern Munich,Stuttgart,3,1,H\n" +
+        "D1,29/08/2026,Dortmund,M'gladbach,0,0,D\n" +
+        "D1,05/09/2026,Mainz,Augsburg,2,1,H\n"
+    );
+
+    // football-data fuehrt die ersten beiden Spiele, das dritte noch nicht.
+    const result = mergeMarketRows(file, [
+      {
+        Div: "D1",
+        Date: "28/08/2026",
+        HomeTeam: "Bayern Munich",
+        AwayTeam: "Stuttgart",
+        FTHG: "3",
+        FTAG: "1",
+        FTR: "H",
+        PSCH: "1.28",
+        PSCD: "6.40",
+        PSCA: "9.50",
+        AvgCH: "1.27",
+      },
+      {
+        Div: "D1",
+        Date: "29/08/2026",
+        HomeTeam: "Dortmund",
+        AwayTeam: "M'gladbach",
+        FTHG: "0",
+        FTAG: "0",
+        FTR: "D",
+        // Leere Pinnacle-Spalte: kommt in den Dateien vor und darf nichts kaputt machen.
+        PSCH: "",
+        PSCD: "",
+        PSCA: "",
+        AvgCH: "1.85",
+      },
+    ]);
+
+    const rows: Record<string, string>[] = parseCsv(readFileSync(file, "utf-8"), {
+      columns: true,
+      skip_empty_lines: true,
+      bom: true,
+    });
+
+    check(() => assert.equal(rows.length, 3, "kein Spiel verloren, keines verdoppelt"));
+    check(() => assert.equal(result.updatedRows, 2));
+    check(() => assert.equal(result.addedRows, 0, "beide Paarungen waren schon da"));
+
+    const bayern = rows.find((r) => r.HomeTeam === "Bayern Munich")!;
+    check(() => assert.equal(bayern.PSCH, "1.28", "Schlussquote eingetragen"));
+    check(() => assert.equal(bayern.FTHG, "3", "Ergebnis bleibt stehen"));
+
+    const dortmund = rows.find((r) => r.HomeTeam === "Dortmund")!;
+    check(() => assert.equal(dortmund.PSCH, "", "leere Fremdspalte bleibt leer"));
+    check(() => assert.equal(dortmund.AvgCH, "1.85", "Marktmittel trotzdem da"));
+
+    // Der eigentliche Zweck des Merges: was football-data noch nicht kennt, ueberlebt.
+    const mainz = rows.find((r) => r.HomeTeam === "Mainz")!;
+    check(() => assert.equal(mainz.FTHG, "2", "lokal bekanntes Spiel bleibt erhalten"));
+    check(() => assert.equal(mainz.PSCH, "", "hat noch keine Quote, aber alle Spalten"));
+
+    // Zweiter Lauf mit denselben Daten darf nichts veraendern.
+    mergeMarketRows(file, [
+      {
+        Div: "D1",
+        Date: "28/08/2026",
+        HomeTeam: "Bayern Munich",
+        AwayTeam: "Stuttgart",
+        FTHG: "3",
+        FTAG: "1",
+        FTR: "H",
+        PSCH: "1.28",
+        PSCD: "6.40",
+        PSCA: "9.50",
+        AvgCH: "1.27",
+      },
+    ]);
+    const again: Record<string, string>[] = parseCsv(readFileSync(file, "utf-8"), {
+      columns: true,
+      skip_empty_lines: true,
+      bom: true,
+    });
+    check(() => assert.equal(again.length, 3, "zweiter Lauf legt keine Duplikate an"));
+
+    // Die Heimrechte gehoeren zum Schluessel: dieselben zwei Teams sind das Rueckspiel,
+    // nicht dieselbe Zeile.
+    const back = mergeMarketRows(file, [
+      {
+        Div: "D1",
+        Date: "20/01/2027",
+        HomeTeam: "Stuttgart",
+        AwayTeam: "Bayern Munich",
+        FTHG: "1",
+        FTAG: "1",
+        FTR: "D",
+        PSCH: "4.10",
+      },
+    ]);
+    check(() => assert.equal(back.addedRows, 1, "Rueckspiel ist eine eigene Zeile"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
