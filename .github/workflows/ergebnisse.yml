@@ -45,6 +45,14 @@ jobs:
 
       - run: npm ci
 
+      # Kostet praktisch nichts: der Job laeuft ohnehin, und OpenLigaDB liefert Ansetzungen
+      # und Ergebnisse aus demselben Endpunkt. Faellt das Abendfenster mit einer neuen
+      # Ansetzung zusammen, steht sie damit eine halbe Stunde spaeter in der Anzeige statt
+      # erst am Montag.
+      - name: Spielplan auffrischen
+        continue-on-error: true
+        run: npm run fetch-fixtures
+
       - name: Ergebnisse und xG holen
         run: |
           npm run refresh | tee bericht.txt
@@ -68,6 +76,12 @@ jobs:
             echo "Nichts geaendert -- keine neuen Ergebnisse." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          git commit -m "Ergebnisse und xG aktualisiert (${GRUND})"
+          # Nur der Spielplan bewegt: dann ist "Ergebnisse aktualisiert" schlicht falsch,
+          # und in der Commit-Historie steht spaeter niemand mehr davor und raet.
+          if git diff --cached --quiet -- data/D1_*.csv data/xg_bundesliga.json; then
+            git commit -m "Spielplan aufgefrischt"
+          else
+            git commit -m "Ergebnisse und xG aktualisiert (${GRUND})"
+          fi
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push

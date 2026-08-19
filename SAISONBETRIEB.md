@@ -109,15 +109,20 @@ berechnet sich aus dem *ersten* Anpfiff eines Spieltags — steht dort samstags 
 während in Wirklichkeit freitags um 20:30 eröffnet wird, recherchiert die Automatik am
 Samstagmittag, also nach dem Freitagsspiel.
 
-Deshalb läuft `fetch-fixtures` an **drei** Stellen:
+Deshalb läuft `fetch-fixtures` an **vier** Stellen:
 
 1. In `spielkontext.yml` **vor** der Fälligkeitsprüfung, bei jedem der viertelstündlichen
-   Ticks. Die Entscheidung wird damit nie aus veralteten Zeiten berechnet — sie ist die
-   einzige Frage, die dieser Workflow stellt, und aus einem alten Spielplan wäre die
-   Antwort schlicht falsch. Schlägt der Abruf fehl, läuft der Workflow mit dem bisherigen
-   Spielplan weiter, statt die Recherche ausfallen zu lassen.
-2. In `nachbereitung.yml`, montags, dienstags und donnerstags.
-3. Von Hand über `npm run fetch-fixtures`.
+   Ticks. Das ist die einzige Stelle, auf die es ankommt: die Entscheidung wird nie aus
+   veralteten Zeiten berechnet. Schlägt der Abruf fehl, läuft der Workflow mit dem
+   bisherigen Spielplan weiter, statt die Recherche ausfallen zu lassen.
+2. In `ergebnisse.yml`, halbstündlich am Spielabend. OpenLigaDB liefert Ansetzungen und
+   Ergebnisse aus demselben Endpunkt — der Job läuft ohnehin, es kostet nichts.
+3. In `nachbereitung.yml`, montags, dienstags und donnerstags.
+4. Von Hand über `npm run fetch-fixtures`.
+
+Die Punkte 2 bis 4 halten die **Anzeige** aktuell. Die Korrektheit der Automatik hängt
+allein an Punkt 1: selbst wenn der Spielplan sonst eine Woche alt wäre, würde im Fenster
+mit frischen Zeiten gerechnet.
 
 Verschiebt sich dabei eine Anstoßzeit, wird sie sofort committet und ausgeliefert — auch
 wenn im selben Lauf gar nicht recherchiert wurde. Zwei Sicherungen im Skript: es bricht ab,
