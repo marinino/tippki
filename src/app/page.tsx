@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AdminBar } from "./components/AdminBar";
 import { AppHeader } from "./components/AppHeader";
 import { BacktestSection } from "./components/BacktestSection";
+import { DataPanel } from "./components/DataPanel";
 import { PredictionsSection } from "./components/PredictionsSection";
 import { SimulateSection } from "./components/SimulateSection";
 import { TabBar } from "./components/TabBar";
 import { TableSection } from "./components/TableSection";
+import { useAdmin } from "./hooks/useAdmin";
 import { useBacktest } from "./hooks/useBacktest";
 import { usePredictions } from "./hooks/usePredictions";
 import { useSimulation } from "./hooks/useSimulation";
@@ -29,6 +32,15 @@ export default function Home() {
   const predictions = usePredictions(initial.matchday);
   const sim = useSimulation();
   const backtest = useBacktest();
+  const admin = useAdmin();
+
+  // Lokal immer, gehostet nur angemeldet. Die Sperre selbst sitzt in den Routen -- hier
+  // geht es nur darum, keinen Knopf zu zeigen, der ohnehin 403 liefern wuerde.
+  const canRefresh = predictions.data?.readOnly === false || admin.state.admin;
+
+  // Ein geteilter Link auf ?tab=daten darf bei einem nicht angemeldeten Leser nicht in
+  // einer leeren Seite enden. Der Reiter existiert fuer ihn nicht, also der Vorgabewert.
+  const sichtbarerTab: Tab = tab === "data" && !admin.state.admin ? "predictions" : tab;
 
   const loadTable = useCallback(async () => {
     setTableLoading(true);
@@ -82,20 +94,26 @@ export default function Home() {
         onRefresh={refreshResults}
         loading={predictions.results.loading}
         message={predictions.results.message}
+        canRefresh={canRefresh}
       />
 
-      <TabBar active={tab} onChange={setTab} />
+      <AdminBar admin={admin} />
 
-      {tab === "predictions" && <PredictionsSection predictions={predictions} />}
-      {tab === "table" && <TableSection table={table} loading={tableLoading} />}
-      {tab === "simulate" && <SimulateSection sim={sim} />}
-      {tab === "backtest" && (
+      <TabBar active={sichtbarerTab} onChange={setTab} admin={admin.state.admin} />
+
+      {sichtbarerTab === "predictions" && (
+        <PredictionsSection predictions={predictions} canRefresh={canRefresh} />
+      )}
+      {sichtbarerTab === "table" && <TableSection table={table} loading={tableLoading} />}
+      {sichtbarerTab === "simulate" && <SimulateSection sim={sim} />}
+      {sichtbarerTab === "backtest" && (
         <BacktestSection
           backtest={backtest.result}
           loading={backtest.loading}
           onRun={() => backtest.run()}
         />
       )}
+      {sichtbarerTab === "data" && <DataPanel />}
     </main>
   );
 }

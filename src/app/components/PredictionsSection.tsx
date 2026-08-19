@@ -5,8 +5,10 @@ import { SkeletonCards } from "./Skeleton";
 
 export function PredictionsSection({
   predictions,
+  canRefresh,
 }: {
   predictions: ReturnType<typeof usePredictions>;
+  canRefresh: boolean;
 }) {
   const { data, loading, load, llm, refreshLlm } = predictions;
 
@@ -24,6 +26,7 @@ export function PredictionsSection({
           onMatchdayChange={(md) => load(md)}
           onRefreshLlm={refreshLlm}
           llmLoading={llm.loading}
+          canRefresh={canRefresh}
         />
       </div>
 

@@ -5,4 +5,9 @@ next-env.d.ts
 tsconfig.tsbuildinfo
 .env
 .env.local
-data/forward_log.jsonl
+
+# data/forward_log.jsonl steht bewusst NICHT mehr hier. Seit forward-log automatisch in
+# GitHub Actions laeuft, gaebe es das Log sonst nur im Wegwerf-Container des Runners --
+# die Evidenz der Saison waere nach jedem Lauf weg. Versioniert bekommt sie ausserdem
+# etwas, das eine append-only-Datei allein nicht hat: eine nachpruefbare Historie. Wer eine
+# einmal abgegebene Vorhersage nachtraeglich aendert, aendert damit auch die Commit-Kette.

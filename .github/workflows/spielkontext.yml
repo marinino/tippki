@@ -1,0 +1,135 @@
+# Recherche des Spielkontexts, drei Stunden vor dem ersten Anpfiff eines Spieltags.
+#
+# Der Zeitplan ist absichtlich stumpf und die Entscheidung liegt im Skript: Cron in GitHub
+# Actions feuert nicht puenktlich, sondern irgendwann in den Minuten danach. Deshalb laeuft
+# die Pruefung viertelstuendlich, und `research-due` entscheidet, ob der Sollzeitpunkt
+# gerade erreicht ist (drei Stunden vor Anpfiff, plus/minus zwanzig Minuten). Ein
+# verspaeteter Tick faellt so in denselben Korridor wie ein puenktlicher.
+#
+# Die Stundenangaben sind UTC -- Cron kennt nichts anderes. 08:00-16:59 UTC deckt jedes
+# Fenster dieser Saison ab, im Sommer wie im Winter; der selfCheck-Abschnitt
+# "Recherchefenster" rechnet das fuer alle 34 Spieltage nach und schlaegt fehl, sobald ein
+# Spielplan daraus herauslaeuft.
+
+name: Spielkontext
+
+on:
+  schedule:
+    - cron: "*/15 8-16 * * 2,3,5,6,0"
+  workflow_dispatch:
+    inputs:
+      spieltag:
+        description: "Spieltag (leer = der naechste)"
+        required: false
+        type: string
+      erzwingen:
+        description: "Zeitfenster uebergehen"
+        required: false
+        default: "false"
+        type: string
+      grund:
+        description: "Woher der Lauf kommt"
+        required: false
+        default: "manuell"
+        type: string
+
+permissions:
+  contents: write
+
+# Alle drei Datenworkflows teilen sich diese Gruppe: zwei gleichzeitige Laeufe wuerden auf
+# denselben Branch pushen wollen.
+concurrency:
+  group: tippki-daten
+  cancel-in-progress: false
+
+jobs:
+  recherche:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Volle Historie, damit ein rebase vor dem Push funktioniert.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Vor der Entscheidung, nicht danach: die Faelligkeit berechnet sich aus dem ersten
+      # Anpfiff des naechsten Spieltags, und der steht erst sechs bis acht Wochen vorher
+      # fest. Aus einem veralteten Spielplan waere die Antwort auf die einzige Frage, die
+      # dieser Workflow stellt, schlicht falsch.
+      #
+      # continue-on-error, weil ein gestoertes OpenLigaDB die Recherche nicht ausfallen
+      # lassen darf -- dann wird eben mit dem bisherigen Spielplan gerechnet.
+      - name: Spielplan auffrischen
+        continue-on-error: true
+        run: npm run fetch-fixtures
+
+      # Eingaben gehen ueber die Umgebung in die Shell, nicht per Textersetzung in die
+      # Kommandozeile -- sonst waere der Inhalt eines Eingabefeldes ausfuehrbarer Code.
+      - name: Faelligkeit pruefen
+        id: pruefung
+        env:
+          ERZWINGEN: ${{ inputs.erzwingen }}
+          SPIELTAG: ${{ inputs.spieltag }}
+        run: |
+          args=""
+          if [ "$ERZWINGEN" = "true" ]; then args="$args --force"; fi
+          if [ -n "$SPIELTAG" ]; then args="$args --matchday=$SPIELTAG"; fi
+          npm run research-due -- $args | tee bericht.txt
+          {
+            echo "### Spielkontext"
+            echo ""
+            echo '```'
+            cat bericht.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f bericht.txt
+
+      - name: Recherchieren
+        if: steps.pruefung.outputs.due == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SPIELTAG: ${{ inputs.spieltag }}
+        run: |
+          args=""
+          if [ -n "$SPIELTAG" ]; then args="--matchday=$SPIELTAG"; fi
+          npm run refresh-llm -- $args
+
+      # Muss unmittelbar nach der Recherche laufen und noch vor Anpfiff. Laeuft es davor,
+      # faellt die withLlm-Variante mit dem Basismodell zusammen, und die Idempotenzpruefung
+      # ueberspringt die Partien danach -- die Zeilen waeren dauerhaft wertlos fuer den
+      # gepaarten Test. Laeuft es gar nicht, entsteht fuer diesen Spieltag keine Evidenz.
+      - name: Vorhersagen protokollieren
+        if: steps.pruefung.outputs.due == 'true'
+        run: npm run forward-log
+
+      # Laeuft immer, nicht nur bei faelliger Recherche: hat sich oben eine Anstosszeit
+      # verschoben, gehoert das sofort ins Repository und damit in die Anzeige. Sonst
+      # stuende die Verschiebung bis zum naechsten Nachbereitungslauf nur im Runner.
+      - name: Committen
+        env:
+          SPIELTAG: ${{ steps.pruefung.outputs.matchday }}
+          GRUND: ${{ inputs.grund || 'planmaessig' }}
+          RECHERCHIERT: ${{ steps.pruefung.outputs.due }}
+        run: |
+          git config user.name "tippki-automat"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Nichts geaendert." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$RECHERCHIERT" = "true" ]; then
+            git commit -m "Spielkontext Spieltag ${SPIELTAG} (${GRUND})"
+          else
+            git commit -m "Spielplan aufgefrischt"
+          fi
+          # Der Ergebnis-Workflow schreibt in dieselben Dateien. Die concurrency-Gruppe
+          # haelt beide auseinander, aber ein Push von Hand kann trotzdem dazwischenkommen.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push

@@ -1,5 +1,6 @@
 // Die Formen, die die API-Routen an die UI liefern.
 
+import type { LlmStatus } from "../llm/llmCache";
 import type { PriceSheet } from "../model/priceSheet";
 import type { MetricSummary } from "../eval/metrics";
 import type { VariantName } from "../eval/backtestCore";
@@ -25,6 +26,11 @@ export interface Prediction {
   awayIsEstimated: boolean;
   // Recherchierter Spielkontext (Ausfaelle, Belastung, Motivation).
   llmApplied: boolean;
+  // Ob und wie die Recherche fuer genau diese Partie gelaufen ist -- llmApplied allein
+  // konnte "nie gefragt" nicht von "gefragt, nichts gefunden" unterscheiden.
+  llmStatus: LlmStatus;
+  llmFailureReason: string | null;
+  llmFetchedAt: string | null;
   llmHomeAdjustmentPct: number | null;
   llmAwayAdjustmentPct: number | null;
   llmFactors: string[];
@@ -39,6 +45,10 @@ export interface PredictionsResponse {
   availableMatchdays: number[];
   llmFetchedAt: string | null;
   llmModel: string | null;
+  // Gehostete Instanz: kein beschreibbares data/, deshalb keine Aktualisierungsknoepfe.
+  readOnly: boolean;
+  // ... es sei denn, jemand ist als Admin angemeldet. Dann stossen sie den Workflow an.
+  admin: boolean;
 }
 
 export interface SeasonBacktest {
@@ -125,4 +135,6 @@ export interface SimResult {
   awayGoals: number;
 }
 
-export type Tab = "predictions" | "table" | "backtest" | "simulate";
+// "data" erscheint nur fuer einen angemeldeten Admin -- der Reiter wird gar nicht erst
+// gezeigt, und der Endpunkt dahinter prueft ohnehin selbst.
+export type Tab = "predictions" | "table" | "backtest" | "simulate" | "data";

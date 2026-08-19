@@ -1,0 +1,73 @@
+# Ergebnisse und xG der laufenden Saison nachziehen.
+#
+# Anders als bei der Recherche gibt es hier keinen richtigen Zeitpunkt, den man verpassen
+# koennte: `npm run refresh` ist idempotent und uebernimmt nur abgeschlossene Partien
+# (OpenLigaDB liefert `matchIsFinished`). Ein Lauf, bei dem sich nichts geaendert hat,
+# committet nichts. Deshalb keine Faelligkeitspruefung -- der Zeitplan darf stumpf sein.
+#
+# Halbstuendlich zwischen 15:00 und 22:59 UTC an Spieltagen. Das deckt jede Partie ab:
+# der letzte Anpfiff eines Bundesliga-Spieltags liegt bei 19:30 deutscher Zeit, abgepfiffen
+# ist gegen 21:20, also 19:20 UTC im Sommer. Wer eine Stunde spaeter noch Ergebnisse
+# erwartet, bekommt sie hier -- und in der Praxis frueher.
+
+name: Ergebnisse
+
+on:
+  schedule:
+    - cron: "*/30 15-22 * * 2,3,5,6,0"
+  workflow_dispatch:
+    inputs:
+      grund:
+        description: "Woher der Lauf kommt"
+        required: false
+        default: "manuell"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tippki-daten
+  cancel-in-progress: false
+
+jobs:
+  ergebnisse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ergebnisse und xG holen
+        run: |
+          npm run refresh | tee bericht.txt
+          {
+            echo "### Ergebnisse"
+            echo ""
+            echo '```'
+            cat bericht.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f bericht.txt
+
+      - name: Committen
+        env:
+          GRUND: ${{ inputs.grund || 'planmaessig' }}
+        run: |
+          git config user.name "tippki-automat"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Nichts geaendert -- keine neuen Ergebnisse." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -m "Ergebnisse und xG aktualisiert (${GRUND})"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push

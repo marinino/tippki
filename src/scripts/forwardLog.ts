@@ -23,6 +23,7 @@
 import { appendFileSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { loadEnvLocal } from "../data/loadEnv";
+import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { loadAllMatches } from "../data/loadMatches";
 import { buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
@@ -52,8 +53,7 @@ function flag(name: string): string | undefined {
 const allFixtures: Fixture[] = JSON.parse(readFileSync(join(DATA_DIR, "fixtures.json"), "utf-8"));
 
 const now = new Date();
-const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
-const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
+const nextMatchday = nextMatchdayOf(allFixtures, now);
 const matchday = flag("matchday") ? Number(flag("matchday")) : nextMatchday;
 
 if (matchday == null) {
@@ -141,7 +141,11 @@ for (const fixture of fixtures) {
     continue;
   }
 
-  const kickoff = new Date(fixture.date);
+  // Die Sperre, die dieses Log als Evidenz traegt: nach Anpfiff wird nicht mehr
+  // protokolliert. parseKickoff statt new Date ist hier nicht Kosmetik -- auf einem Runner
+  // in UTC sieht ein laufendes Spiel sonst noch zwei Stunden lang zukuenftig aus, und die
+  // Zeile stuende append-only fuer immer im Log.
+  const kickoff = parseKickoff(fixture.date);
   if (kickoff < now) {
     console.warn(`  uebersprungen (bereits angepfiffen): ${fixture.homeTeam} vs ${fixture.awayTeam}`);
     skipped++;

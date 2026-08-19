@@ -1,11 +1,14 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { isAdminRequest } from "../../../data/adminAuth";
+import { isReadOnlyDeployment } from "../../../data/deployment";
+import { nextMatchdayOf, parseKickoff } from "../../../data/kickoff";
 import { loadAllMatches } from "../../../data/loadMatches";
 import { buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
 import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
 import { computeXgForm } from "../../../model/xgForm";
-import { cacheKey, readLlmCache } from "../../../llm/llmCache";
+import { cacheKey, llmStatusOf, readLlmCache } from "../../../llm/llmCache";
 import { describeFactors } from "../../../llm/llmAdjustment";
 
 // 0 bis 5 Tore je Seite. Darueber traegt die Matrix zusammen weit unter einem Prozent.
@@ -27,9 +30,10 @@ export async function GET(request: Request) {
 
   const availableMatchdays = [...new Set(allFixtures.map((f) => f.matchday))].sort((a, b) => a - b);
 
-  const now = new Date();
-  const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
-  const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
+  // parseKickoff, nicht new Date: diese Route laeuft in der Cloud unter UTC, und ein
+  // zonenloser Zeitstempel wuerde dort jeden Anpfiff zwei Stunden spaeter verorten -- der
+  // Spieltag bliebe nach dem letzten Anpfiff noch zwei Stunden lang der "naechste".
+  const nextMatchday = nextMatchdayOf(allFixtures);
 
   const params = new URL(request.url).searchParams;
   const requestedParam = params.get("matchday");
@@ -47,11 +51,12 @@ export async function GET(request: Request) {
   // Kein Live-Abruf hier -- nur lesen, was zuletzt ueber den manuellen Knopf geholt wurde.
   // Ein Kontext aus einem anderen Spieltag waere schlimmer als keiner.
   const llmCache = readLlmCache();
-  const llmByFixture =
-    llmCache && llmCache.matchday === selectedMatchday ? llmCache.contexts : {};
+  const cacheForMatchday =
+    llmCache && llmCache.matchday === selectedMatchday ? llmCache : null;
+  const llmByFixture = cacheForMatchday ? cacheForMatchday.contexts : {};
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
-    const matchDate = new Date(date);
+    const matchDate = parseKickoff(date);
     const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
 
     const out = predictPipeline({
@@ -80,6 +85,11 @@ export async function GET(request: Request) {
       homeIsEstimated: out.homeIsEstimated,
       awayIsEstimated: out.awayIsEstimated,
       llmApplied: out.llmAdjustment !== null,
+      // Vier Zustaende statt eines Ja/Nein -- siehe llmStatusOf. "reines Modell" hiess
+      // bisher sowohl "nie gefragt" als auch "gefragt, nichts gefunden".
+      llmStatus: llmStatusOf(cacheForMatchday, homeTeam, awayTeam, out.llmAdjustment !== null),
+      llmFailureReason: cacheForMatchday?.failures?.[cacheKey(homeTeam, awayTeam)] ?? null,
+      llmFetchedAt: cachedLlm?.fetchedAt ?? null,
       // Relative Aenderung der Torerwartung je Seite, in Prozent. Seit dem Ausbau der
       // Favoritensicherung ist das die einzige Groesse, die zwischen zwei Korrekturen noch
       // variiert -- und damit die, an der sich beobachten laesst, ob der Layer ueberhaupt
@@ -103,5 +113,12 @@ export async function GET(request: Request) {
     availableMatchdays,
     llmFetchedAt: llmCache && llmCache.matchday === selectedMatchday ? llmCache.fetchedAt : null,
     llmModel: llmCache && llmCache.matchday === selectedMatchday ? llmCache.model : null,
+    // Die UI blendet danach die beiden Aktualisierungsknoepfe aus. Der Weg ueber diese
+    // Antwort statt ueber eine NEXT_PUBLIC_-Variable spart einen Konfigurationsschritt
+    // beim Hoster -- und einen, den man vergessen kann.
+    readOnly: isReadOnlyDeployment(),
+    // Angemeldeter Admin: die Knoepfe kommen zurueck, loesen dann aber den Workflow aus.
+    // Die Sichtbarkeit ist Bequemlichkeit, die Sperre sitzt in den Routen selbst.
+    admin: isAdminRequest(request),
   });
 }

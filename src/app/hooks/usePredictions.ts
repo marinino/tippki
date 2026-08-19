@@ -12,6 +12,13 @@ export interface RefreshState {
 
 const IDLE: RefreshState = { loading: false, message: null };
 
+// Auf der gehosteten Instanz schreiben die Knoepfe nicht selbst, sondern stossen den
+// GitHub-Workflow an. Der laeuft, committet und deployt -- die neuen Zahlen stehen also
+// erst in ein bis zwei Minuten hier, und zwar nach einem Neuladen der Seite.
+const DISPATCHED =
+  "Lauf angestoßen. Die Daten erscheinen nach Commit und Deployment, üblicherweise " +
+  "in ein bis zwei Minuten — Seite dann neu laden.";
+
 export function usePredictions(initialMatchday?: number | null) {
   const [data, setData] = useState<PredictionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,11 +71,15 @@ export function usePredictions(initialMatchday?: number | null) {
       "/api/refresh",
       setResults,
       (r) =>
-        `${r.resultsCount} Ergebnisse, ${r.xgCount} xG-Spiele aktualisiert` +
-        (r.oddsCount === null ? "" : `, ${r.oddsCount} Spiele mit Buchmacher-Schlussquote`),
+        r.dispatched
+          ? DISPATCHED
+          : `${r.resultsCount} Ergebnisse, ${r.xgCount} xG-Spiele aktualisiert` +
+            (r.oddsCount === null ? "" : `, ${r.oddsCount} Spiele mit Buchmacher-Schlussquote`),
       "Fehler beim Aktualisieren"
     );
-    if (result) await load(data?.matchday ?? undefined);
+    // Nach einem angestossenen Lauf gibt es hier noch nichts Neues zu holen -- die Daten
+    // erscheinen erst nach Commit und Deployment.
+    if (result && !result.dispatched) await load(data?.matchday ?? undefined);
     return result;
   }, [runRefresh, load, data?.matchday]);
 
@@ -78,6 +89,7 @@ export function usePredictions(initialMatchday?: number | null) {
       "/api/refresh-llm",
       setLlm,
       (r) => {
+        if (r.dispatched) return DISPATCHED;
         const failed = Object.keys((r.failures as Record<string, unknown>) ?? {}).length;
         return (
           `Spieltag ${r.matchday}: ${r.fixturesWithContext}/${r.fixturesTotal} recherchiert, ` +
@@ -88,7 +100,7 @@ export function usePredictions(initialMatchday?: number | null) {
       },
       "Fehler beim Recherchieren"
     );
-    if (result) await load(data?.matchday ?? undefined);
+    if (result && !result.dispatched) await load(data?.matchday ?? undefined);
   }, [runRefresh, load, data?.matchday]);
 
   return { data, loading, load, results, llm, refreshResults, refreshLlm };

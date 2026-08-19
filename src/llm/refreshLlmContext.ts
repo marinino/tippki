@@ -7,6 +7,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { FORWARD_SEASON } from "../eval/splits";
 import { fetchMatchdayContext, isLlmConfigured } from "./anthropicClient";
 import { LLM_CACHE_VERSION, cacheKey, writeLlmCache, type LlmCacheFile } from "./llmCache";
@@ -38,10 +39,7 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
   const fixturesPath = join(process.cwd(), "data", "fixtures.json");
   const allFixtures: Fixture[] = JSON.parse(readFileSync(fixturesPath, "utf-8"));
 
-  const now = new Date();
-  const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
-  const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
-  const targetMatchday = matchday ?? nextMatchday;
+  const targetMatchday = matchday ?? nextMatchdayOf(allFixtures);
 
   if (targetMatchday == null) throw new Error("Kein kommender Spieltag gefunden.");
 
@@ -54,7 +52,7 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
     fixtures.map((f) => ({
       homeTeam: f.homeTeam,
       awayTeam: f.awayTeam,
-      kickoff: new Date(f.date),
+      kickoff: parseKickoff(f.date),
     })),
     targetMatchday
   );

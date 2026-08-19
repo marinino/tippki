@@ -20,7 +20,12 @@
     "refresh-llm": "tsx src/scripts/refreshLlm.ts",
     "simulate-season": "tsx src/scripts/simulateSeason.ts",
     "dev": "next dev",
-    "refresh-market": "tsx src/scripts/refreshMarket.ts"
+    "build": "next build",
+    "start": "next start",
+    "refresh": "tsx src/scripts/refresh.ts",
+    "fetch-fixtures": "tsx src/scripts/fetchFixtures.ts",
+    "refresh-market": "tsx src/scripts/refreshMarket.ts",
+    "research-due": "tsx src/scripts/researchDue.ts"
   },
   "repository": {
     "type": "git",

@@ -1,4 +1,5 @@
 import type { Prediction } from "../types";
+import { formatTimestamp } from "../lib/format";
 import { ScoreHeatmap } from "./ScoreHeatmap";
 import { PriceSheetView } from "./PriceSheetView";
 import styles from "./MatchDetails.module.css";
@@ -9,6 +10,10 @@ import styles from "./MatchDetails.module.css";
 export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
   const hasFactors = p.llmFactors != null && p.llmFactors.length > 0;
   const hasGrid = p.scoreGrid != null && p.scoreGrid.length > 0;
+  // Auch ein ergebnisloser oder gescheiterter Recherchelauf gehoert hierher. Vorher fiel
+  // beides stillschweigend weg und war von "nie gefragt" nicht zu unterscheiden -- genau
+  // die Verwechslung, die eine automatisch laufende Recherche unbemerkt ausfallen laesst.
+  const hasContext = p.llmStatus !== "nicht_recherchiert";
 
   const summary = [
     "Alle Märkte",
@@ -37,7 +42,7 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
           </div>
         )}
 
-        {hasFactors && <ContextFactorList prediction={p} />}
+        {hasContext && <ContextFactorList prediction={p} />}
       </div>
     </details>
   );
@@ -49,10 +54,14 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
 // bewegt, sieht man nur hier.
 function ContextFactorList({ prediction: p }: { prediction: Prediction }) {
   const signed = (pct: number) => `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)} %`;
+
+  // Der Fehlschlag zuerst: er ist der einzige Zustand, der eine Handlung verlangt.
   const status =
-    p.llmHomeAdjustmentPct == null || p.llmAwayAdjustmentPct == null
-      ? "Keine Korrektur"
-      : `Torerwartung Heim ${signed(p.llmHomeAdjustmentPct)}, Auswärts ${signed(p.llmAwayAdjustmentPct)}`;
+    p.llmStatus === "fehlgeschlagen"
+      ? `Recherche fehlgeschlagen${p.llmFailureReason ? ` — ${p.llmFailureReason}` : ""}`
+      : p.llmHomeAdjustmentPct == null || p.llmAwayAdjustmentPct == null
+        ? "Recherchiert, keine Korrektur"
+        : `Torerwartung Heim ${signed(p.llmHomeAdjustmentPct)}, Auswärts ${signed(p.llmAwayAdjustmentPct)}`;
 
   const tone = p.llmApplied ? styles.applied : "";
 
@@ -60,14 +69,17 @@ function ContextFactorList({ prediction: p }: { prediction: Prediction }) {
     <div className={styles.row}>
       <span className={styles.rowLabel}>Spielkontext</span>
       <span className={styles.rowValue}>
-        <ul className={styles.factors}>
-          {p.llmFactors.map((factor, i) => (
-            <li key={i}>{factor}</li>
-          ))}
-        </ul>
+        {p.llmFactors.length > 0 && (
+          <ul className={styles.factors}>
+            {p.llmFactors.map((factor, i) => (
+              <li key={i}>{factor}</li>
+            ))}
+          </ul>
+        )}
         <span className={`${styles.status} ${tone}`}>
           {status}
           {p.llmSources.length > 0 && ` · ${p.llmSources.length} Quellen`}
+          {p.llmFetchedAt && ` · ${formatTimestamp(p.llmFetchedAt)}`}
         </span>
       </span>
     </div>

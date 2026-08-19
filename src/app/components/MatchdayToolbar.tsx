@@ -5,16 +5,23 @@ import styles from "./MatchdayToolbar.module.css";
 // Spieltagwahl plus der eine Aktualisierungsknopf, der Geld kostet -- deshalb bleibt er
 // manuell. Der frueher danebenstehende Quoten-Knopf ist entfallen: Buchmacherquoten sind
 // in diesem Projekt Messlatte und keine Eingabe, es gibt also nichts abzurufen.
+//
+// Auf der gehosteten Instanz faellt der Recherche-Knopf weg: dort waere er von jedem
+// klickbar, und der Zeitpunkt der Recherche gehoert zum Eingefrorenen. Zurueck kommt er
+// nur fuer einen angemeldeten Admin -- und stoesst dann den Workflow an, statt selbst zu
+// recherchieren.
 export function MatchdayToolbar({
   data,
   onMatchdayChange,
   onRefreshLlm,
   llmLoading,
+  canRefresh,
 }: {
   data: PredictionsResponse | null;
   onMatchdayChange: (matchday: number) => void;
   onRefreshLlm: () => void;
   llmLoading: boolean;
+  canRefresh: boolean;
 }) {
   return (
     <div className={styles.controls}>
@@ -32,9 +39,11 @@ export function MatchdayToolbar({
           ))}
         </select>
       )}
-      <button className="button secondary" onClick={onRefreshLlm} disabled={llmLoading}>
-        {llmLoading ? "Recherchiert …" : "Spielkontext recherchieren"}
-      </button>
+      {canRefresh && (
+        <button className="button secondary" onClick={onRefreshLlm} disabled={llmLoading}>
+          {llmLoading ? "Recherchiert …" : "Spielkontext recherchieren"}
+        </button>
+      )}
     </div>
   );
 }

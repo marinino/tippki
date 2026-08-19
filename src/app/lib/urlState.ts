@@ -6,7 +6,7 @@
 
 import type { Tab } from "../types";
 
-const TABS: Tab[] = ["predictions", "table", "backtest", "simulate"];
+const TABS: Tab[] = ["predictions", "table", "backtest", "simulate", "data"];
 
 // Deutsche Namen in der Adresse, damit ein geteilter Link lesbar bleibt.
 const TAB_SLUGS: Record<Tab, string> = {
@@ -14,6 +14,7 @@ const TAB_SLUGS: Record<Tab, string> = {
   table: "tabelle",
   backtest: "backtest",
   simulate: "simulieren",
+  data: "daten",
 };
 
 const SLUG_TO_TAB: Record<string, Tab> = Object.fromEntries(

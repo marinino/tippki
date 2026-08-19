@@ -1,0 +1,131 @@
+# Nach dem Spielwochenende: Schlussquoten nachholen, abrechnen, und den naechsten
+# Recherchezeitpunkt anzeigen.
+#
+# Drei Laeufe: montags, dienstags und donnerstags um 07:00 UTC. Die Buchmacher-Schlussquoten
+# kommen bei football-data mit ein bis drei Tagen Verzug -- ein einzelner Lauf am Montag
+# wuerde sie an manchen Wochen noch nicht finden, und `refresh-market` ist idempotent.
+#
+# Der Donnerstagslauf gilt vor allem dem Spielplan: die DFL setzt die genauen Anstosszeiten
+# erst sechs bis acht Wochen im Voraus an, und aus dem ersten Anpfiff eines Spieltags
+# berechnet sich das Recherchefenster. Donnerstags ist der Spielplan damit frisch, bevor
+# das Fenster des kommenden Spieltags faellig wird.
+#
+# Die Auswertung aendert keine Daten. Sie steht hier, damit der Stand der Saison ohne
+# Rechner sichtbar ist: der Bericht landet in der Zusammenfassung des Laufs.
+
+name: Nachbereitung
+
+on:
+  schedule:
+    - cron: "0 7 * * 1,2,4"
+  workflow_dispatch:
+    inputs:
+      grund:
+        description: "Woher der Lauf kommt"
+        required: false
+        default: "manuell"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tippki-daten
+  cancel-in-progress: false
+
+jobs:
+  nachbereitung:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Zuerst der Spielplan: verschobene Anstosszeiten verschieben das Recherchefenster,
+      # und das Skript bricht ab, statt einen halben Spielplan zu schreiben, falls
+      # OpenLigaDB gestoert ist. Von Hand gesetzte Wappen bleiben dabei stehen.
+      - name: Spielplan und Wappen
+        run: |
+          npm run fetch-fixtures | tee spielplan.txt
+          {
+            echo "### Spielplan"
+            echo ""
+            echo '```'
+            cat spielplan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f spielplan.txt
+
+      - name: Ergebnisse, xG und Schlussquoten
+        run: |
+          npm run refresh
+          npm run refresh-market
+
+      - name: Committen
+        env:
+          GRUND: ${{ inputs.grund || 'planmaessig' }}
+        run: |
+          git config user.name "tippki-automat"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Nichts geaendert." >> "$GITHUB_STEP_SUMMARY"
+          else
+            git commit -m "Spielplan, Ergebnisse und Schlussquoten nachgezogen (${GRUND})"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push
+          fi
+
+      # Nach dem Commit, damit die Auswertung die eben geholten Quoten schon sieht.
+      # continue-on-error: vor dem ersten protokollierten Spieltag hat forward-eval nichts
+      # auszuwerten, und das ist kein Fehlschlag des Laufs.
+      - name: Abrechnen
+        continue-on-error: true
+        run: |
+          npm run forward-eval | tee auswertung.txt
+          {
+            echo "### Vorwärtstest"
+            echo ""
+            echo '```'
+            cat auswertung.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f auswertung.txt
+
+      # Die Vorschau ist die Versicherung gegen einen stillen Ausfall: sie zeigt, wann das
+      # naechste Recherchefenster liegt und auf welchen UTC-Wochentag es faellt. Deckt der
+      # Zeitplan in spielkontext.yml diesen Tag nicht ab, faellt der Spieltag durch -- hier
+      # steht es eine Woche vorher im Bericht statt hinterher gar nicht.
+      - name: Naechstes Recherchefenster
+        continue-on-error: true
+        run: |
+          npm run research-due -- --preflight | tee vorschau.txt
+          {
+            echo "### Nächstes Recherchefenster"
+            echo ""
+            echo '```'
+            cat vorschau.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f vorschau.txt
+
+      # Bewusst als letzter Schritt und bewusst ohne continue-on-error.
+      #
+      # Der Abschnitt "Recherchefenster" im selfCheck rechnet fuer ALLE 34 Spieltage nach,
+      # dass ihr Fenster auf einen vom Zeitplan abgedeckten UTC-Wochentag und in dessen
+      # Stundenfenster faellt. Genau das kann eine Ansetzung kippen: verlegt die DFL einen
+      # Spieltagsauftakt auf Montag oder auf 13:00, laeuft das Fenster aus dem Cron heraus,
+      # und der Spieltag fiele stumm durch.
+      #
+      # Weil die Daten oben schon committet sind, geht hier nichts verloren -- es wird nur
+      # rot, und zwar Wochen bevor der betroffene Spieltag ansteht. Das ist der Grund, aus
+      # dem das Stundenfenster eng bleiben darf: eine Luecke meldet sich, statt zu warten.
+      - name: Zeitplan gegen den Spielplan pruefen
+        run: npm test

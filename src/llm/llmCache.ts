@@ -53,3 +53,34 @@ export function readLlmCache(): LlmCacheFile | null {
 export function cacheKey(homeTeam: string, awayTeam: string): string {
   return `${homeTeam}|${awayTeam}`;
 }
+
+// Was mit dem Spielkontext dieser Partie passiert ist.
+//
+// Bisher gab es dafuer nur ein Ja/Nein ("Korrektur angewandt?"), und das warf drei sehr
+// verschiedene Faelle in denselben Topf: nie gefragt, gefragt und nichts gefunden, gefragt
+// und gescheitert. Fuer die Beobachtung des Layers ist der Unterschied aber genau der
+// Punkt -- laufen die Korrekturen gegen null, will man wissen, ob die Recherche inert ist
+// oder ob sie gar nicht stattgefunden hat. Automatisch ausgeloest wird das noch wichtiger:
+// ein stiller Fehlschlag der Automatik sieht sonst aus wie ein unauffaelliger Spieltag.
+export type LlmStatus =
+  | "nicht_recherchiert"
+  | "fehlgeschlagen"
+  | "ohne_befund"
+  | "korrigiert";
+
+// Der Cache muss bereits auf den gefragten Spieltag geprueft sein -- ein Kontext aus einem
+// anderen Spieltag ist kein Kontext, sondern ein Fehler.
+export function llmStatusOf(
+  cacheForMatchday: LlmCacheFile | null,
+  homeTeam: string,
+  awayTeam: string,
+  adjustmentApplied: boolean
+): LlmStatus {
+  if (!cacheForMatchday) return "nicht_recherchiert";
+  const key = cacheKey(homeTeam, awayTeam);
+  if (cacheForMatchday.contexts[key]) {
+    return adjustmentApplied ? "korrigiert" : "ohne_befund";
+  }
+  if (cacheForMatchday.failures?.[key]) return "fehlgeschlagen";
+  return "nicht_recherchiert";
+}

@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { inflateRawSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseCsv } from "csv-parse/sync";
@@ -21,6 +22,17 @@ import {
   type PipelineConfig,
 } from "../model/pipelineConfig";
 import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
+import {
+  FIXTURE_TIMEZONE,
+  firstKickoffOf,
+  nextMatchdayOf,
+  parseKickoff,
+} from "../data/kickoff";
+import { LEAD_MINUTES, decideResearch } from "../data/researchWindow";
+import { DATA_FILES, isKnownDataFile } from "../data/dataFiles";
+import { createZip, crc32 } from "../data/zip";
+import { llmStatusOf } from "../llm/llmCache";
+import { describeProvenance } from "../app/lib/format";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
 import { XG_FORM_WINDOW, computeXgForm, computeXgFormResidual } from "../model/xgForm";
 import { predictFromLambdas } from "../model/predictMatch";
@@ -349,6 +361,375 @@ section("Splits", () => {
   check(() =>
     closeTo(accuracyStandardError(918), 0.0165, 5e-5, "SE der Trefferquote bei n=918 ~ 1.65pp")
   );
+});
+
+// ---------------------------------------------------------------------------
+
+// Diese Sektion ist maschinenunabhaengig formuliert: verglichen wird gegen absolute
+// UTC-Zeitpunkte, von Hand ausgerechnet. Genau daran scheitert `new Date(naiverString)` --
+// dessen Ergebnis haengt davon ab, wo der Rechner steht. Laeuft der Abschnitt auf einem
+// UTC-Runner genauso durch wie auf einem deutschen Laptop, ist die Frage erledigt.
+section("Anstosszeiten sind zeitzonenfest", () => {
+  const utc = (s: string) => parseKickoff(s).toISOString();
+
+  // Sommerzeit, +02:00. Der erste Anpfiff der Saison 2026/27.
+  check(() => assert.equal(utc("2026-08-28T20:30:00"), "2026-08-28T18:30:00.000Z"));
+  // Winterzeit, +01:00.
+  check(() => assert.equal(utc("2026-12-05T15:30:00"), "2026-12-05T14:30:00.000Z"));
+
+  // Die Zeitumstellung im Herbst 2026 faellt auf Sonntag, den 25. Oktober. Ein Samstagsspiel
+  // davor und ein Sonntagsspiel danach haben dieselbe Wandzeit und liegen trotzdem eine
+  // Stunde auseinander -- der Fall, den ein fester Offset falsch macht.
+  check(() => assert.equal(utc("2026-10-24T15:30:00"), "2026-10-24T13:30:00.000Z"));
+  check(() => assert.equal(utc("2026-10-25T15:30:00"), "2026-10-25T14:30:00.000Z"));
+  // Und die Umstellung im Fruehjahr, Sonntag der 29. Maerz.
+  check(() => assert.equal(utc("2026-03-28T15:30:00"), "2026-03-28T14:30:00.000Z"));
+  check(() => assert.equal(utc("2026-03-29T15:30:00"), "2026-03-29T13:30:00.000Z"));
+
+  // Traegt der String eine Zone, wird nicht geraten.
+  check(() => assert.equal(utc("2026-08-28T20:30:00+02:00"), "2026-08-28T18:30:00.000Z"));
+  check(() => assert.equal(utc("2026-08-28T18:30:00Z"), "2026-08-28T18:30:00.000Z"));
+  check(() => assert.equal(utc("2026-12-05T15:30:00+01:00"), "2026-12-05T14:30:00.000Z"));
+
+  // Sekunden sind optional, Muell ist es nicht.
+  check(() => assert.equal(utc("2026-08-28T20:30:45"), "2026-08-28T18:30:45.000Z"));
+  check(() => assert.throws(() => parseKickoff("28.08.2026 20:30")));
+  check(() => assert.throws(() => parseKickoff("")));
+
+  // Der komplette Spielplan muss lesbar sein -- eine einzige unlesbare Zeile wuerde die
+  // Automatik an einem Spieltag stumm ausfallen lassen.
+  const fixtures: { date: string; matchday: number }[] = JSON.parse(
+    readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
+  );
+  check(() => assert.ok(fixtures.length > 0, "fixtures.json ist leer"));
+  for (const f of fixtures) {
+    check(() => assert.ok(!Number.isNaN(parseKickoff(f.date).getTime()), `unlesbar: ${f.date}`));
+  }
+
+  // Anpfiffe liegen zwischen 12:00 und 23:00 deutscher Zeit. Der Check faengt genau den
+  // Fehler, um den es hier geht: haette parseKickoff die Zone verschluckt, laege ein
+  // 20:30-Spiel auf einem UTC-Runner bei 22:30 Ortszeit und fiele aus dem Fenster.
+  const stunde = new Intl.DateTimeFormat("en-US", {
+    timeZone: FIXTURE_TIMEZONE,
+    hourCycle: "h23",
+    hour: "2-digit",
+  });
+  for (const f of fixtures) {
+    check(() => {
+      const h = Number(stunde.format(parseKickoff(f.date)));
+      assert.ok(h >= 12 && h <= 23, `unplausible Anstosszeit ${f.date} -> ${h} Uhr in Berlin`);
+    });
+  }
+
+  // firstKickoffOf liefert den fruehesten Anpfiff, nicht den ersten in der Dateireihenfolge.
+  const spieltag1 = fixtures.filter((f) => f.matchday === 1);
+  check(() => {
+    const first = firstKickoffOf(fixtures, 1);
+    assert.ok(first !== null);
+    const min = Math.min(...spieltag1.map((f) => parseKickoff(f.date).getTime()));
+    assert.equal(first!.getTime(), min);
+  });
+  check(() => assert.equal(firstKickoffOf(fixtures, 999), null));
+
+  // nextMatchdayOf richtet sich nach dem Zeitpunkt, nicht nach dem Kalendertag.
+  const vorSaison = new Date("2026-08-01T00:00:00Z");
+  check(() => assert.equal(nextMatchdayOf(fixtures, vorSaison), 1));
+  const nachAllem = new Date("2027-12-31T00:00:00Z");
+  check(() => assert.equal(nextMatchdayOf(fixtures, nachAllem), null));
+
+  // Absetzung: eine Partie des 5. Spieltags wird auf Dezember verlegt. Der naechste
+  // Spieltag muss trotzdem der 6. sein -- sonst berechnete die Automatik ihr Fenster aus
+  // dem Dezembertermin und liesse alles dazwischen unrecherchiert durchlaufen.
+  const mitAbsetzung = [
+    { date: "2026-09-18T20:30:00", matchday: 5 },
+    { date: "2026-09-19T15:30:00", matchday: 5 },
+    { date: "2026-12-16T18:30:00", matchday: 5 }, // verlegt
+    { date: "2026-09-25T20:30:00", matchday: 6 },
+    { date: "2026-10-02T20:30:00", matchday: 7 },
+  ];
+  const nachSpieltag5 = new Date("2026-09-20T12:00:00Z");
+  check(() => assert.equal(nextMatchdayOf(mitAbsetzung, nachSpieltag5), 6));
+  check(() =>
+    assert.equal(
+      decideResearch({
+        fixtures: mitAbsetzung,
+        now: new Date("2026-09-25T15:30:00Z"), // drei Stunden vor 20:30 Berlin
+        cachedMatchday: 5,
+      }).due,
+      true
+    )
+  );
+  // Und wenn wirklich nur noch die verlegte Partie aussteht, ist sie der naechste Anpfiff.
+  check(() =>
+    assert.equal(nextMatchdayOf(mitAbsetzung, new Date("2026-12-01T12:00:00Z")), 5)
+  );
+
+  // Gleicher Anpfiff, zwei Spieltagsnummern: das Ergebnis darf nicht an der Reihenfolge
+  // in der Datei haengen.
+  const gleichzeitig = [
+    { date: "2026-09-25T20:30:00", matchday: 7 },
+    { date: "2026-09-25T20:30:00", matchday: 6 },
+  ];
+  check(() => assert.equal(nextMatchdayOf(gleichzeitig, vorSaison), 6));
+  check(() => assert.equal(nextMatchdayOf([...gleichzeitig].reverse(), vorSaison), 6));
+  // Eine Minute nach dem ersten Anpfiff ist Spieltag 1 noch aktuell -- es laufen ja noch
+  // acht Partien. Erst wenn die letzte angepfiffen ist, rueckt der Zaehler weiter.
+  const nachErstemAnpfiff = new Date(firstKickoffOf(fixtures, 1)!.getTime() + 60_000);
+  check(() => assert.equal(nextMatchdayOf(fixtures, nachErstemAnpfiff), 1));
+  const letzterAnpfiffSt1 = Math.max(...spieltag1.map((f) => parseKickoff(f.date).getTime()));
+  check(() => assert.equal(nextMatchdayOf(fixtures, new Date(letzterAnpfiffSt1 + 60_000)), 2));
+});
+
+// ---------------------------------------------------------------------------
+
+// Die Regel, nach der die Automatik recherchiert. Geprueft wird gegen feste Zeitpunkte,
+// nicht gegen "jetzt" -- ein Test, der von der Uhr abhaengt, ist an 364 Tagen im Jahr
+// gruen und genau dann rot, wenn niemand hinschaut.
+section("Recherchefenster", () => {
+  const fixtures = [
+    { date: "2026-08-28T20:30:00", matchday: 1 }, // Fr, erster Anpfiff
+    { date: "2026-08-29T15:30:00", matchday: 1 },
+    { date: "2026-08-30T17:30:00", matchday: 1 }, // So, letzter Anpfiff
+    { date: "2026-09-04T20:30:00", matchday: 2 },
+  ];
+  // Anpfiff 18:30 UTC (20:30 Berlin), Soll also 15:30 UTC.
+  const soll = new Date("2026-08-28T15:30:00Z");
+  const min = (n: number) => new Date(soll.getTime() + n * 60000);
+  const decide = (now: Date, extra: Partial<Parameters<typeof decideResearch>[0]> = {}) =>
+    decideResearch({ fixtures, now, cachedMatchday: null, ...extra });
+
+  // Punktgenau, und am Rand des Toleranzbereichs beidseitig.
+  check(() => assert.equal(decide(soll).due, true));
+  check(() => assert.equal(decide(min(-19)).due, true));
+  check(() => assert.equal(decide(min(19)).due, true));
+  // Genau ausserhalb -- ein verspaeteter Cron-Tick faellt hier durch, und das ist gewollt.
+  check(() => assert.equal(decide(min(-21)).due, false));
+  check(() => assert.equal(decide(min(21)).due, false));
+  // Weit davor und weit danach.
+  check(() => assert.equal(decide(new Date("2026-08-25T15:30:00Z")).due, false));
+  check(() => assert.equal(decide(new Date("2026-08-28T17:30:00Z")).due, false));
+
+  // Der Sollzeitpunkt bemisst sich am FRUEHESTEN Anpfiff des Spieltags, nicht am ersten
+  // Eintrag in der Datei -- sonst haenge die Recherche an der Sortierung von fixtures.json.
+  check(() => assert.equal(decide(soll).target!.toISOString(), "2026-08-28T15:30:00.000Z"));
+  check(() =>
+    assert.equal(decide(soll).firstKickoff!.toISOString(), "2026-08-28T18:30:00.000Z")
+  );
+  const gedreht = [...fixtures].reverse();
+  check(() =>
+    assert.equal(
+      decideResearch({ fixtures: gedreht, now: soll, cachedMatchday: null }).target!.getTime(),
+      soll.getTime()
+    )
+  );
+
+  // Idempotenz: ist der Spieltag schon recherchiert, passiert nichts mehr. Ohne diese
+  // Sperre wuerde jeder Tick im Fenster erneut Geld ausgeben und einen zum richtigen
+  // Zeitpunkt entstandenen Befund durch einen spaeteren ersetzen.
+  check(() => assert.equal(decide(soll, { cachedMatchday: 1 }).due, false));
+  check(() => assert.equal(decide(soll, { cachedMatchday: 2 }).due, true));
+  // ... ausser von Hand. Genau dafuer ist der Admin-Knopf da.
+  check(() => assert.equal(decide(soll, { cachedMatchday: 1, force: true }).due, true));
+
+  // Die Untergrenze: naeher als 90 Minuten an den Anpfiff geht die Automatik nie, weil
+  // dann die Aufstellungen stehen. 100 Minuten vorher ist das Fenster laengst verpasst,
+  // aber es ist die Untergrenze, die den Fall begruendet -- beides muss "nein" ergeben.
+  const kickoff = new Date("2026-08-28T18:30:00Z");
+  const vorAnpfiff = (n: number) => new Date(kickoff.getTime() - n * 60000);
+  check(() => assert.equal(decide(vorAnpfiff(89)).due, false));
+  check(() => assert.ok(decide(vorAnpfiff(89)).reason.includes("Untergrenze")));
+  check(() => assert.ok(decide(vorAnpfiff(100)).reason.includes("verpasst")));
+
+  // Von Hand darf die Untergrenze uebergangen werden -- aber nicht der Anpfiff selbst.
+  check(() => assert.equal(decide(vorAnpfiff(30), { force: true }).due, true));
+  check(() => assert.equal(decide(vorAnpfiff(-1), { force: true }).due, false));
+  check(() => assert.ok(decide(vorAnpfiff(-1), { force: true }).reason.includes("begonnen")));
+
+  // Nach dem letzten Anpfiff von Spieltag 1 richtet sich alles auf Spieltag 2 aus.
+  const nachSpieltag1 = new Date("2026-08-30T16:00:00Z");
+  check(() => assert.equal(decide(nachSpieltag1).matchday, 2));
+  check(() =>
+    assert.equal(decide(nachSpieltag1).target!.toISOString(), "2026-09-04T15:30:00.000Z")
+  );
+
+  // Winterzeit: derselbe Wandkalender-Anpfiff liegt eine Stunde spaeter in UTC, das
+  // Fenster wandert mit. Ein fest verdrahteter Offset waere hier falsch.
+  const winter = [{ date: "2026-12-04T20:30:00", matchday: 14 }];
+  check(() =>
+    assert.equal(
+      decideResearch({ fixtures: winter, now: new Date("2026-12-04T16:30:00Z"), cachedMatchday: null })
+        .target!
+        .toISOString(),
+      "2026-12-04T16:30:00.000Z"
+    )
+  );
+  check(() =>
+    assert.equal(
+      decideResearch({ fixtures: winter, now: new Date("2026-12-04T16:30:00Z"), cachedMatchday: null })
+        .due,
+      true
+    )
+  );
+
+  // Saisonende: kein kommender Spieltag, kein Lauf, kein Absturz.
+  check(() => assert.equal(decide(new Date("2027-07-01T12:00:00Z")).due, false));
+  check(() => assert.equal(decide(new Date("2027-07-01T12:00:00Z")).matchday, null));
+
+  // Und der echte Spielplan: jedes Fenster muss auf einen Wochentag fallen, den der
+  // Cron-Ausdruck in .github/workflows/spielkontext.yml abdeckt (Di, Mi, Fr, Sa, So) und
+  // in dessen Stundenfenster liegen. Faellt ein Spieltag hier durch, faellt er im Betrieb
+  // stumm durch -- und genau das soll hier auffliegen, nicht erst im Oktober.
+  const echte: { date: string; matchday: number }[] = JSON.parse(
+    readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
+  );
+  const CRON_TAGE = new Set([2, 3, 5, 6, 0]);
+  const spieltage = [...new Set(echte.map((f) => f.matchday))];
+  for (const md of spieltage) {
+    check(() => {
+      const anpfiff = firstKickoffOf(echte, md)!;
+      const fenster = new Date(anpfiff.getTime() - LEAD_MINUTES * 60000);
+      assert.ok(
+        CRON_TAGE.has(fenster.getUTCDay()),
+        `Spieltag ${md}: Fenster ${fenster.toISOString()} faellt auf UTC-Wochentag ` +
+          `${fenster.getUTCDay()}, den der Zeitplan nicht abdeckt`
+      );
+      const stunde = fenster.getUTCHours();
+      assert.ok(
+        stunde >= 8 && stunde <= 16,
+        `Spieltag ${md}: Fenster ${fenster.toISOString()} liegt bei ${stunde} Uhr UTC, ` +
+          `ausserhalb des Zeitplans (8-16)`
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+// Der Marker auf der Karte. Geprueft wird die reine Funktion, nicht ueber eine
+// hingelegte Cache-Datei -- eine erfundene llm_context_cache.json im Arbeitsverzeichnis
+// wuerde von forward-log gelesen und als echter Befund protokolliert.
+section("Spielkontext-Marker", () => {
+  const kontext = {
+    context: {} as never,
+    sources: [],
+    model: "claude-haiku-4-5",
+    fetchedAt: "2026-08-28T15:31:00.000Z",
+  };
+  const cache = {
+    version: 1,
+    season: "2026",
+    matchday: 1,
+    fetchedAt: "2026-08-28T15:31:00.000Z",
+    model: "claude-haiku-4-5",
+    contexts: { "Bayern Munich|Stuttgart": kontext, "Mainz|Paderborn": kontext },
+    failures: { "Dortmund|Hamburg": "keine zuordenbare Antwort" },
+  };
+
+  // Recherchiert und die Torerwartung bewegt.
+  check(() =>
+    assert.equal(llmStatusOf(cache, "Bayern Munich", "Stuttgart", true), "korrigiert")
+  );
+  // Recherchiert, aber nichts gefunden, was die Zahlen bewegt. Das ist ein Befund und
+  // kein Ausfall -- und genau der Fall, der vorher wie "nie gefragt" aussah.
+  check(() => assert.equal(llmStatusOf(cache, "Mainz", "Paderborn", false), "ohne_befund"));
+  // Recherche gelaufen, Antwort nicht zuzuordnen.
+  check(() =>
+    assert.equal(llmStatusOf(cache, "Dortmund", "Hamburg", false), "fehlgeschlagen")
+  );
+  // Partie gar nicht im Cache.
+  check(() => assert.equal(llmStatusOf(cache, "Freiburg", "Werder Bremen", false), "nicht_recherchiert"));
+  // Kein Cache fuer diesen Spieltag: die Route uebergibt dann null, nicht den Cache eines
+  // anderen Spieltags. Ein Kontext aus einem fremden Spieltag waere schlimmer als keiner.
+  check(() => assert.equal(llmStatusOf(null, "Bayern Munich", "Stuttgart", false), "nicht_recherchiert"));
+
+  // Vier Zustaende, vier unterscheidbare Beschriftungen -- sonst waere die Unterscheidung
+  // im Code zwar da, auf der Karte aber nicht zu sehen.
+  const labels = (
+    ["korrigiert", "ohne_befund", "fehlgeschlagen", "nicht_recherchiert"] as const
+  ).map(describeProvenance);
+  check(() => assert.equal(new Set(labels).size, 4));
+  check(() => assert.ok(labels.every((l) => l.length > 0)));
+});
+
+// ---------------------------------------------------------------------------
+
+// Selbstgeschriebenes Archivformat: ein Fehler darin faellt nicht beim Erzeugen auf,
+// sondern beim Entpacken -- moeglicherweise Monate spaeter, wenn jemand an die Daten will.
+// Deshalb wird hier ein echtes Archiv gebaut und Byte fuer Byte gegengelesen.
+section("ZIP-Buendel", () => {
+  const inhalt = [
+    { name: "fixtures.json", data: Buffer.from(JSON.stringify({ a: 1, b: "ü" }), "utf-8") },
+    { name: "D1_2627.csv", data: Buffer.from("Div,Date\nD1,28/08/2026\n", "utf-8") },
+    // Gut komprimierbar: die deflate-Groesse muss unter der Rohgroesse liegen.
+    { name: "gross.txt", data: Buffer.from("x".repeat(50_000), "utf-8") },
+    { name: "leer.txt", data: Buffer.alloc(0) },
+  ];
+  const zip = createZip(inhalt, new Date("2026-08-19T12:34:56Z"));
+
+  // Signaturen: lokaler Kopf am Anfang, End-of-Central-Directory am Ende.
+  check(() => assert.equal(zip.readUInt32LE(0), 0x04034b50));
+  const eocdOffset = zip.length - 22;
+  check(() => assert.equal(zip.readUInt32LE(eocdOffset), 0x06054b50));
+  check(() => assert.equal(zip.readUInt16LE(eocdOffset + 8), inhalt.length));
+  check(() => assert.equal(zip.readUInt16LE(eocdOffset + 10), inhalt.length));
+
+  // Das zentrale Verzeichnis muss genau dort liegen, wo der Abschluss es behauptet, und
+  // jeder Eintrag dort auf einen gueltigen lokalen Kopf zeigen. Genau diese beiden
+  // Offsets sind es, an denen ein selbstgebautes ZIP typischerweise scheitert.
+  const centralSize = zip.readUInt32LE(eocdOffset + 12);
+  const centralStart = zip.readUInt32LE(eocdOffset + 16);
+  check(() => assert.equal(centralStart + centralSize, eocdOffset));
+
+  let cursor = centralStart;
+  for (const erwartet of inhalt) {
+    check(() => assert.equal(zip.readUInt32LE(cursor), 0x02014b50));
+    const crcGespeichert = zip.readUInt32LE(cursor + 16);
+    const komprimiert = zip.readUInt32LE(cursor + 20);
+    const roh = zip.readUInt32LE(cursor + 24);
+    const nameLen = zip.readUInt16LE(cursor + 28);
+    const localOffset = zip.readUInt32LE(cursor + 42);
+    const name = zip.subarray(cursor + 46, cursor + 46 + nameLen).toString("utf-8");
+
+    check(() => assert.equal(name, erwartet.name));
+    check(() => assert.equal(roh, erwartet.data.length));
+    check(() => assert.equal(crcGespeichert, crc32(erwartet.data)));
+    check(() => assert.equal(zip.readUInt32LE(localOffset), 0x04034b50));
+
+    // Und der eigentliche Test: die Daten wieder herausholen und vergleichen.
+    const localNameLen = zip.readUInt16LE(localOffset + 26);
+    const localExtraLen = zip.readUInt16LE(localOffset + 28);
+    const datenStart = localOffset + 30 + localNameLen + localExtraLen;
+    const roher = inflateRawSync(zip.subarray(datenStart, datenStart + komprimiert));
+    check(() => assert.ok(roher.equals(erwartet.data), `${name} entpackt nicht identisch`));
+
+    cursor += 46 + nameLen;
+  }
+  check(() => assert.equal(cursor, eocdOffset));
+
+  // Der UTF-8-Merker im Flag-Feld -- ohne ihn zeigen Archivprogramme Umlaute in
+  // Dateinamen als Buchstabensalat.
+  check(() => assert.equal(zip.readUInt16LE(6) & 0x0800, 0x0800));
+
+  // Ein leeres Archiv muss gueltig bleiben, nicht abstuerzen.
+  const leer = createZip([]);
+  check(() => assert.equal(leer.length, 22));
+  check(() => assert.equal(leer.readUInt32LE(0), 0x06054b50));
+
+  // Bekannte CRC32-Pruefwerte, damit die Tabelle nicht unbemerkt kippt.
+  check(() => assert.equal(crc32(Buffer.from("", "utf-8")), 0));
+  check(() => assert.equal(crc32(Buffer.from("123456789", "utf-8")), 0xcbf43926));
+  check(() => assert.equal(crc32(Buffer.from("The quick brown fox jumps over the lazy dog")), 0x414fa339));
+
+  // Die Dateiliste des Download-Panels muss zu dem passen, was wirklich unter data/
+  // liegt -- ein Eintrag, den es nicht gibt, waere ein toter Link im Panel.
+  for (const f of DATA_FILES) {
+    check(() => assert.ok(isKnownDataFile(f.name), `${f.name} nicht in der Freigabeliste`));
+  }
+  // Und nichts anderes kommt durch. Der Name aus dem Request landet sonst im Dateisystem.
+  check(() => assert.equal(isKnownDataFile("../.env"), false));
+  check(() => assert.equal(isKnownDataFile("../../.env.local"), false));
+  check(() => assert.equal(isKnownDataFile("D1_2627.csv"), true));
+  check(() => assert.equal(isKnownDataFile("beliebig.json"), false));
 });
 
 // ---------------------------------------------------------------------------
