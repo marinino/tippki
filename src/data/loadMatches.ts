@@ -119,6 +119,14 @@ export function deriveSeasonFromDate(date: Date): string {
 // Jahres-Suffixe hintereinander. Als reiner String sortiert "9394" faelschlich NACH
 // "2021" (weil '9' > '2'). Wir normalisieren auf das vierstellige Startjahr der
 // Saison (z.B. "1993", "2020"), das sortiert sowohl chronologisch als auch als String korrekt.
+// Die Gegenrichtung: Saison-Code "2026" -> Dateiname-Suffix "2627". Beide Refresher
+// brauchen sie, deshalb steht sie hier bei den uebrigen Saison-Helfern und nicht in einem
+// der beiden -- sonst importieren sie sich gegenseitig.
+export function seasonToFilenameSuffix(season: string): string {
+  const startYear = Number(season);
+  return String(startYear % 100).padStart(2, "0") + String((startYear + 1) % 100).padStart(2, "0");
+}
+
 function normalizeSeasonCode(rawCode: string): string {
   const startSuffix = Number(rawCode.slice(0, 2));
   const startYear = startSuffix >= 50 ? 1900 + startSuffix : 2000 + startSuffix;
