@@ -1,4 +1,5 @@
 import { Fraunces, Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 // Beide Schriften werden beim Build heruntergeladen und selbst ausgeliefert -- zur
@@ -18,6 +19,23 @@ const fraunces = Fraunces({
   axes: ["SOFT", "WONK", "opsz"],
 });
 
+// Support-Widget von HappySupport. Die Kennung im Pfad ("tippki") ist der Mandant; mehr
+// braucht der Anbieter nicht, um die richtige Wissensbasis auszuliefern.
+//
+// Der Identitaetsblock aus der Anleitung (user + userJwt) fehlt hier bewusst: Tippki hat
+// keine Benutzer, nur ein geteiltes Admin-Passwort und ansonsten anonyme Besucher. Es
+// gibt also keine stabile Kennung, die man signieren koennte -- und eine erfundene waere
+// schlechter als keine, weil dann alle Besucher als dieselbe Person gefuehrt wuerden.
+//
+// Der Aufrufpuffer bleibt trotzdem stehen: er nimmt HappyWidget(...)-Aufrufe entgegen,
+// die vor dem Laden des Skripts passieren, und spielt sie danach nach.
+const HAPPY_WIDGET_BOOTSTRAP = `
+window.HappyWidget = window.HappyWidget || function () {
+  (window.HappyWidget.q = window.HappyWidget.q || []).push(arguments);
+};
+window.HappyWidgetConfig = {};
+`;
+
 export const metadata = {
   title: "Tippki",
   description: "Faire Bundesliga-Quoten aus einem Dixon-Coles-Modell, ohne Buchmacherdaten",
@@ -26,7 +44,24 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de" className={`${inter.variable} ${fraunces.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Die Reihenfolge ist das Einzige, was hier zaehlt: widget.js liest die
+            Konfiguration beim Start, sie muss also vorher stehen. beforeInteractive
+            landet im ersten HTML, afterInteractive erst nach der Hydration -- damit ist
+            der Abstand gross genug.
+
+            lazyOnload waere fuer ein Support-Widget die naheliegendere Wahl, haengt in
+            App Router aber am load-Ereignis und fuegt das Tag dann gar nicht mehr ein. */}
+        <Script id="happy-widget-config" strategy="beforeInteractive">
+          {HAPPY_WIDGET_BOOTSTRAP}
+        </Script>
+        <Script
+          src="https://api.happysupport.ai/v1/widget/tippki/widget.js"
+          data-language="de"
+          strategy="afterInteractive"
+        />
+      </body>
     </html>
   );
 }

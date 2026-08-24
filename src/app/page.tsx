@@ -88,8 +88,12 @@ export default function Home() {
   // 18-zeilige Tabelle auf 1040 px zieht das Auge unnoetig weit nach rechts.
   const narrow = tab === "table" || tab === "backtest";
 
+  
+
   return (
+    
     <main className={`page ${narrow ? "narrow" : ""}`}>
+    
       <AppHeader
         onRefresh={refreshResults}
         loading={predictions.results.loading}
