@@ -23,7 +23,7 @@
 }
 
 .draw {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--wash);
   color: var(--text-2);
 }
 

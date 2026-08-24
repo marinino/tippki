@@ -59,8 +59,8 @@
 .value {
   font-size: 9px;
   font-weight: 500;
-  /* Ab etwa halber Fuellung traegt die helle Messingflaeche keine helle Schrift mehr. */
-  color: color-mix(in srgb, var(--ink-900) calc(var(--fill) * 100%), var(--text-3));
+  /* Ab etwa halber Fuellung traegt die Messingflaeche die Gegenfarbe der Ansicht. */
+  color: color-mix(in srgb, var(--heat-ink) calc(var(--fill) * 100%), var(--text-3));
 }
 
 .tipCell {

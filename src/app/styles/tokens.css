@@ -4,9 +4,17 @@
    Richtung "Matchday": blaugraue Tinte statt reinem Schwarz, ein einziger Messing-Akzent,
    und eine Tonwertskala fuer die drei Spielausgaenge statt einer Ampel. Gruen/Gelb/Rot
    fuer Heim/Unentschieden/Auswaerts las sich als gut/mittel/schlecht -- dabei sind das
-   drei gleichwertige Ausgaenge. */
+   drei gleichwertige Ausgaenge.
+
+   Zwei Ansichten: dunkel ist die Vorgabe und steht in :root, hell haengt an
+   [data-theme="light"] auf <html>. Die Zuordnung der --ink-Stufen bleibt dabei
+   dieselbe -- 900 ist immer die Seite, 700 immer die Karte, 500 immer die Fuellung --
+   nur die Helligkeitsrichtung dreht sich. Deshalb muss keine Komponente wissen,
+   welche Ansicht gerade laeuft. */
 
 :root {
+  color-scheme: dark;
+
   /* Flaechen, von unten nach oben */
   --ink-900: #08090b;
   --ink-800: #0b0c0f;
@@ -17,6 +25,11 @@
   --line: rgba(255, 255, 255, 0.07);
   --line-strong: rgba(255, 255, 255, 0.13);
 
+  /* Zwei Schleier fuer Flaechen ohne eigene Stufe: Form-Pille "Unentschieden" und
+     die Zeile unter dem Zeiger in der Tabelle. */
+  --wash: rgba(255, 255, 255, 0.08);
+  --wash-soft: rgba(255, 255, 255, 0.02);
+
   --text: rgba(255, 255, 255, 0.94);
   --text-2: rgba(255, 255, 255, 0.58);
   --text-3: rgba(255, 255, 255, 0.36);
@@ -25,6 +38,13 @@
   --brass: #e3c77a;
   --brass-dim: #8c7a4e;
   --brass-wash: rgba(227, 199, 122, 0.12);
+  --brass-hi: #efd79a;
+
+  /* Schrift auf einer vollflaechigen Messingflaeche -- der Knopf. Immer das
+     Gegenteil von --text, nicht einfach "dunkel". */
+  --on-brass: var(--ink-900);
+  /* Dasselbe fuer die Heatmap, deren Fuellung von --ink-500 bis Messing laeuft. */
+  --heat-ink: var(--ink-900);
 
   /* Nur fuer Dinge, die tatsaechlich gut oder schlecht sind -- Form-Pillen,
      Tordifferenz, Fehlermeldungen. Entsaettigt, damit sie den Messington nicht
@@ -36,6 +56,14 @@
   --prob-home: var(--brass);
   --prob-draw: rgba(255, 255, 255, 0.26);
   --prob-away: rgba(255, 255, 255, 0.11);
+
+  /* Der Pfeil im Auswahlfeld. Steckt als Datenadresse im Token, weil die Strichfarbe
+     im SVG sonst nicht mitwechseln koennte. */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(255,255,255,0.45)' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  /* Wappen sind fuer helle Untergruende gezeichnet -- das Plaettchen bleibt in beiden
+     Ansichten weiss. */
+  --badge: #ffffff;
 
   /* Kanten statt Rundungen: der editoriale Eindruck lebt von Haarlinien.
      Vorher 20/14/10 px -- das las sich als iOS-Widget. */
@@ -56,4 +84,51 @@
 
   --page-width: 1040px;
   --page-width-narrow: 860px;
+}
+
+/* --- Helle Ansicht -------------------------------------------------------------- */
+
+/* Papier statt Tinte, und dasselbe Blaugrau als Schriftfarbe. Das Messing muss dabei
+   abdunkeln: #e3c77a auf Weiss liegt bei 1,5:1 und ist als Schrift unbrauchbar. Der
+   dunkle Goldton traegt hier beides -- Schrift auf Papier und weisse Schrift auf der
+   Knopffflaeche. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ink-900: #f2f1ec;
+  --ink-800: #eeece6;
+  --ink-700: #ffffff;
+  --ink-600: #f8f7f3;
+  --ink-500: #e6e3da;
+
+  --line: rgba(20, 22, 28, 0.1);
+  --line-strong: rgba(20, 22, 28, 0.2);
+
+  --wash: rgba(20, 22, 28, 0.07);
+  --wash-soft: rgba(20, 22, 28, 0.035);
+
+  --text: rgba(20, 22, 28, 0.92);
+  --text-2: rgba(20, 22, 28, 0.62);
+  /* Nicht der Spiegelwert von 0.36: dieselbe Deckkraft liest sich auf Papier deutlich
+     schwaecher als Weiss auf Tinte. 0.55 haelt die Stufe leise und kommt trotzdem auf
+     3,9:1 statt 3,1:1. */
+  --text-3: rgba(20, 22, 28, 0.55);
+
+  --brass: #8a6d1e;
+  --brass-dim: #7a6018;
+  --brass-wash: rgba(138, 109, 30, 0.16);
+  --brass-hi: #6f5716;
+
+  --on-brass: #ffffff;
+  /* Anders als im Dunkeln: die volle Heatmap-Zelle ist hier ein mittlerer Goldton,
+     der dunkle Schrift traegt, keine helle. */
+  --heat-ink: var(--text);
+
+  --pos: #3d7a4a;
+  --neg: #a8422f;
+
+  --prob-draw: rgba(20, 22, 28, 0.3);
+  --prob-away: rgba(20, 22, 28, 0.13);
+
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(20,22,28,0.45)' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }

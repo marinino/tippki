@@ -31,7 +31,7 @@
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--badge);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;

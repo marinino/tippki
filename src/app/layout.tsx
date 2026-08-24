@@ -1,6 +1,7 @@
 import { Fraunces, Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
+import { THEME_BOOTSTRAP } from "./lib/theme";
 
 // Beide Schriften werden beim Build heruntergeladen und selbst ausgeliefert -- zur
 // Laufzeit geht kein Request an Google.
@@ -43,7 +44,18 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="de" className={`${inter.variable} ${fraunces.variable}`}>
+    // suppressHydrationWarning, weil das Skript unten data-theme auf genau dieses
+    // Element schreibt, bevor React uebernimmt -- der Server kann das nicht wissen.
+    <html
+      lang="de"
+      className={`${inter.variable} ${fraunces.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        {/* Roh und inline, nicht ueber next/script: das Umschalten der Flaechen muss vor
+            dem ersten Anstrich passieren, sonst blitzt die dunkle Ansicht auf. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+      </head>
       <body>
         {children}
         {/* Die Reihenfolge ist das Einzige, was hier zaehlt: widget.js liest die
