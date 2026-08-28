@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "season": "2026",
+  "matchday": 1,
+  "fetchedAt": "2026-08-28T16:28:59.184Z",
+  "model": "claude-haiku-4-5",
+  "contexts": {
+    "Bayern Munich|Stuttgart": {
+      "context": {
+        "homeTeam": "Bayern Munich",
+        "awayTeam": "Stuttgart",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "RB Leipzig|M'gladbach": {
+      "context": {
+        "homeTeam": "RB Leipzig",
+        "awayTeam": "M'gladbach",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Mainz|Paderborn": {
+      "context": {
+        "homeTeam": "Mainz",
+        "awayTeam": "Paderborn",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Union Berlin|Ein Frankfurt": {
+      "context": {
+        "homeTeam": "Union Berlin",
+        "awayTeam": "Ein Frankfurt",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "FC Koln|Hoffenheim": {
+      "context": {
+        "homeTeam": "FC Koln",
+        "awayTeam": "Hoffenheim",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Elversberg|Leverkusen": {
+      "context": {
+        "homeTeam": "Elversberg",
+        "awayTeam": "Leverkusen",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Dortmund|Hamburg": {
+      "context": {
+        "homeTeam": "Dortmund",
+        "awayTeam": "Hamburg",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Freiburg|Werder Bremen": {
+      "context": {
+        "homeTeam": "Freiburg",
+        "awayTeam": "Werder Bremen",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    },
+    "Augsburg|Schalke 04": {
+      "context": {
+        "homeTeam": "Augsburg",
+        "awayTeam": "Schalke 04",
+        "foundAnything": false,
+        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
+        "keyFactors": []
+      },
+      "sources": [],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-08-28T16:28:59.184Z"
+    }
+  }
+}
