@@ -1,117 +1,421 @@
 {
-  "version": 1,
+  "version": 2,
   "season": "2026",
-  "matchday": 1,
-  "fetchedAt": "2026-08-28T16:28:59.184Z",
+  "matchday": 2,
+  "fetchedAt": "2026-09-04T17:58:53.590Z",
   "model": "claude-haiku-4-5",
   "contexts": {
-    "Bayern Munich|Stuttgart": {
+    "Stuttgart|FC Koln": {
       "context": {
-        "homeTeam": "Bayern Munich",
-        "awayTeam": "Stuttgart",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Stuttgart",
+        "awayTeam": "FC Koln",
+        "foundAnything": true,
+        "summary": "Der 1. FC Köln muss auf zwei wichtige Offensivkräfte verzichten, die am vergangenen Wochenende getroffen haben.",
+        "keyFactors": [
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Saïd El Mala",
+            "role": "forward",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Krankheitsbedingt ausfallend",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Thijs Dallinga",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Krankheitsbedingt ausfallend, Torschütze vom Wochenende",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     },
-    "RB Leipzig|M'gladbach": {
+    "Hoffenheim|Dortmund": {
       "context": {
-        "homeTeam": "RB Leipzig",
-        "awayTeam": "M'gladbach",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Hoffenheim",
+        "awayTeam": "Dortmund",
+        "foundAnything": true,
+        "summary": "Hoffenheim verliert einen Schlüsselspieler im Mittelfeld, während Dortmund mit einem schwerwiegenden Ausfall eines jungen Verteidigers zu kämpfen hat.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Andrej Kramaric",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Verletzung, nicht verfügbar",
+            "source": "https://www.fotmob.com/matches/tsg-hoffenheim-vs-borussia-dortmund/2omex9"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Giannis Konstantelias",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss nach Bundesliga-Debüt, mehrmonatige Ausfallzeit",
+            "source": "https://www.absolutfussball.com/deutschland/borussia-dortmund/konstantelias-verletzt-nach-traumeinstand-kreuzbandriss-borussia-dortmund-94465825.html"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.fotmob.com/matches/tsg-hoffenheim-vs-borussia-dortmund/2omex9",
+        "https://www.absolutfussball.com/deutschland/borussia-dortmund/konstantelias-verletzt-nach-traumeinstand-kreuzbandriss-borussia-dortmund-94465825.html"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     },
-    "Mainz|Paderborn": {
+    "Leverkusen|Union Berlin": {
       "context": {
-        "homeTeam": "Mainz",
-        "awayTeam": "Paderborn",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Leverkusen",
+        "awayTeam": "Union Berlin",
+        "foundAnything": true,
+        "summary": "Beide Mannschaften haben erhebliche Personalausfälle zu verkraften. Leverkusen verliert mehrere Spieler aus verschiedenen Bereichen, während Union Berlin mit fünf Ausfällen kämpft, darunter ein Spieler mit Kreuzbandriss.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Ben Seghir",
+            "role": "forward",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Rückstand nach Oberschenkelverletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Culbreath",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Fußverletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Eichhorn",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Stoffwechselstörung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Terrier",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskuläre Probleme",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Burke",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Trainingsrückstand",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Friedrich",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Blessur",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Ilić",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Trainingsrückstand",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Markgraf",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Nsoki",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelprobleme",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     },
-    "Union Berlin|Ein Frankfurt": {
+    "Schalke 04|Bayern Munich": {
       "context": {
-        "homeTeam": "Union Berlin",
-        "awayTeam": "Ein Frankfurt",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Schalke 04",
+        "awayTeam": "Bayern Munich",
+        "foundAnything": true,
+        "summary": "Schalke muss auf Bryan Lasme und Adrian Gantenbein verzichten; Ron Schallenberg ist gesperrt. Bayern fehlen Tarek Buchmann, Serge Gnabry und Jamal Musiala.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Bryan Lasme",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Adrian Gantenbein",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Ron Schallenberg",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Sperrung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Tarek Buchmann",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Serge Gnabry",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Jamal Musiala",
+            "role": "midfielder",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.goal.com/en/news/schalke-bayern-munich-bundesliga-preview/blt57d6c8f50474e115"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     },
-    "FC Koln|Hoffenheim": {
+    "Hamburg|Mainz": {
       "context": {
-        "homeTeam": "FC Koln",
-        "awayTeam": "Hoffenheim",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Hamburg",
+        "awayTeam": "Mainz",
+        "foundAnything": true,
+        "summary": "Hamburg fehlen Muheim, Omari und Røssing-Lelesiit. Mainz hat die gleichen Ausfallprobleme wie Paderborn.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Muheim",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Trainingsrückstand",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Omari",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Schulterverletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Røssing-Lelesiit",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Aufbautraining",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Kohr",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Syndesmoseverletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Martel",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Innenbandanriss im Knie",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Nebel",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Adduktorenverletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Silas",
+            "role": "forward",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Reha nach Schien- und Wadenbeinbruch",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     },
-    "Elversberg|Leverkusen": {
+    "Ein Frankfurt|Augsburg": {
       "context": {
-        "homeTeam": "Elversberg",
-        "awayTeam": "Leverkusen",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
+        "homeTeam": "Ein Frankfurt",
+        "awayTeam": "Augsburg",
+        "foundAnything": true,
+        "summary": "Frankfurt hat keine Meldungen. Augsburg fehlen Breithaupt und Mounié.",
+        "keyFactors": [
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Breithaupt",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Zehenprellung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Mounié",
+            "role": "forward",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "reported",
+            "note": "Verletzung",
+            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+          }
+        ]
       },
-      "sources": [],
+      "sources": [
+        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-spieltag-verletzungen-sperren-ubersicht-2-39002"
+      ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
-    },
-    "Dortmund|Hamburg": {
-      "context": {
-        "homeTeam": "Dortmund",
-        "awayTeam": "Hamburg",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
-      },
-      "sources": [],
-      "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
-    },
-    "Freiburg|Werder Bremen": {
-      "context": {
-        "homeTeam": "Freiburg",
-        "awayTeam": "Werder Bremen",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
-      },
-      "sources": [],
-      "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
-    },
-    "Augsburg|Schalke 04": {
-      "context": {
-        "homeTeam": "Augsburg",
-        "awayTeam": "Schalke 04",
-        "foundAnything": false,
-        "summary": "No notable injuries, suspensions, or other squad considerations affecting this match were identified.",
-        "keyFactors": []
-      },
-      "sources": [],
-      "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-08-28T16:28:59.184Z"
+      "fetchedAt": "2026-09-04T17:58:53.590Z"
     }
+  },
+  "failures": {
+    "M'gladbach|Elversberg": "keine zuordenbare Antwort",
+    "Werder Bremen|RB Leipzig": "keine zuordenbare Antwort",
+    "Paderborn|Freiburg": "keine zuordenbare Antwort"
+  },
+  "usage": {
+    "inputTokens": 232148,
+    "outputTokens": 7341,
+    "webSearches": 10,
+    "costUsd": 0.368853,
+    "searchErrors": [],
+    "researchChars": 5635
   }
 }
