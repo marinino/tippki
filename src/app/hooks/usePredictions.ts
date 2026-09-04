@@ -83,7 +83,7 @@ export function usePredictions(initialMatchday?: number | null) {
     return result;
   }, [runRefresh, load, data?.matchday]);
 
-  // Kostet echtes Geld (rund 1 $ fuer neun Partien), deshalb nur auf Knopfdruck.
+  // Kostet echtes Geld (gemessen rund 0,37 $ fuer neun Partien), deshalb nur auf Knopfdruck.
   const refreshLlm = useCallback(async () => {
     const result = await runRefresh(
       "/api/refresh-llm",

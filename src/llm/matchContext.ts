@@ -174,28 +174,114 @@ export function isValidMatchContext(value: unknown): value is LlmMatchContext {
   });
 }
 
-// Das Modell soll recherchieren, nicht vorhersagen. Der wichtigste Satz im ganzen Prompt
-// ist der ueber den Normalfall: ohne ihn erfindet jedes Modell fuer jede Partie etwas,
-// weil sich das nach Arbeit anfuehlt.
-export const SYSTEM_PROMPT = `Du recherchierst Fakten zu einem Bundesliga-Spiel. Du sagst KEINE Ergebnisse vorher und bewertest keine Gewinnchancen.
+// ZWEI STUFEN, und der Grund dafuer ist gemessen (2026-09-01, Spieltag 2 als Testlast):
+//
+// Vorher lief beides in einem Aufruf -- recherchieren und gleichzeitig in dieses Schema
+// pressen, fuer alle neun Partien auf einmal. Das ist an der Zuordnung gescheitert, und
+// zwar still:
+//
+//   3 Partien, Haiku,  8 Suchen  -> 5 Faktoren bei 1 von 3 Partien
+//   9 Partien, Sonnet 5, 25 Suchen -> 0 Faktoren bei 0 von 9 Partien
+//
+// Achtzehn Mannschaften gleichzeitig einer von neun Paarungen zuzuordnen ueberfordert
+// beide Modelle. Sie melden das nicht, sondern setzen ueberall foundAnything: false --
+// ununterscheidbar von einem ruhigen Spieltag. Sonnet hat seine Begruendung immerhin
+// hingeschrieben: "keine eindeutig einer Mannschaft und diesem Spieltag zuordenbaren
+// Informationen". Es hatte Material und hat es weggeworfen.
+//
+// Deshalb jetzt: EIN Rechercheaufruf fuer den ganzen Spieltag (Werkzeuge an, kein Schema,
+// freier Text), danach kleine Extraktionsaufrufe je drei Partien (Schema an, keine
+// Werkzeuge, Eingabe ist der Recherchetext). Die Extraktion kostet fast nichts -- kein
+// Suchergebnis im Kontext -- und sie muss nur noch sechs Mannschaften auseinanderhalten.
+//
+// Nebeneffekt auf die Kosten: die Suchergebnisse werden einmal bezahlt statt dreimal, wie
+// es bei drei unabhaengig suchenden Bloecken der Fall waere.
 
-Ein statistisches Modell deckt Teamstärke, Heimvorteil, Form und Marktquoten bereits vollständig ab. Deine Aufgabe ist ausschließlich Information, die in KEINEM Ergebnisdatensatz steht:
+// Die Recherchestufe. Freier Text, damit das Modell nicht gleichzeitig suchen und ein
+// Schema bedienen muss.
+//
+// Gegenueber der alten Fassung bewusst auf Ausfaelle und Rueckkehrer verengt: Belastung,
+// Trainerwechsel und Motivationslage sind ueber weite Strecken der Saison leer, kosten
+// aber jede fuer sich Suchen -- und die Suche ist linear der Kostentreiber (~0,03 USD je
+// Suche, Token eingerechnet). Sie bleiben im Schema und werden mitgenommen, wenn sie
+// nebenbei auffallen; gesucht wird nicht mehr danach.
+export const RESEARCH_SYSTEM_PROMPT = `Du recherchierst Personalnachrichten zu Bundesliga-Mannschaften. Du sagst KEINE Ergebnisse vorher und bewertest keine Gewinnchancen.
 
-- Ausfälle: Verletzungen, Sperren, Abstellungen — wer genau, und wie wichtig ist er?
-- Rückkehrer: ein Schlüsselspieler, der nach längerer Pause wieder verfügbar ist
-- Belastung: Europapokalspiel unter der Woche, weniger als vier Tage Regeneration
-- Trainerwechsel in den letzten vier Wochen
-- Motivationslage: Abstiegskampf, Meisterschaft oder Klassenerhalt bereits entschieden
+Ein statistisches Modell deckt Teamstärke, Heimvorteil und Form bereits vollständig ab. Gesucht ist ausschließlich Information, die in KEINEM Ergebnisdatensatz steht. In dieser Reihenfolge:
 
-Argumentiere NICHT über Tabellenplatz, Form, letzte Ergebnisse, Tordifferenz oder direkte Vergleiche. Das Modell hat all das, und es zu wiederholen verschlechtert das Ergebnis.
+1. Ausfälle: Verletzungen, Sperren, Abstellungen — wer genau, und wie wichtig ist er?
+2. Rückkehrer: ein Schlüsselspieler, der nach längerer Pause wieder verfügbar ist
 
-WICHTIGSTE REGEL: Wenn du nichts Bemerkenswertes findest, setze foundAnything auf false und keyFactors auf eine leere Liste. Das ist bei den meisten Spielen der erwartete und richtige Ausgang. Erfinde nichts, um Arbeit zu zeigen.
+Faellt dir dabei nebenbei ein Trainerwechsel der letzten vier Wochen, eine englische Woche mit weniger als vier Tagen Regeneration oder eine besondere Motivationslage auf, nimm sie mit. Suche nicht eigens danach.
 
-Belege jede einzelne Behauptung mit einer konkreten Quell-URL aus deiner Suche. Ein Faktor ohne belastbare Quelle gehört nicht in die Liste.
+Schreibe NICHT über Tabellenplatz, Form, letzte Ergebnisse, Tordifferenz oder direkte Vergleiche. Das Modell hat all das.
 
-Zu "importance": "key" nur für Stammspieler, deren Ausfall die Mannschaft messbar schwächt. "regular" für Rotationsspieler, "squad" für Ergänzungsspieler — letztere sind meist irrelevant und können weggelassen werden.
+Suche gebündelt: eine Abfrage der aktuellen Bundesliga-Verletztenliste deckt viele Mannschaften auf einmal ab. Geh erst dann einzelnen Mannschaften nach, wenn die Übersichtsquellen dort eine Lücke lassen.
 
-Zu "certainty": "confirmed" nur bei offizieller Vereinsmeldung oder bestätigter Aufstellung. "likely" bei glaubwürdiger Presseberichterstattung, "reported" bei Gerüchten.`;
+Gib das Ergebnis als Fließtext aus, nach Mannschaften gegliedert. Schreibe zu JEDER Mannschaft etwas — auch "keine Meldungen gefunden" ist ein Befund und wird gebraucht. Setze hinter jede einzelne Behauptung die Quell-URL, aus der sie stammt, in Klammern. Ohne URL ist die Behauptung im nächsten Schritt wertlos.
+
+Erfinde nichts. Wenn eine Quelle unklar ist, ob sie diese Saison oder die vorige meint, schreib das dazu, statt zu raten.`;
+
+// Die Extraktionsstufe. Keine Werkzeuge, kein Netz -- nur der Recherchetext und drei
+// Partien.
+//
+// Die Regel zur Unsicherheit ist gegenueber der alten Fassung umgedreht. Vorher hiess es
+// "ein Faktor ohne belastbare Quelle gehoert nicht in die Liste", und genau daran ist
+// Sonnet gescheitert: bei jedem Zweifel hat es verworfen. Das Schema hat fuer Zweifel eine
+// eigene Achse -- certainty mit confirmed/likely/reported --, und die soll benutzt werden,
+// statt sie durch eine Ja/Nein-Entscheidung zu ersetzen. Verworfen wird nur, was gar keine
+// Quelle hat.
+export const EXTRACTION_SYSTEM_PROMPT = `Du bekommst einen Rechercheberichtssatz zu Bundesliga-Personalnachrichten und ordnest daraus Fakten einzelnen Partien zu. Du recherchierst nicht selbst und ergänzt nichts aus eigenem Wissen — was nicht im Bericht steht, existiert für dich nicht.
+
+Für jede vorgelegte Partie: geh den Bericht nach beiden beteiligten Mannschaften durch und trage jeden Fakt ein, der eine der beiden betrifft. "home" ist die Heimmannschaft, "away" die Auswärtsmannschaft der jeweiligen Partie.
+
+Zu "certainty" — diese Achse trägt deine Unsicherheit, wirf einen Fakt nicht wegen Zweifeln weg:
+- "confirmed" bei offizieller Vereinsmeldung oder bestätigter Aufstellung
+- "likely" bei glaubwürdiger Presseberichterstattung
+- "reported" bei allem Übrigen, auch bei Meldungen, deren Aktualität oder Zuordnung unsicher ist
+
+Verwirf einen Fakt nur, wenn im Bericht keine Quell-URL dazu steht oder wenn er sich keiner der beiden Mannschaften dieser Partie zuordnen lässt. Übernimm die URL aus dem Bericht wörtlich in "source".
+
+Zu "importance": "key" nur für Stammspieler, deren Ausfall die Mannschaft messbar schwächt. "regular" für Rotationsspieler, "squad" für Ergänzungsspieler.
+
+Steht im Bericht zu beiden Mannschaften einer Partie nichts Bemerkenswertes, setze foundAnything auf false und keyFactors auf eine leere Liste. Das ist ein gültiger und häufiger Ausgang — aber nur dann, wenn der Bericht wirklich nichts hergibt, nicht als bequemer Ausweg.
+
+Schreibe "summary" und "note" auf Deutsch.`;
+
+// Drei Partien je Extraktionsaufruf. Bei drei Partien hat die Zuordnung nachweislich
+// funktioniert, bei neun nicht -- und zwischen beiden liegt die einzige Groesse, die sich
+// in der Messung geaendert hat.
+export const EXTRACTION_BLOCK_SIZE = 3;
+
+// Eigene Funktion statt einer Schleife im Client, damit der Self-Check nachweisen kann,
+// dass jede Partie genau einmal vorkommt. Faellt hier eine heraus, wird sie nie
+// recherchiert und landet als "nicht_recherchiert" in der Anzeige -- ein stiller Ausfall
+// derselben Bauart wie der, der Spieltag 1 gekostet hat.
+export function extractionBlocks<T>(fixtures: T[]): T[][] {
+  const blocks: T[][] = [];
+  for (let i = 0; i < fixtures.length; i += EXTRACTION_BLOCK_SIZE) {
+    blocks.push(fixtures.slice(i, i + EXTRACTION_BLOCK_SIZE));
+  }
+  return blocks;
+}
+
+// Die Aufgabe-Signatur: erschoepftes Suchbudget UND kein einziger Faktor ueber alle
+// Partien. Genau so sah der Ausfall von Spieltag 1 aus.
+//
+// Warum das einen eigenen Riegel braucht, obwohl es schon einen fuer "null Suchen" gibt:
+// beim nachgestellten Ausfall setzte das Modell fuenf Suchen parallel ab, EINE lief durch,
+// vier kamen als max_uses_exceeded zurueck -- und danach gab es die Recherche auf und
+// schrieb ueberall denselben Nullsatz. `webSearches` war 1, nicht 0. Der Null-Riegel haette
+// also geschwiegen und den wertlosen Cache durchgelassen.
+//
+// Bewusst nur bei NULL Faktoren scharf: hat die Recherche fuer einen Teil der Partien etwas
+// gefunden und ist erst danach ins Budget gelaufen, sind diese Befunde echt. Dann ist der
+// Verlust einzelner falscher Nullbefunde kleiner als der Verlust des ganzen Spieltags --
+// gemeldet wird der Budgetfehler in beiden Faellen.
+export function isGiveUpSignature(searchErrors: string[], factorCounts: number[]): boolean {
+  if (!searchErrors.includes("max_uses_exceeded")) return false;
+  return factorCounts.length > 0 && factorCounts.every((n) => n === 0);
+}
 
 export interface FixtureForPrompt {
   homeTeam: string;
@@ -203,14 +289,8 @@ export interface FixtureForPrompt {
   kickoff: Date;
 }
 
-export function buildMatchdayPrompt(fixtures: FixtureForPrompt[], matchday: number): string {
-  const today = new Date().toLocaleDateString("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-
-  const lines = fixtures
+function fixtureLines(fixtures: FixtureForPrompt[]): string {
+  return fixtures
     .map((f, i) => {
       const kickoff = f.kickoff.toLocaleString("de-DE", {
         weekday: "short",
@@ -222,17 +302,35 @@ export function buildMatchdayPrompt(fixtures: FixtureForPrompt[], matchday: numb
       return `${i + 1}. ${f.homeTeam} (Heim) gegen ${f.awayTeam} (Auswärts) — Anstoß ${kickoff}`;
     })
     .join("\n");
+}
 
-  const teams = [...new Set(fixtures.flatMap((f) => [f.homeTeam, f.awayTeam]))].join(", ");
+export function buildResearchPrompt(fixtures: FixtureForPrompt[], matchday: number): string {
+  const today = new Date().toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const teams = [...new Set(fixtures.flatMap((f) => [f.homeTeam, f.awayTeam]))];
 
   return `Bundesliga, Spieltag ${matchday}. Heute ist ${today}.
 
 Diese ${fixtures.length} Partien stehen an:
-${lines}
+${fixtureLines(fixtures)}
 
-Betroffene Mannschaften: ${teams}.
+Recherchiere den Personalstand dieser ${teams.length} Mannschaften: ${teams.join(", ")}.
 
-Recherchiere den aktuellen Stand für alle Mannschaften. Suche gebündelt — eine Suche nach der aktuellen Bundesliga-Verletztenliste deckt mehrere Partien gleichzeitig ab; suche nur dann gezielt nach einer einzelnen Mannschaft, wenn die Übersichtsquellen dort eine Lücke lassen.
+Gliedere den Bericht nach Mannschaften, eine Überschrift je Mannschaft, und nenne alle ${teams.length} — auch die ohne Meldung.`;
+}
 
-Gib für JEDE der ${fixtures.length} Partien einen Eintrag zurück, in genau dieser Reihenfolge, mit exakt den oben genannten Teamnamen in homeTeam und awayTeam. Partien ohne Befund bekommen foundAnything: false und eine leere keyFactors-Liste — das ist der erwartete Normalfall für die meisten Partien.`;
+export function buildExtractionPrompt(fixtures: FixtureForPrompt[], research: string): string {
+  return `Rechercheberichtssatz:
+
+---
+${research}
+---
+
+Ordne daraus diesen ${fixtures.length} Partien Fakten zu:
+${fixtureLines(fixtures)}
+
+Gib genau ${fixtures.length} Einträge zurück, in dieser Reihenfolge, mit exakt den oben genannten Teamnamen in homeTeam und awayTeam.`;
 }

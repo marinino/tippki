@@ -1,7 +1,7 @@
 // Cache fuer die LLM-Recherche, nach dem Vorbild von data/odds_cache.json.
 //
-// Manuelles Aktualisieren, nie automatisch bei einem Seitenaufruf: ein Refresh kostet ~1 $
-// (9 Partien auf claude-opus-5 mit Websuche), und ein Seitenaufruf darf kein Geld
+// Nie automatisch bei einem Seitenaufruf: ein Refresh kostet gemessen rund 0,37 $ (neun
+// Partien auf claude-haiku-4-5 mit Websuche), und ein Seitenaufruf darf kein Geld
 // verbrennen. Genau dieselbe Begruendung wie beim Quoten-Cache.
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
@@ -15,6 +15,25 @@ export interface CachedMatchContext {
   fetchedAt: string;
 }
 
+// Was der Lauf tatsaechlich getan hat.
+//
+// Steht hier, weil das Fehlen dieser Zahlen den Ausfall von Spieltag 1 unsichtbar gemacht
+// hat: der Cache enthielt neunmal "nichts gefunden", und aus dem Artefakt liess sich nicht
+// entscheiden, ob recherchiert und nichts gefunden wurde oder ob nie eine Suche lief. Der
+// Unterschied ist der ganze Punkt -- ohne ihn sieht ein stiller Fehlschlag der Automatik
+// aus wie ein unauffaelliger Spieltag.
+export interface LlmRunUsage {
+  inputTokens: number;
+  outputTokens: number;
+  webSearches: number;
+  costUsd: number;
+  // Fehlercodes der Websuche, z.B. max_uses_exceeded. Nicht leer heisst: die Recherche
+  // wurde beschnitten, der Nullbefund einzelner Partien ist also mit Vorsicht zu lesen.
+  searchErrors: string[];
+  // Laenge des Rechercheberichts in Zeichen.
+  researchChars: number;
+}
+
 export interface LlmCacheFile {
   version: number;
   season: string;
@@ -26,9 +45,14 @@ export interface LlmCacheFile {
   // Partien, bei denen die Recherche fehlgeschlagen ist, mit Grund -- damit ein erneuter
   // Refresh nicht raten muss, was fehlt.
   failures?: Record<string, string>;
+  // Optional, weil Dateien aus Version 1 sie nicht haben. Neue Laeufe schreiben sie immer.
+  usage?: LlmRunUsage;
 }
 
-export const LLM_CACHE_VERSION = 1;
+// 2 seit dem Umbau auf zwei Stufen (2026-09-01). Der Versionssprung wirft die Datei aus
+// Spieltag 1 bewusst weg: sie enthaelt neun Nullbefunde aus einem Lauf, der nie gesucht
+// hat, und die als Kontext weiterzureichen waere schlimmer als kein Kontext.
+export const LLM_CACHE_VERSION = 2;
 
 const CACHE_PATH = join(process.cwd(), "data", "llm_context_cache.json");
 

@@ -189,6 +189,14 @@ for (const fixture of fixtures) {
           sources: cachedLlm.sources,
           homeLogAdj: withLlm.llmAdjustment?.homeLogAdj ?? 0,
           awayLogAdj: withLlm.llmAdjustment?.awayLogAdj ?? 0,
+          // Spieltagsweite Kennzahlen des Rechercheaufrufs, in jede Zeile kopiert.
+          // Redundant, aber das Log ist append-only und wird spaeter zeilenweise
+          // ausgewertet: ohne diese Zahlen laesst sich an einer Zeile mit
+          // foundAnything: false nicht mehr entscheiden, ob ueberhaupt gesucht wurde.
+          // Genau diese Unterscheidung fehlte bei Spieltag 1.
+          webSearches: llmCache?.usage?.webSearches ?? null,
+          searchErrors: llmCache?.usage?.searchErrors ?? null,
+          researchChars: llmCache?.usage?.researchChars ?? null,
         }
       : null,
     variants: {

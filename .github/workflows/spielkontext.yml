@@ -90,7 +90,17 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           rm -f bericht.txt
 
+      # continue-on-error, damit ein Recherchefehler nicht auch noch das Protokollieren
+      # verhindert. Die beiden Dinge haben nichts miteinander zu tun: die Vorhersage des
+      # Basismodells ist unabhaengig vom Spielkontext, und sie geht sonst fuer den ganzen
+      # Spieltag verloren -- ein zweiter Schaden zusaetzlich zum ersten.
+      #
+      # Der Lauf endet trotzdem rot, dafuer sorgt der letzte Schritt. Ein stiller
+      # Fehlschlag der Recherche ist genau das, was diesem Layer schon einen Spieltag
+      # gekostet hat (siehe SAISONBETRIEB.md, "Sonderfall: ein echter Fehler").
       - name: Recherchieren
+        id: recherche
+        continue-on-error: true
         if: steps.pruefung.outputs.due == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -104,6 +114,9 @@ jobs:
       # faellt die withLlm-Variante mit dem Basismodell zusammen, und die Idempotenzpruefung
       # ueberspringt die Partien danach -- die Zeilen waeren dauerhaft wertlos fuer den
       # gepaarten Test. Laeuft es gar nicht, entsteht fuer diesen Spieltag keine Evidenz.
+      #
+      # Laeuft auch nach einer gescheiterten Recherche: dann steht in den Zeilen llm: null,
+      # und sie sind als "nicht recherchiert" von einem echten Nullbefund unterscheidbar.
       - name: Vorhersagen protokollieren
         if: steps.pruefung.outputs.due == 'true'
         run: npm run forward-log
@@ -116,6 +129,7 @@ jobs:
           SPIELTAG: ${{ steps.pruefung.outputs.matchday }}
           GRUND: ${{ inputs.grund || 'planmaessig' }}
           RECHERCHIERT: ${{ steps.pruefung.outputs.due }}
+          RECHERCHE_STATUS: ${{ steps.recherche.outcome }}
         run: |
           git config user.name "tippki-automat"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -124,7 +138,11 @@ jobs:
             echo "Nichts geaendert." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [ "$RECHERCHIERT" = "true" ]; then
+          if [ "$RECHERCHIERT" = "true" ] && [ "$RECHERCHE_STATUS" = "failure" ]; then
+            # Der Spielkontext fehlt, die Vorhersagen des Basismodells stehen aber drin.
+            # Die Commit-Nachricht sagt das, damit die Luecke spaeter im Log auffindbar ist.
+            git commit -m "Vorhersagen Spieltag ${SPIELTAG} ohne Spielkontext (Recherche fehlgeschlagen)"
+          elif [ "$RECHERCHIERT" = "true" ]; then
             git commit -m "Spielkontext Spieltag ${SPIELTAG} (${GRUND})"
           else
             git commit -m "Spielplan aufgefrischt"
@@ -133,3 +151,25 @@ jobs:
           # haelt beide auseinander, aber ein Push von Hand kann trotzdem dazwischenkommen.
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
+
+      # Ganz am Ende, damit alles davor -- protokollieren, committen, pushen -- vorher
+      # durchgelaufen ist. Erst dann darf der Lauf rot werden.
+      - name: Recherchefehler melden
+        if: steps.recherche.outcome == 'failure'
+        run: |
+          {
+            echo ""
+            echo "### Recherche fehlgeschlagen"
+            echo ""
+            echo "Der Spielkontext fehlt fuer diesen Spieltag. Die Vorhersagen des"
+            echo "Basismodells wurden trotzdem protokolliert und committet -- die Zeilen"
+            echo "tragen \`llm: null\` und sind damit von einem echten Nullbefund"
+            echo "unterscheidbar."
+            echo ""
+            echo "Log des Schritts \"Recherchieren\" oben ansehen. Steht dort"
+            echo "\`max_uses_exceeded\`, war das Suchbudget zu knapp (MAX_SEARCHES in"
+            echo "src/llm/anthropicClient.ts). Steht dort \"keine einzige Websuche\","
+            echo "hat die Recherche gar nicht stattgefunden und es wurde bewusst nichts"
+            echo "in den Cache geschrieben."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

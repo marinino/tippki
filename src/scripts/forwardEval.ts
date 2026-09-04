@@ -59,6 +59,33 @@ interface LogEntry {
   kickoff: string;
   configHash: string;
   variants: Record<string, Variant>;
+  // null heisst: fuer diese Partie lag kein Spielkontext vor. Das ist etwas anderes als
+  // ein leerer Befund, siehe researchStateOf().
+  llm?: {
+    foundAnything: boolean;
+    // Seit dem 01.09.2026 mitgeschrieben. Aeltere Zeilen kennen das Feld nicht.
+    webSearches?: number | null;
+  } | null;
+}
+
+// Drei Zustaende, die im gepaarten Test NICHT dasselbe sind:
+//
+//   "recherchiert"   -- die Behandlung wurde verabreicht. Ob sie etwas gefunden hat, ist
+//                       das Ergebnis und gehoert in die Auswertung, auch als Nullbefund.
+//   "ohne_recherche" -- die Behandlung wurde gar nicht verabreicht (Recherche
+//                       fehlgeschlagen oder nie gelaufen). Die Zeile ist keine Beobachtung
+//                       des Layers und darf den gepaarten Vergleich nicht auffuellen.
+//   "unbekannt"      -- Zeile von vor dem 01.09.2026: ein Kontext lag vor, aber ohne
+//                       Suchzahl laesst sich nicht mehr pruefen, ob wirklich recherchiert
+//                       wurde. Genau dieser blinde Fleck hat Spieltag 1 gekostet.
+type ResearchState = "recherchiert" | "ohne_recherche" | "unbekannt";
+
+function researchStateOf(entry: LogEntry): ResearchState {
+  if (entry.llm == null) return "ohne_recherche";
+  if (entry.llm.webSearches == null) return "unbekannt";
+  // Null Suchen kann seit dem Riegel in refreshLlmContext nicht mehr entstehen. Bleibt
+  // als Pruefung stehen, weil aeltere Zeilen es enthalten koennen.
+  return entry.llm.webSearches > 0 ? "recherchiert" : "ohne_recherche";
 }
 
 if (!existsSync(LOG_PATH)) {
@@ -217,51 +244,109 @@ for (const group of groups) {
   // -------------------------------------------------------------------------
   // Frage 1: bringt der Spielkontext etwas?
   // -------------------------------------------------------------------------
-  const baseline = "model";
-  const treatment = "withLlm";
-  const baseRows = perVariant.get(baseline);
-  const llmRows = perVariant.get(treatment);
+  // Gepaart wird ueber die Zeilen selbst, nicht ueber die weiter oben gebauten
+  // Variantenlisten: dort wird eine Zeile ohne die jeweilige Variante uebersprungen, und
+  // zwei so entstandene Listen waeren gegeneinander verschoben, ohne dass es auffiele.
+  const paired: { entry: LogEntry; base: PerMatchMetrics; llm: PerMatchMetrics }[] = [];
+  const skipped: Record<ResearchState, number> = {
+    recherchiert: 0,
+    ohne_recherche: 0,
+    unbekannt: 0,
+  };
 
-  if (baseRows && llmRows && baseRows.length === llmRows.length && baseRows.length > 0) {
+  for (const s of settled) {
+    const base = s.entry.variants["model"];
+    const treat = s.entry.variants["withLlm"];
+    if (!base || !treat) continue;
+
+    const state = researchStateOf(s.entry);
+    // Zeilen ohne verabreichte Behandlung fliegen raus. Sie haben in beiden Varianten
+    // exakt dieselben Zahlen und wuerden den gepaarten Test nur mit Nullen auffuellen --
+    // das druckt n hoch, ohne ein einziges Bit Evidenz beizusteuern.
+    if (state === "ohne_recherche") {
+      skipped.ohne_recherche++;
+      continue;
+    }
+    if (state === "unbekannt") skipped.unbekannt++;
+
+    const cell = (v: Variant) => scoreProbOf(v, s.homeGoals, s.awayGoals);
+    paired.push({
+      entry: s.entry,
+      base: metricsOf(base.probs, base.over25, cell(base), s.homeGoals, s.awayGoals),
+      llm: metricsOf(treat.probs, treat.over25, cell(treat), s.homeGoals, s.awayGoals),
+    });
+  }
+
+  if (paired.length > 0) {
     let onlyA = 0;
     let onlyB = 0;
     const rpsDiffs: number[] = [];
-    const differing: number[] = [];
+    // Getrennt gefuehrt, weil die Fallzahlrechnung darauf und nicht auf der Gesamtmenge
+    // beruhen muss -- siehe unten.
+    const movedDiffs: number[] = [];
 
-    for (let i = 0; i < llmRows.length; i++) {
-      const aRight = llmRows[i].predicted === llmRows[i].actual;
-      const bRight = baseRows[i].predicted === baseRows[i].actual;
+    for (const p of paired) {
+      const aRight = p.llm.predicted === p.llm.actual;
+      const bRight = p.base.predicted === p.base.actual;
       if (aRight && !bRight) onlyA++;
       else if (!aRight && bRight) onlyB++;
-      const d = baseRows[i].rps - llmRows[i].rps;
+      const d = p.base.rps - p.llm.rps;
       rpsDiffs.push(d);
-      if (Math.abs(d) > 1e-9) differing.push(d);
+      if (Math.abs(d) > 1e-9) movedDiffs.push(d);
     }
 
     console.log(`\nSpielkontext gegen Basismodell (positiv = Kontext besser):`);
+
+    if (skipped.ohne_recherche > 0) {
+      console.log(
+        `  ${skipped.ohne_recherche} Spiele ohne Spielkontext ausgeschlossen. Dort wurde die\n` +
+          `  Recherche nie verabreicht -- solche Zeilen sind keine Beobachtung des Layers,\n` +
+          `  sondern nur Nullen, die n aufblaehen.`
+      );
+    }
+    if (skipped.unbekannt > 0) {
+      console.log(
+        `  Achtung: bei ${skipped.unbekannt} Spielen ist unbekannt, ob wirklich recherchiert\n` +
+          `  wurde -- Zeilen von vor dem 01.09.2026 fuehren keine Suchzahl. Sie sind\n` +
+          `  enthalten, koennten aber stille Nullbefunde sein (siehe SAISONBETRIEB.md).`
+      );
+    }
+
     console.log(`  ${formatMcNemar("Tendenz", mcnemarExact(onlyA, onlyB))}`);
     console.log(`  ${formatBootstrap("RPS", pairedBootstrap(rpsDiffs))}`);
     console.log(
-      `  Der Kontext hat auf ${differing.length} von ${rpsDiffs.length} Spielen ueberhaupt\n` +
-        `  etwas veraendert. Auf den uebrigen ist die Differenz exakt 0 und sie verduennen\n` +
-        `  den Mittelwert -- deshalb steht die Zahl hier daneben.`
+      `  Der Kontext hat auf ${movedDiffs.length} von ${rpsDiffs.length} recherchierten Spielen\n` +
+        `  ueberhaupt etwas veraendert. Auf den uebrigen ist die Differenz exakt 0 und sie\n` +
+        `  verduennen den Mittelwert -- deshalb steht die Zahl hier daneben.`
     );
 
     // Wie viel Evidenz braucht es ueberhaupt? Diese Zahl neben dem aktuellen n zu drucken
     // verhindert, dass ein frueher, zufaellig positiver Zwischenstand ueberinterpretiert
     // wird.
-    if (rpsDiffs.length > 1) {
-      const mean = rpsDiffs.reduce((s, d) => s + d, 0) / rpsDiffs.length;
+    //
+    // Gerechnet wird auf den BEWEGTEN Spielen und danach auf die Gesamtmenge
+    // hochgerechnet. Die Streuung ueber alle Zeilen zu nehmen waere bequem und falsch:
+    // exakte Nullen druecken die Streuung, die noetige Fallzahl geht mit ihrem Quadrat,
+    // und heraus kaeme eine zu optimistische Zahl -- ausgerechnet bei der Groesse, die vor
+    // Ueberinterpretation schuetzen soll.
+    if (movedDiffs.length > 1) {
+      const mean = movedDiffs.reduce((s, d) => s + d, 0) / movedDiffs.length;
       const sd = Math.sqrt(
-        rpsDiffs.reduce((s, d) => s + (d - mean) ** 2, 0) / Math.max(1, rpsDiffs.length - 1)
+        movedDiffs.reduce((s, d) => s + (d - mean) ** 2, 0) / Math.max(1, movedDiffs.length - 1)
       );
       const target = 0.005; // ein Effekt in der Groessenordnung, die den Marktabstand schliessen wuerde
-      const needed = sd > 0 ? Math.ceil(((1.96 * sd) / target) ** 2) : 0;
+      const neededMoved = sd > 0 ? Math.ceil(((1.96 * sd) / target) ** 2) : 0;
+      // Anteil der Spiele, die der Layer ueberhaupt anfasst. Um so viele Spiele mehr
+      // braucht es insgesamt, damit am Ende genug BEWEGTE darunter sind.
+      const moveRate = movedDiffs.length / rpsDiffs.length;
+      const neededTotal = moveRate > 0 ? Math.ceil(neededMoved / moveRate) : 0;
       console.log(
-        `\n  Streuung der RPS-Differenz: ${sd.toFixed(4)}. Um einen Effekt von ${target} RPS mit\n` +
-          `  95% Sicherheit von Null zu trennen, braucht es rund ${needed} Spiele ` +
-          `(${(needed / 306).toFixed(1)} Saisons).\n` +
-          `  Aktuell ausgewertet: ${rpsDiffs.length}.`
+        `\n  Streuung der RPS-Differenz auf den bewegten Spielen: ${sd.toFixed(4)}.\n` +
+          `  Um dort einen Effekt von ${target} RPS mit 95% Sicherheit von Null zu trennen,\n` +
+          `  braucht es rund ${neededMoved} bewegte Spiele. Bei einer Trefferquote von\n` +
+          `  ${(moveRate * 100).toFixed(0)}% sind das rund ${neededTotal} protokollierte Spiele ` +
+          `(${(neededTotal / 306).toFixed(1)} Saisons).\n` +
+          `  Aktuell: ${movedDiffs.length} bewegte von ${rpsDiffs.length} recherchierten.`
       );
     }
   }

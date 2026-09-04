@@ -47,7 +47,10 @@ import {
   toLlmAdjustment,
 } from "../llm/llmAdjustment";
 import {
+  EXTRACTION_BLOCK_SIZE,
   FACT_CATEGORIES,
+  extractionBlocks,
+  isGiveUpSignature,
   isValidMatchContext,
   isValidMatchdayContext,
   type LlmKeyFactor,
@@ -649,6 +652,61 @@ section("Spielkontext-Marker", () => {
   ).map(describeProvenance);
   check(() => assert.equal(new Set(labels).size, 4));
   check(() => assert.ok(labels.every((l) => l.length > 0)));
+
+  // Die Aufteilung in Extraktionsbloecke. Faellt hier eine Partie heraus oder taucht sie
+  // doppelt auf, wird sie nie bzw. widerspruechlich recherchiert -- und zwar lautlos, weil
+  // "nicht_recherchiert" auf der Karte harmlos aussieht. Genau die Bauart von Ausfall, die
+  // Spieltag 1 gekostet hat, deshalb hier festgenagelt.
+  for (const n of [0, 1, 2, 3, 4, 8, 9, 10, 17]) {
+    const fixtures = Array.from({ length: n }, (_, i) => i);
+    const blocks = extractionBlocks(fixtures);
+    check(() =>
+      assert.deepEqual(blocks.flat(), fixtures, `${n} Partien: jede genau einmal, in Reihenfolge`)
+    );
+    check(() =>
+      assert.ok(
+        blocks.every((b) => b.length > 0 && b.length <= EXTRACTION_BLOCK_SIZE),
+        `${n} Partien: kein leerer und kein uebergrosser Block`
+      )
+    );
+  }
+  // Neun Partien ergeben drei Bloecke -- der Regelfall eines Bundesliga-Spieltags.
+  check(() => assert.equal(extractionBlocks(Array.from({ length: 9 }, (_, i) => i)).length, 3));
+
+  // Der Riegel gegen das Aufgeben. Nachgestellt ist genau der Ausfall von Spieltag 1:
+  // einzelne Suchen laufen durch, der Rest kommt als max_uses_exceeded, und danach meldet
+  // das Modell fuer jede Partie "nichts gefunden".
+  const budgetWeg = ["max_uses_exceeded", "max_uses_exceeded"];
+  check(() =>
+    assert.equal(
+      isGiveUpSignature(budgetWeg, [0, 0, 0, 0, 0, 0, 0, 0, 0]),
+      true,
+      "Budget erschoepft und ueberall null Faktoren -- das ist der Ausfall, nicht ein ruhiger Spieltag"
+    )
+  );
+  // Ein ruhiger Spieltag OHNE Budgetfehler ist ein gueltiges Ergebnis und muss durch.
+  check(() =>
+    assert.equal(
+      isGiveUpSignature([], [0, 0, 0, 0, 0, 0, 0, 0, 0]),
+      false,
+      "null Faktoren ohne Budgetfehler ist ein echter Nullspieltag"
+    )
+  );
+  // Budget erschoepft, aber es wurde etwas gefunden: die Befunde sind echt, der Spieltag
+  // wird geschrieben. Der Budgetfehler wird trotzdem gemeldet.
+  check(() =>
+    assert.equal(
+      isGiveUpSignature(budgetWeg, [0, 3, 0]),
+      false,
+      "Teilbefund ueberlebt den Budgetfehler"
+    )
+  );
+  // Ein anderer Suchfehler ist kein Budgetproblem und darf den Spieltag nicht verwerfen.
+  check(() =>
+    assert.equal(isGiveUpSignature(["unavailable"], [0, 0, 0]), false, "nur max_uses_exceeded zaehlt")
+  );
+  // Leere Zuordnung: dann greift der Riegel nicht, sondern der Fehlschlagpfad darunter.
+  check(() => assert.equal(isGiveUpSignature(budgetWeg, []), false, "ohne Partien kein Urteil"));
 });
 
 // ---------------------------------------------------------------------------
@@ -1328,15 +1386,41 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
     )
   );
 
-  // Kostenschaetzung: die Websuche ist der Kostenboden, nicht das Modell.
-  const cost = estimateCostUsd(haiku, { inputTokens: 16000, outputTokens: 3000, webSearches: 8 });
-  check(() => assert.ok(cost > 0 && cost < 1, `ein gebuendelter Spieltag unter 1 USD: ${cost.toFixed(3)}`));
-  const searchShare =
-    (8 * SEARCH_USD_PER_REQUEST) / cost;
+  // Kostenschaetzung, geeicht an einer echten Messung statt an einer Annahme.
+  //
+  // Hier stand vorher eine Rechnung mit 16.000 Eingabe-Token auf acht Suchen und daraus die
+  // Behauptung, die Suchgebuehr dominiere die Kosten. Beides war falsch: gemessen am
+  // 2026-09-01 kostete ein Lauf mit acht Suchen 151.243 Eingabe-Token, weil in der
+  // serverseitigen Suchschleife bei jeder Iteration der ganze angesammelte Kontext neu
+  // abgerechnet wird. Die Gebuehr ist rund ein Drittel, die Token sind zwei Drittel.
+  //
+  // Die Zahlen unten sind genau dieser gemessene Lauf. Wandert die Schaetzung davon weg --
+  // etwa weil jemand einen Preis anfasst -- soll das auffallen.
+  const gemessen = { inputTokens: 151243, outputTokens: 1236, webSearches: 8 };
+  const cost = estimateCostUsd(haiku, gemessen);
   check(() =>
     assert.ok(
-      searchShare > 0.4,
-      `die Suche dominiert die Kosten (${(searchShare * 100).toFixed(0)}%) -- deshalb buendeln`
+      Math.abs(cost - 0.2374) < 0.01,
+      `gemessener Lauf (3 Partien, 8 Suchen) kostet ~0.24 USD, geschaetzt: ${cost.toFixed(4)}`
+    )
+  );
+  const searchShare = (gemessen.webSearches * SEARCH_USD_PER_REQUEST) / cost;
+  check(() =>
+    assert.ok(
+      searchShare > 0.25 && searchShare < 0.45,
+      `die Suchgebuehr ist rund ein Drittel der Kosten, nicht die Mehrheit: ` +
+        `${(searchShare * 100).toFixed(0)}%`
+    )
+  );
+
+  // Hochrechnung auf einen ganzen Spieltag mit dem gesetzten Suchbudget. Kein
+  // Qualitaetsurteil, nur ein Riegel gegen eine stille Verzehnfachung: wer MAX_SEARCHES
+  // hochdreht, soll die Kosten hier sehen.
+  const spieltag = estimateCostUsd(haiku, { inputTokens: 265000, outputTokens: 6000, webSearches: 14 });
+  check(() =>
+    assert.ok(
+      spieltag < 0.8,
+      `ein Spieltag bleibt unter 0.80 USD (~27 USD/Saison): ${spieltag.toFixed(2)} USD`
     )
   );
 

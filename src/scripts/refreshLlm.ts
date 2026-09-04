@@ -3,7 +3,8 @@
 //   npm run refresh-llm
 //   npm run refresh-llm -- --matchday=3
 //
-// Kostet echtes Geld (rund 1 $ fuer neun Partien), deshalb nur manuell.
+// Kostet echtes Geld (gemessen rund 0,37 USD fuer neun Partien), deshalb nur manuell --
+// im Regelbetrieb loest die Automatik in spielkontext.yml aus.
 
 import { loadEnvLocal } from "../data/loadEnv";
 import { isLlmConfigured } from "../llm/anthropicClient";
@@ -43,13 +44,31 @@ console.log(
   `\nVerbrauch: ${summary.usage.inputTokens} Eingabe-Token, ` +
     `${summary.usage.outputTokens} Ausgabe-Token, ${summary.usage.webSearches} Websuchen.`
 );
+console.log(`Recherchebericht: ${summary.researchChars} Zeichen.`);
 console.log(`Geschaetzte Kosten zu Listenpreisen: ${summary.estimatedCostUsd.toFixed(2)} USD`);
 console.log(`Gespeichert in data/llm_context_cache.json`);
 
-// Dass die meisten Partien keine Faktoren haben, ist der erwartete Ausgang -- nicht ein
-// Zeichen dafuer, dass die Recherche nicht funktioniert.
+// Ein erschoepftes Suchbudget hat Spieltag 1 gekostet, und zwar lautlos: das Modell bricht
+// dann die Recherche ab und meldet fuer jede Partie "nichts gefunden". Deshalb steht der
+// Hinweis hier oben und nicht in einer Logzeile.
+if (summary.searchErrors.length > 0) {
+  const codes = [...new Set(summary.searchErrors)].join(", ");
+  console.log(`\nACHTUNG: ${summary.searchErrors.length} Suchfehler (${codes}).`);
+  if (summary.searchErrors.includes("max_uses_exceeded")) {
+    console.log(
+      `Das Suchbudget war zu knapp. Die Nullbefunde unten sind deshalb nicht belastbar --\n` +
+        `MAX_SEARCHES in src/llm/anthropicClient.ts anheben.`
+    );
+  }
+}
+
+// Dass die meisten Partien keine Faktoren haben, ist der erwartete Ausgang -- aber nur,
+// wenn wirklich gesucht wurde. Ohne diese Unterscheidung sah Spieltag 1 aus wie ein
+// ruhiger Spieltag.
 if (summary.fixturesWithFactors === 0 && summary.fixturesWithContext > 0) {
   console.log(
-    `\nKeine Partie mit bemerkenswerten Faktoren. Das ist der Normalfall und kein Fehler.`
+    `\nKeine Partie mit bemerkenswerten Faktoren -- bei ${summary.usage.webSearches} Websuchen\n` +
+      `und ${summary.researchChars} Zeichen Bericht. Bei zweistelliger Suchzahl und langem\n` +
+      `Bericht ist das der Normalfall; bei kurzem Bericht hat die Recherche nichts hergegeben.`
   );
 }

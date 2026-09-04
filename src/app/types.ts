@@ -45,6 +45,20 @@ export interface PredictionsResponse {
   availableMatchdays: number[];
   llmFetchedAt: string | null;
   llmModel: string | null;
+  // Was der Recherchelauf dieses Spieltags tatsaechlich getan hat. null bei Spieltagen
+  // ohne Kontext -- und bei Staenden von vor dem 01.09.2026, die noch keine Suchzahl
+  // fuehren.
+  //
+  // Steht hier, weil die Karte den Ausfall von Spieltag 1 nicht zeigen konnte: dort stand
+  // neunmal "recherchiert, ohne Befund", und das war nach der Statuslogik sogar richtig --
+  // ein Kontext lag ja vor. Dass die Recherche keine einzige Suche abgesetzt hatte, war
+  // aus der Anzeige nicht zu erkennen.
+  llmRun: {
+    webSearches: number;
+    researchChars: number;
+    searchErrors: string[];
+    costUsd: number;
+  } | null;
   // Gehostete Instanz: kein beschreibbares data/, deshalb keine Aktualisierungsknoepfe.
   readOnly: boolean;
   // ... es sei denn, jemand ist als Admin angemeldet. Dann stossen sie den Workflow an.

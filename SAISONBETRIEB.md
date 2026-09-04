@@ -34,15 +34,25 @@ Zeitplan das trifft, findet es unter [Die Automatik](#die-automatik).
 npm run refresh-llm
 ```
 
-Recherchiert Ausfälle, Belastung und Motivation für alle neun Partien. Kostet rund 0,11 USD
-je Aufruf. Nie bei einem Seitenaufruf und nie auf Verdacht — der inhaltliche Wert hängt am
+Recherchiert Ausfälle und Rückkehrer für alle neun Partien. **Kostet rund 0,37 USD je
+Aufruf, also etwa 12–13 USD je Saison** (gemessen am 2026-09-01 auf echter Last, nicht
+geschätzt). Nie bei einem Seitenaufruf und nie auf Verdacht — der inhaltliche Wert hängt am
 Zeitpunkt, und ein Aufruf zehn Tage vorher überschreibt den Cache mit einem leeren Befund.
 
-Warum genau drei Stunden, und warum ein einziger Aufruf für den ganzen Spieltag:
+Der Lauf geht in **zwei Stufen**: ein suchender Rechercheaufruf für den ganzen Spieltag,
+danach drei billige Extraktionsaufrufe zu je drei Partien. Der Grund ist gemessen — die
+frühere einstufige Variante hat für alle neun Partien auf einmal recherchieren *und* das
+Schema füllen sollen und ist an der Zuordnung gescheitert, still und mit neun Nullbefunden.
+Ausführlich in `src/llm/matchContext.ts`.
 
-- **Ein Aufruf**, weil gebündelt 6–8 Suchen und ein Systemprompt anfallen statt 27–36 Suchen
-  und neun Systemprompts. Der Cache ist entsprechend gebaut — ein `matchday`, ein
-  `fetchedAt` —, ein zweiter Aufruf überschreibt den ersten.
+Warum genau drei Stunden, und warum nur ein suchender Aufruf:
+
+- **Ein suchender Aufruf**, weil die Websuche linear der Kostentreiber ist: rund 0,03 USD je
+  Suche, davon nur ein Drittel Gebühr und zwei Drittel Token — in der serverseitigen
+  Suchschleife wird bei jeder Iteration der ganze angesammelte Kontext neu abgerechnet. Drei
+  unabhängig suchende Blöcke würden dieselbe Verletztenliste dreimal bezahlen. Der Cache ist
+  entsprechend gebaut — ein `matchday`, ein `fetchedAt` —, ein zweiter Aufruf überschreibt
+  den ersten.
 - **So spät wie vertretbar**, weil ein Spieltag sich über 45 Stunden zieht (Fr 20:30 bis
   So 17:30). Ein Aufruf am Donnerstag hätte der Freitagspartie 27 Stunden Vorlauf gelassen
   und den Sonntagsspielen 72 — ausgerechnet die Hälfte des Spieltags ohne das, was den
@@ -269,6 +279,12 @@ Der Unterschied trägt: läuft die Automatik still ins Leere, sah das vorher aus
 unauffälliger Spieltag. Und beim Beobachten der Korrekturgrößen (siehe unten) ist „inert"
 etwas anderes als „hat nie stattgefunden".
 
+**Der Marker allein reicht aber nicht.** An Spieltag 1 stand bei allen neun Partien
+„recherchiert · ohne Befund" — korrekt nach dieser Tabelle, denn ein Kontext lag ja vor. Dass
+die Recherche in Wahrheit keine einzige Websuche abgesetzt hatte, konnte die Karte nicht
+zeigen. Deshalb steht die Suchzahl seit dem 01.09.2026 im Cache und im Log, und deshalb ist
+sie in „Beobachten" der **erste** Punkt, nicht einer von mehreren.
+
 ---
 
 ## Eingefroren — nicht anfassen
@@ -339,18 +355,41 @@ Alles, was die Vorhersage nicht verändert:
 
 ## Beobachten, aber nicht nachdrehen
 
-Diese drei Dinge sagen etwas über das *Verhalten* des Layers, nicht über seine Trefferquote.
-Sie kosten deshalb nichts und sollten laufend angeschaut werden:
+Diese Dinge sagen etwas über das *Verhalten* des Layers, nicht über seine Trefferquote.
+Sie kosten deshalb nichts und sollten laufend angeschaut werden.
 
+**Zuerst die Suchzahl, dann alles andere.** Das ist keine Stilfrage, sondern die Lehre aus
+Spieltag 1 (siehe unten): stand die Recherche still, sind sämtliche Zahlen darunter
+bedeutungslos, und sie sehen trotzdem unauffällig aus.
+
+0. **Hat überhaupt gesucht worden?** — `usage.webSearches` und `usage.researchChars` in
+   `data/llm_context_cache.json`, dieselben Zahlen in jeder Logzeile und in der
+   Job-Zusammenfassung des Workflows. Zweistellige Suchzahl und ein Bericht von mehreren
+   tausend Zeichen heißt: die Recherche lief. Steht dort eine Warnung mit
+   `max_uses_exceeded`, war das Suchbudget zu knapp — dann sind alle Nullbefunde dieses
+   Spieltags wertlos, und `MAX_SEARCHES` in [anthropicClient.ts](src/llm/anthropicClient.ts)
+   gehört hoch. Zwei Riegel greifen inzwischen von selbst und schreiben dann **nichts**:
+   keine einzige Websuche, oder erschöpftes Budget bei null Faktoren über den ganzen
+   Spieltag. Der zweite ist der wichtigere — beim Ausfall von Spieltag 1 liefen durchaus
+   einzelne Suchen, nur zu wenige. Fehlt der Cache also ganz, ist das die Automatik, die
+   funktioniert hat, und nicht ihr Versagen.
 1. **Größe der Korrekturen** — `homeLogAdj` / `awayLogAdj` in jeder Logzeile, in der UI als
    „Torerwartung Heim −8 %, Auswärts +6 %". Liegen sie durchweg bei 0,01, ist der Layer
-   faktisch inert und die Frage nach dem richtigen Gain verfrüht.
+   faktisch inert und die Frage nach dem richtigen Gain verfrüht. Erst nach Punkt 0 zu
+   lesen: „inert" heißt nur dann etwas, wenn die Recherche nachweislich stattgefunden hat.
 2. **Wie oft die Klammer greift** — schlägt sie ständig an, ist die Recherche zu
    enthusiastisch oder die Aggregation zu additiv.
 3. **Qualität der Fakten** — findet das LLM die Ausfälle, die es wirklich gab? War
    „bestätigt" bestätigt? Stimmen die Quellen? Das prüfst du gegen die öffentliche Realität,
    nicht gegen Ergebnisse. Hier sitzt vermutlich der größere Hebel: ein falsch extrahierter
    Fakt ist durch keinen Gain zu retten.
+4. **Verteilung von `certainty`** — offen seit dem Umbau vom 01.09.2026: im ersten
+   verifizierten Lauf kamen 35 von 37 Faktoren als `reported` zurück, und `reported` dämpft
+   in [factMapping.ts](src/llm/factMapping.ts) mit 0,25. Die Sicherheitsachse wirkt damit
+   derzeit als gleichmäßige Viertelung statt als Unterscheidung. Ob das ehrlich ist (eine
+   abgeschriebene Verletztenliste *ist* keine Vereinsmeldung) oder eine zu vorsichtige
+   Formulierung im Extraktionsprompt, entscheidet sich mit ein paar Spieltagen Daten — die
+   `certainty` jedes Faktors steht im Vorwärts-Log. Nicht vorher am Mapping drehen.
 
 Beobachtung ist keine Erlaubnis zum Nachdrehen. Wird ein Befund groß genug, wird er
 aufgeschrieben und **nach** der Saison umgesetzt.
@@ -369,6 +408,50 @@ rechnet — nicht „suboptimal", sondern falsch —, wird es repariert. Dann gi
 
 Die Grenze ist nicht immer scharf. Der Test: lässt sich die Änderung begründen, **ohne** auf
 die Ergebnisse dieser Saison zu schauen? Dann ist es eine Reparatur. Sonst ist es Tuning.
+
+### Vorgefallen: Spieltag 1, repariert am 01.09.2026
+
+Der bislang einzige Anwendungsfall dieses Abschnitts, und als Muster brauchbar.
+
+**Befund.** Der Spielkontext von Spieltag 1 war wertlos: neunmal derselbe Satz,
+`foundAnything: false`, keine Quellen, in jeder Logzeile `homeLogAdj: 0`. Der gepaarte Test
+hatte nichts zu vergleichen.
+
+**Ursache**, nachgestellt und reproduziert: Bei neun Partien setzt das Modell seine
+Websuchen parallel ab. Ist das Budget dafür zu knapp, läuft eine Suche durch, der Rest
+kommt als `max_uses_exceeded` zurück — und dann bricht das Modell die Recherche ab und
+füllt für *jede* Partie denselben Nullsatz ein, ohne den Fehlschlag zu melden. Zweiter,
+davon unabhängiger Befund: achtzehn Mannschaften gleichzeitig auf neun Paarungen zuzuordnen
+überfordert die Modelle ohnehin. Gleicher Tag, gleiche Nachrichtenlage, nur die Partienzahl
+verändert:
+
+| Last | Suchen | Befunde |
+|---|---|---|
+| 3 Partien, Haiku 4.5 | 8 | 5 Faktoren bei 1 von 3 |
+| 9 Partien, Sonnet 5 | 25 | **0 von 9** |
+
+**Reparatur.** Recherche und Extraktion getrennt (zwei Stufen, siehe oben), Rechercheanweisung
+auf Ausfälle und Rückkehrer verengt, und im Extraktionsprompt wird Unsicherheit jetzt über
+`certainty: reported` abgebildet statt durch Wegwerfen — der alte Prompt ließ jeden Zweifel
+zum Totalverlust des Fakts führen. Dazu vier Riegel, damit dieselbe Bauart von Ausfall nicht
+noch einmal lautlos bleibt: zwei Abbruchriegel statt zu schreiben (keine einzige Websuche,
+oder erschöpftes Budget bei null Faktoren über den ganzen Spieltag), Suchfehler werden
+gemeldet statt beim Quellensammeln übersprungen, Suchzahl und Berichtslänge stehen in Cache
+und Log, und Quell-URLs werden über alle Fortsetzungsrunden gesammelt statt nur aus der
+letzten Antwort.
+
+Der zweite Riegel ist der eigentlich wichtige, und das war beim ersten Anlauf nicht klar:
+ein Riegel nur auf „null Suchen" hätte diesen Ausfall **nicht** gefangen. Im nachgestellten
+Fall setzte das Modell fünf Suchen parallel ab, eine lief durch, vier liefen ins Limit — die
+Suchzahl war also 1 und nicht 0. Erst die Kombination aus Budgetfehler und null Faktoren
+über den ganzen Spieltag beschreibt das Aufgeben eindeutig.
+
+**Was das gekostet hat, außer Geld:** einen Spieltag Evidenz. Spieltag 1 behält seinen alten
+Hash und seine neun Nullzeilen; die tragen zum gepaarten Vergleich nichts bei.
+
+**Warum das eine Reparatur war und kein Tuning:** die Begründung steht vollständig ohne einen
+Blick auf ein einziges Ergebnis dieser Saison. Der Hash hat sich entsprechend geändert
+(`llmPromptFingerprint`), und `forward-eval` trennt die beiden Gruppen von selbst.
 
 ---
 

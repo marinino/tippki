@@ -111,8 +111,19 @@ export async function GET(request: Request) {
     matchday: selectedMatchday,
     nextMatchday,
     availableMatchdays,
-    llmFetchedAt: llmCache && llmCache.matchday === selectedMatchday ? llmCache.fetchedAt : null,
-    llmModel: llmCache && llmCache.matchday === selectedMatchday ? llmCache.model : null,
+    llmFetchedAt: cacheForMatchday ? cacheForMatchday.fetchedAt : null,
+    llmModel: cacheForMatchday ? cacheForMatchday.model : null,
+    // Ohne diese Zahlen ist "ohne Befund" nicht von "hat nie gesucht" zu unterscheiden --
+    // genau der blinde Fleck, der Spieltag 1 gekostet hat. undefined bei Staenden von vor
+    // dem 01.09.2026.
+    llmRun: cacheForMatchday?.usage
+      ? {
+          webSearches: cacheForMatchday.usage.webSearches,
+          researchChars: cacheForMatchday.usage.researchChars,
+          searchErrors: cacheForMatchday.usage.searchErrors,
+          costUsd: cacheForMatchday.usage.costUsd,
+        }
+      : null,
     // Die UI blendet danach die beiden Aktualisierungsknoepfe aus. Der Weg ueber diese
     // Antwort statt ueber eine NEXT_PUBLIC_-Variable spart einen Konfigurationsschritt
     // beim Hoster -- und einen, den man vergessen kann.

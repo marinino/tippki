@@ -16,12 +16,14 @@ import { aggregateFactors, toLambdaExponents } from "../llm/factMapping";
 import {
   CERTAINTY_LEVELS,
   DIRECTIONS,
+  EXTRACTION_SYSTEM_PROMPT,
   FACT_CATEGORIES,
   IMPORTANCE_LEVELS,
   PLAYER_ROLES,
-  SYSTEM_PROMPT,
+  RESEARCH_SYSTEM_PROMPT,
   TEAM_SIDES,
-  buildMatchdayPrompt,
+  buildExtractionPrompt,
+  buildResearchPrompt,
   type LlmKeyFactor,
 } from "../llm/matchContext";
 import { resolveModelProfile } from "../llm/modelProfile";
@@ -75,15 +77,22 @@ export interface PipelineConfig {
 // Exportiert, damit selfCheck.ts nachweisen kann, dass keine Ziffer durchkommt. Bliebe
 // eine stehen, waere es das Tagesdatum, und der Fingerabdruck waere ueber Nacht ein
 // anderer.
+// Seit dem Umbau auf zwei Stufen (2026-09-01) deckt der Abdruck BEIDE Nutzeranweisungen
+// ab. Die Extraktionsanweisung enthaelt den Recherchebericht -- der wechselt natuerlich
+// jede Woche, deshalb steht an seiner Stelle ein fester Platzhalter. Gehashst wird der
+// Wortlaut der Anweisung, nicht ihr Inhalt.
 export function canonicalUserPrompt(): string {
   const kickoff = new Date(Date.UTC(2000, 0, 1, 12, 0));
-  return buildMatchdayPrompt(
-    [
-      { homeTeam: "Heimteam", awayTeam: "Auswaertsteam", kickoff },
-      { homeTeam: "Heimteam Zwei", awayTeam: "Auswaertsteam Zwei", kickoff },
-    ],
-    1
-  ).replace(/\d/g, "#");
+  const fixtures = [
+    { homeTeam: "Heimteam", awayTeam: "Auswaertsteam", kickoff },
+    { homeTeam: "Heimteam Zwei", awayTeam: "Auswaertsteam Zwei", kickoff },
+  ];
+  return [
+    buildResearchPrompt(fixtures, 1),
+    buildExtractionPrompt(fixtures, "BERICHT"),
+  ]
+    .join("\n")
+    .replace(/\d/g, "#");
 }
 
 // Trennzeichen zwischen den beiden Haelften. Sichtbar und benannt, weil hier zwischen-
@@ -94,7 +103,8 @@ export function canonicalUserPrompt(): string {
 const PROMPT_PART_SEPARATOR = "\n--- Nutzeranweisung ---\n";
 
 export function llmPromptFingerprint(): string {
-  return fnv1a(`${SYSTEM_PROMPT}${PROMPT_PART_SEPARATOR}${canonicalUserPrompt()}`);
+  const systems = `${RESEARCH_SYSTEM_PROMPT}${PROMPT_PART_SEPARATOR}${EXTRACTION_SYSTEM_PROMPT}`;
+  return fnv1a(`${systems}${PROMPT_PART_SEPARATOR}${canonicalUserPrompt()}`);
 }
 
 // Zweiter Fingerabdruck, und der subtilere: die Uebersetzung recherchierter Fakten in
