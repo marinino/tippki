@@ -31,7 +31,11 @@ import {
 } from "../eval/backtestCore";
 import { BENCHMARK_LABELS, parseBenchmarkSource } from "../eval/benchmarkOdds";
 import { loadAllMatches } from "../data/loadMatches";
-import { buildLeagueModel, type LeagueModelOptions } from "../model/teamStrength";
+import {
+  PRODUCTION_MODEL_OPTIONS,
+  buildLeagueModel,
+  type LeagueModelOptions,
+} from "../model/teamStrength";
 
 function flag(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -82,7 +86,11 @@ interface Candidate {
   model: LeagueModelOptions;
 }
 
-const candidates: Candidate[] = [{ label: "Ausgang (Saisonbloecke, Tore)", model: {} }];
+// Der Ausgangspunkt ist die PRODUKTIVE Konfiguration, nicht die Voreinstellung von
+// buildLeagueModel. Vorher war es {} -- also Saisonbloecke ohne Ridge, und damit etwas,
+// das so gar nicht lief. Ein Kandidat wurde dadurch gegen eine Pipeline gemessen, die
+// niemand faehrt, und das Δ bedeutete nichts.
+const candidates: Candidate[] = [{ label: "Saisonbloecke, Tore (alt)", model: {} }];
 
 // Hebel 1: Halbwertszeit der Zeitgewichtung. 60 Tage ist sehr kurz (gut zwei Monate),
 // 700 Tage entspricht ungefaehr der bisherigen Reichweite ueber mehrere Saisons.
@@ -100,6 +108,23 @@ for (const [label, model] of [
   candidates.push({ label, model });
 }
 
+// Hebel 3: Ridge/Shrinkage in Pseudo-Spielen. Bisher nie durchsucht, weil er bei
+// maxSweeps = 200 gar nicht auskonvergierte und deshalb nur wie ein Weichzeichner aussah.
+// Er ist der einzige Hebel, der ein Team mit duenner Datenlage ueberhaupt an die Ligamitte
+// binden kann -- ohne ihn hat ein Aufsteiger ohne erzieltes Tor keine endliche Schaetzung.
+for (const ridgePseudoMatches of [1, 2, 4, 8, 16]) {
+  candidates.push({ label: `Ridge ${ridgePseudoMatches}`, model: { ridgePseudoMatches } });
+}
+
+for (const halfLifeDays of [180, 365, 500]) {
+  for (const ridgePseudoMatches of [1, 2, 4, 8, 16]) {
+    candidates.push({
+      label: `${halfLifeDays}d + Ridge ${ridgePseudoMatches}`,
+      model: { halfLifeDays, ridgePseudoMatches },
+    });
+  }
+}
+
 // Beide Hebel zusammen -- die interessanteste Frage, weil sie sich ergaenzen koennten:
 // xG glaettet das Rauschen, die Zeitgewichtung schaerft die Aktualitaet.
 for (const halfLifeDays of [90, 180, 365]) {
@@ -111,7 +136,13 @@ for (const halfLifeDays of [90, 180, 365]) {
   }
 }
 
-const baselineContexts = buildContexts(seasons, {}, allMatches, buildLeagueModel, source);
+const baselineContexts = buildContexts(
+  seasons,
+  PRODUCTION_MODEL_OPTIONS,
+  allMatches,
+  buildLeagueModel,
+  source
+);
 const baselineEval = evaluateRun(baselineContexts, RUN);
 const baselineSummary = summarize(baselineEval.map((e) => e.metrics));
 const marketEval = evaluateRun(baselineContexts, MARKT);

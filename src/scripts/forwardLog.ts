@@ -25,7 +25,7 @@ import { join } from "path";
 import { loadEnvLocal } from "../data/loadEnv";
 import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { loadAllMatches } from "../data/loadMatches";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
 import { computeXgForm } from "../model/xgForm";
 import { argmaxCell } from "../model/scoreMatrix";
@@ -112,7 +112,7 @@ if (!llmMatchesMatchday) {
   );
 }
 
-const model = buildLeagueModel(loadAllMatches());
+const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
 
 let written = 0;
 let skipped = 0;

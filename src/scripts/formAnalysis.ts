@@ -19,7 +19,7 @@
 
 import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
 import { computeXgForm } from "../model/xgForm";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { summarize, type PerMatchMetrics } from "../eval/metrics";
 import { pairedBootstrap } from "../eval/significance";
 import { seasonsFor, VALIDATION_SEASONS } from "../eval/splits";
@@ -35,7 +35,7 @@ console.log("=== 1. Misst die Formkurve Form oder Teamstaerke? ===\n");
 // Waere die Formkurve reine Tagesform, muesste ihr Mittelwert je Team nahe 0 liegen.
 const allMatches = loadAllMatches();
 const trainMatches = allMatches.filter((m) => m.season < VALIDATION_SEASONS[0]);
-const model = buildLeagueModel(trainMatches);
+const model = buildLeagueModel(trainMatches, PRODUCTION_MODEL_OPTIONS);
 
 const formByTeam = new Map<string, number[]>();
 for (const season of contexts) {

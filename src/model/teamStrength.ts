@@ -58,7 +58,13 @@ export interface FitResult {
   diagnostics: FitDiagnostics;
 }
 
-const DEFAULT_MAX_SWEEPS = 200;
+// 200 war zu wenig, und das ist nicht theoretisch: der ungeregelte Fit ist nach 8 bis 20
+// Sweeps fertig, MIT Ridge braucht er 600 bis 1600. Bei 200 lief er also jedes Mal in die
+// Obergrenze, gab `converged: false` zurueck -- und weil das Flag nirgends geprueft wurde,
+// wanderte ein halbfertiger Fit unbemerkt in die Vorhersage. Die Ridge sah dadurch aus,
+// als wuerde sie alle Staerken auf Ligamitte zerdruecken; in Wahrheit war der Fit schlicht
+// mitten im Anlauf abgeschnitten.
+const DEFAULT_MAX_SWEEPS = 20000;
 const DEFAULT_TOLERANCE = 1e-12;
 
 // Block-Coordinate-Ascent mit geschlossener Loesung statt Gradientenaufstieg.
@@ -96,9 +102,6 @@ export function fitPoissonModel(
   const awayIdx = new Int32Array(matches.length);
   const goalsFor = new Float64Array(n);
   const goalsAgainst = new Float64Array(n);
-  // Gewichtete Spielzahl je Team -- der Ridge muss zu den gewichteten Toren passen,
-  // sonst wuerde er bei starker Zeitgewichtung viel zu stark ziehen.
-  const weightSum = new Float64Array(n);
 
   const targets = resolveTargets(matches, options);
 
@@ -113,14 +116,22 @@ export function fitPoissonModel(
     goalsAgainst[h] += w * targets.away[m];
     goalsFor[a] += w * targets.away[m];
     goalsAgainst[a] += w * targets.home[m];
-    weightSum[h] += w;
-    weightSum[a] += w;
   }
 
-  const meanWeight =
-    matches.length > 0
-      ? [...weightSum].reduce((s, v) => s + v, 0) / (2 * matches.length)
-      : 1;
+  // Bezugsgewicht des Ridge: EIN Spiel zum heutigen Stand.
+  //
+  // Hier stand das mittlere Spielgewicht ueber alle Spiele. Ohne Zeitgewichtung ist das
+  // exakt 1 und alles stimmt. Mit exponentieller Zeitgewichtung ist es etwas ganz anderes:
+  // der Mittelwert laeuft ueber zwoelf Saisons, von denen die aelteren ein Gewicht nahe
+  // null tragen, und sackt dadurch auf einen Bruchteil ab. Der Ridge zog damit um Groessen-
+  // ordnungen schwaecher, als seine eigene Dokumentation behauptet ("k zusaetzliche Spiele
+  // im Ligadurchschnitt") -- und, schlimmer, seine Staerke haette sich jedes Mal still
+  // verschoben, wenn eine weitere historische Saison in data/ dazukommt.
+  //
+  // exponentialTimeWeights eicht das juengste Spiel auf 1. "k Pseudospiele zum heutigen
+  // Gewicht" ist damit genau k. Ohne Zeitgewichtung sind alle Gewichte 1, das frueher
+  // berechnete Mittel war ebenfalls 1 -- das bisherige Verhalten bleibt also unveraendert.
+  const referenceWeight = 1;
 
   const expAttack = new Float64Array(n).fill(1);
   const expDefense = new Float64Array(n).fill(1);
@@ -142,7 +153,7 @@ export function fitPoissonModel(
       scale[awayIdx[m]] += w * avgAwayGoals * expDefense[homeIdx[m]];
     }
     for (let i = 0; i < n; i++) {
-      const prior = ridge * meanWeight;
+      const prior = ridge * referenceWeight;
       const denominator = scale[i] + prior;
       if (denominator <= 0) continue;
       const next = (goalsFor[i] + prior) / denominator;
@@ -159,7 +170,7 @@ export function fitPoissonModel(
       scale[awayIdx[m]] += w * avgHomeGoals * expAttack[homeIdx[m]];
     }
     for (let i = 0; i < n; i++) {
-      const prior = ridge * meanWeight;
+      const prior = ridge * referenceWeight;
       const denominator = scale[i] + prior;
       if (denominator <= 0) continue;
       const next = (goalsAgainst[i] + prior) / denominator;
@@ -346,7 +357,51 @@ function computePromotedTeamDefault(teams: Map<string, TeamStrength>): TeamStren
 
 // Gewicht der letzten, vorletzten, ... Saison. Was fuer ein Team unbelegt bleibt
 // (fehlende Saison oder das Reststueck bis 100%) faellt an promotedTeamDefault.
+//
+// NICHT MEHR PRODUKTIV -- siehe PRODUCTION_MODEL_OPTIONS. Die Stufung setzt stillschweigend
+// voraus, dass die neueste Saison eine FERTIGE Saison ist. Mitten im Saisonverlauf stimmt
+// das nie, und der Fehler ist am ersten Spieltag am groessten und verschwindet erst gegen
+// Saisonende -- also genau umgekehrt zu dem, was man beim Draufschauen vermuten wuerde.
 export const SEASON_RECENCY_WEIGHTS = [0.6, 0.3, 0.05, 0.02, 0.02, 0.01];
+
+// Die Fit-Einstellung, mit der produktiv gerechnet wird. Vorher gab es sie nicht: jeder
+// Aufrufer schrieb `buildLeagueModel(loadAllMatches())` und bekam damit die Voreinstellung
+// -- Saisonbloecke, kein Ridge. PipelineConfig fuehrte zwar `ridgePseudoMatches` und
+// `seasonRecencyWeights` und hashte sie sogar, aber die Werte wurden nirgends in den Fit
+// gereicht. Der Hash beschrieb also eine Konfiguration, die so gar nicht lief.
+//
+// Belegt auf VALIDATION (npm run tune-model, 2018-2022, 1529 Spiele, Ziel 1X2-LogLoss):
+//
+//   Kandidat                LogLoss        Δ        p
+//   Ausgang (Saisonbloecke) 0.9954      +0.0000    1.000
+//   Halbwertszeit 500d      0.9945      +0.0010    0.612
+//   500d + Ridge 4          0.9938      +0.0016    0.257
+//   500d + Ridge 8          0.9934      +0.0020    0.179
+//   500d + Ridge 16         0.9931      +0.0024    0.202
+//   Halbwertszeit 180d      1.0010      -0.0056    0.030
+//   Halbwertszeit  60d      1.0179      -0.0225    0.000
+//
+// Zu lesen ist das ausdruecklich NICHT als "gemessene Verbesserung": kein einziger von 39
+// Kandidaten hat die Annahmeschwelle ueberschritten. Der Backtest KANN den Unterschied
+// nicht sehen, denn buildContexts trainiert ausnahmslos auf Saisons VOR der Testsaison --
+// die neueste Trainingssaison ist dort immer vollstaendig, und genau der Fall, in dem die
+// Saisonbloecke auseinanderfliegen, kommt darin nie vor. Der Wechsel wird deshalb
+// strukturell begruendet und nicht mit einer Zahl; was die Messung beisteuert, ist die
+// Auskunft, dass er im messbaren Bereich nichts kostet.
+//
+// Kurze Halbwertszeiten (<= 250d) sind messbar SCHLECHTER -- das ist die eine belastbare
+// Aussage der Tabelle, und sie verbietet, das Problem einfach mit "mehr Aktualitaet" zu
+// erschlagen. Gewaehlt sind 500d und Ridge 8: beide liegen im Inneren des Suchgitters und
+// nicht an seinem Rand, und beide sitzen auf dem flachen Stueck statt auf dem Maximum --
+// dieselbe Regel, nach der schon DEFAULT_OUTCOME_TEMPERATURE gewaehlt wurde.
+//
+// Der Ridge ist hier kein Feinschliff, sondern tragend: ohne ihn hat ein Aufsteiger, der
+// noch kein Tor erzielt hat, keine endliche Angriffsschaetzung. Paderborn (0 Tore aus 2
+// Spielen) bekam ohne Ridge exp(attack) = 0.00 und damit eine Torerwartung von 0.
+export const PRODUCTION_MODEL_OPTIONS: LeagueModelOptions = {
+  halfLifeDays: 500,
+  ridgePseudoMatches: 8,
+};
 
 function applyRecencyWeighting(
   allTeamNames: string[],
@@ -428,6 +483,19 @@ export function buildLeagueModel(matches: Match[], options: LeagueModelOptions =
   return model;
 }
 
+// Ein nicht auskonvergierter Fit ist kein "etwas ungenauer" Fit, sondern ein zufaelliger
+// Punkt irgendwo auf dem Weg. Genau das lieferte die Saison-2026-Blockschaetzung ueber
+// Wochen: `converged: false`, Staerken bis exp(attack) = 15, und niemand sah es, weil das
+// Flag in den Diagnostics verschwand. Ab hier ist Nichtkonvergenz ein Fehler, kein Feld.
+function assertConverged(diagnostics: FitDiagnostics, what: string): void {
+  if (diagnostics.converged) return;
+  throw new Error(
+    `Fit fuer ${what} ist nach ${diagnostics.sweeps} Sweeps nicht konvergiert ` +
+      `(maxParameterDelta = ${diagnostics.maxParameterDelta.toExponential(3)}). ` +
+      `Die Teamstaerken daraus sind unbrauchbar.`
+  );
+}
+
 function fitLeagueModel(matches: Match[], options: LeagueModelOptions): LeagueModel {
   const { avgHomeGoals, avgAwayGoals } = leagueAverages(matches);
 
@@ -439,6 +507,7 @@ function fitLeagueModel(matches: Match[], options: LeagueModelOptions): LeagueMo
       ...options,
       weights: timeWeights,
     });
+    assertConverged(fit.diagnostics, `Zeitgewichtung ${options.halfLifeDays}d`);
 
     return {
       avgHomeGoals,
@@ -461,11 +530,21 @@ function fitLeagueModel(matches: Match[], options: LeagueModelOptions): LeagueMo
   for (const season of seasonsNewestFirst) {
     const seasonMatches = matches.filter((m) => m.season === season);
     const seasonAverages = leagueAverages(seasonMatches);
-    perSeasonTeams.set(
-      season,
-      fitPoissonModel(seasonMatches, seasonAverages.avgHomeGoals, seasonAverages.avgAwayGoals, options)
-        .teams
+    const seasonFit = fitPoissonModel(
+      seasonMatches,
+      seasonAverages.avgHomeGoals,
+      seasonAverages.avgAwayGoals,
+      options
     );
+    // Hier schlug der Fehler zu, der die Tipps zu Spieltag 3 zerlegt hat: eine ANGEFANGENE
+    // Saison ist fuer diesen Weg genauso eine "Saison" wie eine fertige und bekommt darum
+    // das volle Rang-0-Gewicht von 0.6. Bei 18 gespielten Spielen ist der Fit aber gar
+    // nicht identifiziert -- er divergiert (exp(attack) lief bis 3e4 hoch), und 60 Prozent
+    // der fertigen Staerke haengen daran. Der Weg ueber die Zeitgewichtung (halfLifeDays)
+    // hat das Problem bauartbedingt nicht: dort sind 18 junge Spiele einfach 18 Spiele
+    // unter 3690, und ihr Gewicht waechst von selbst mit dem Saisonverlauf.
+    assertConverged(seasonFit.diagnostics, `Saison ${season} (${seasonMatches.length} Spiele)`);
+    perSeasonTeams.set(season, seasonFit.teams);
   }
 
   const teams = applyRecencyWeighting(

@@ -37,9 +37,10 @@ console.log(
 
 if (summary.withPinnacleClose < summary.withAverageClose * 0.8) {
   console.log(
-    `\nHinweis: Pinnacle deckt deutlich weniger Spiele ab als das Marktmittel. Der Vergleich\n` +
-      `laeuft mit "--benchmark=pinnacleClose" dann auf entsprechend wenigen Spielen. Wer die\n` +
-      `volle Fallzahl braucht, nimmt ausdruecklich "--benchmark=marketAverageClose" -- in\n` +
-      `forward-eval UND im Backtest, sonst meinen die beiden Zahlen verschiedene Gegner.`
+    `\nHinweis: Pinnacle deckt deutlich weniger Spiele ab als das Marktmittel. Seit dem\n` +
+      `10.09.2026 ist "marketAverageClose" die Voreinstellung, es ist also nichts zu tun --\n` +
+      `wer ausdruecklich "--benchmark=pinnacleClose" setzt, misst auf entsprechend wenigen\n` +
+      `Spielen. Dann aber in forward-eval UND im Backtest, sonst meinen die beiden Zahlen\n` +
+      `verschiedene Gegner.`
   );
 }

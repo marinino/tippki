@@ -33,13 +33,20 @@ import {
   DEFAULT_OUTCOME_TEMPERATURE,
   DEFAULT_RHO,
 } from "./scoreMatrix";
-import { SEASON_RECENCY_WEIGHTS } from "./teamStrength";
+import { PRODUCTION_MODEL_OPTIONS } from "./teamStrength";
 import { XG_FORM_WEIGHT, XG_FORM_WINDOW } from "./xgForm";
 
 export interface PipelineConfig {
-  // Fit
+  // Fit. Diese beiden Felder waren bis 2026-09-10 reine Behauptung: sie standen hier, sie
+  // gingen in den Hash, und selfCheck prueft sogar, dass eine Aenderung den Hash bewegt --
+  // aber kein Aufrufer reichte sie je an buildLeagueModel weiter. Produktiv lief immer die
+  // Voreinstellung. Jetzt kommen sie aus PRODUCTION_MODEL_OPTIONS, also aus derselben
+  // Quelle, die der Fit tatsaechlich benutzt.
+  //
+  // seasonRecencyWeights ist ersatzlos entfallen: die Saisonbloecke sind nicht mehr
+  // produktiv, und ein Feld, das nichts mehr steuert, gehoert nicht in den Fingerabdruck.
   ridgePseudoMatches: number;
-  seasonRecencyWeights: number[];
+  halfLifeDays: number;
   // Form
   xgFormWindow: number;
   xgFormWeight: number;
@@ -149,8 +156,8 @@ export function llmMappingFingerprint(): string {
 
 // Exakt die aktuell produktiven Werte.
 export const DEFAULT_PIPELINE: PipelineConfig = {
-  ridgePseudoMatches: 0,
-  seasonRecencyWeights: SEASON_RECENCY_WEIGHTS,
+  ridgePseudoMatches: PRODUCTION_MODEL_OPTIONS.ridgePseudoMatches!,
+  halfLifeDays: PRODUCTION_MODEL_OPTIONS.halfLifeDays!,
   xgFormWindow: XG_FORM_WINDOW,
   xgFormWeight: XG_FORM_WEIGHT,
   maxGoals: DEFAULT_MAX_GOALS,
@@ -183,7 +190,7 @@ export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
   return fnv1a(
     JSON.stringify([
       config.ridgePseudoMatches,
-      config.seasonRecencyWeights,
+      config.halfLifeDays,
       config.xgFormWindow,
       config.xgFormWeight,
       config.maxGoals,

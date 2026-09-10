@@ -21,7 +21,7 @@ import { formatBootstrap, pairedBootstrap } from "../eval/significance";
 import { parseSplit, seasonsFor, warnIfTestSplit, type SplitName } from "../eval/splits";
 import { buildContexts, evaluateRun, type MatchEvaluation } from "../eval/backtestCore";
 import { BENCHMARK_LABELS, parseBenchmarkSource } from "../eval/benchmarkOdds";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { loadAllMatches } from "../data/loadMatches";
 import type { OutcomeProbs } from "../eval/metrics";
 
@@ -36,7 +36,7 @@ const source = parseBenchmarkSource(flag("benchmark"));
 warnIfTestSplit(split);
 
 const seasons = seasonsFor(split);
-const contexts = buildContexts(seasons, {}, loadAllMatches(), buildLeagueModel, source);
+const contexts = buildContexts(seasons, PRODUCTION_MODEL_OPTIONS, loadAllMatches(), buildLeagueModel, source);
 
 const model = evaluateRun(contexts, { name: "model", variant: "model" });
 const market = evaluateRun(contexts, { name: "benchmark", variant: "benchmark" });

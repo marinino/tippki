@@ -1,5 +1,5 @@
 import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictMatch } from "../model/predictMatch";
 import { computeXgForm, XG_FORM_WINDOW } from "../model/xgForm";
 
@@ -30,7 +30,7 @@ const seasonMatches = allMatches
   .filter((m) => m.season === targetSeason)
   .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
 
-const model = buildLeagueModel(trainMatches);
+const model = buildLeagueModel(trainMatches, PRODUCTION_MODEL_OPTIONS);
 
 // Bundesliga = 18 Teams = 9 Spiele/Spieltag. Kein offizielles Matchday-Feld in den CSVs,
 // daher chronologisch in 9er-Bloecke gruppiert (bei Nachholspielen nur eine grobe Annaeherung).

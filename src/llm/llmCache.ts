@@ -32,6 +32,17 @@ export interface LlmRunUsage {
   searchErrors: string[];
   // Laenge des Rechercheberichts in Zeichen.
   researchChars: number;
+  // Was die Zuordnung der Antworten auf die Partien getan hat.
+  //
+  // Ohne diese Zahlen war aus dem Artefakt nicht entscheidbar, warum eine Partie ohne
+  // Kontext blieb: hat das Modell nichts geliefert, oder haben wir seine Antwort nur nicht
+  // zuordnen koennen? An Spieltag 2 fielen drei Partien aus, und beide Erklaerungen passten
+  // gleich gut auf den Cache -- bei voellig verschiedenen Reparaturen. Optional, weil
+  // aeltere Dateien sie nicht haben.
+  matching?: {
+    blocks: { block: number; requested: number; returned: number; matched: number }[];
+    unmatched: { block: number; homeTeam: string; awayTeam: string; keyFactorCount: number }[];
+  };
 }
 
 export interface LlmCacheFile {

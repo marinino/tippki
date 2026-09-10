@@ -295,11 +295,10 @@ sondern mechanisch geprüft — [selfCheck.ts](src/scripts/selfCheck.ts), Abschn
 
 | Was | Wo | Wert |
 |---|---|---|
-| Saison-Gewichte | `teamStrength.ts` | `SEASON_RECENCY_WEIGHTS` |
+| Zeitgewichtung und Ridge | `teamStrength.ts` | `PRODUCTION_MODEL_OPTIONS` = 500 d / 8 |
 | Form-Fenster und -Gewicht | `xgForm.ts` | `XG_FORM_WINDOW`, `XG_FORM_WEIGHT` |
 | Matrix-Parameter | `scoreMatrix.ts` | `RHO`, `DRAW_BOOST`, `MAX_GOALS` |
 | Kalibrierungstemperatur | `scoreMatrix.ts` | `DEFAULT_OUTCOME_TEMPERATURE` = 1,20 |
-| Ridge | `pipelineConfig.ts` | `ridgePseudoMatches` |
 | LLM-Dämpfung | `llmAdjustment.ts` | `DEFAULT_LLM_GAIN` = 0,6 |
 | LLM-Klammer | `llmAdjustment.ts` | `DEFAULT_LLM_MAX_LOG_ADJUSTMENT` = 0,15 |
 | Rechercheanweisung | `matchContext.ts` | `SYSTEM_PROMPT`, `buildMatchdayPrompt` |
@@ -341,8 +340,10 @@ sie unbemerkt bleibt.
 
 Alles, was die Vorhersage nicht verändert:
 
-- **Auswertung** (`src/eval/`) — Metriken, Signifikanztests, Kalibrierung, Ausgabeformate.
-  Rückwirkend auf alle geloggten Zeilen anwendbar, deshalb harmlos.
+- **Auswertung** (`src/eval/`) — Metriken, Signifikanztests, Kalibrierung, Ausgabeformate,
+  und wie der Backtest seine Trainingsmenge schneidet (`buildContexts` gegen
+  `buildWalkForwardContexts`). Rückwirkend auf alle geloggten Zeilen anwendbar, deshalb
+  harmlos.
 - **UI** (`src/app/`) — Darstellung, Sortierung, was angezeigt wird.
 - **Skripte und CLI-Ausgaben** (`src/scripts/`) — solange sie nichts an der Pipeline drehen.
 - **Datenaktualisierung** — `refresh`, `refresh-market`, Teamnamen-Zuordnungen, Fixtures.
@@ -383,6 +384,19 @@ bedeutungslos, und sie sehen trotzdem unauffällig aus.
    „bestätigt" bestätigt? Stimmen die Quellen? Das prüfst du gegen die öffentliche Realität,
    nicht gegen Ergebnisse. Hier sitzt vermutlich der größere Hebel: ein falsch extrahierter
    Fakt ist durch keinen Gain zu retten.
+3b. **Zuordnung der Antworten** — seit dem 10.09.2026 mitgeschrieben, in `usage.matching` im
+   Cache und als Tabelle unter `npm run refresh-llm`. Sie beantwortet die Frage, die sich am
+   Cache von Spieltag 2 nicht beantworten ließ: dort fielen drei Partien mit „keine
+   zuordenbare Antwort" aus — und zwar **exakt Partie 4 bis 6, also genau ein
+   Extraktionsblock**. Ob das Modell für diesen Block nichts geliefert hatte oder ob es
+   geliefert hatte und wir es nur nicht zuordnen konnten, war nicht entscheidbar. Der
+   Unterschied ist groß: das eine wäre ein Recherche- oder Prompt-Problem (Prompt ändern =
+   neuer Fingerabdruck = gespaltenes Log), das andere eine Zeile Namensnormalisierung in
+   `matchToFixtures` ohne jede Auswirkung auf die Pipeline.
+
+   Ab jetzt steht der Grund im Klartext im Cache, samt der Namen, die das **Modell** benutzt
+   hat. Steht dort „SC Freiburg" statt „Freiburg", ist die Sache in einer Zeile erledigt.
+   Nicht vorher am Prompt drehen — erst den nächsten Refresh abwarten und lesen.
 4. **Verteilung von `certainty`** — offen seit dem Umbau vom 01.09.2026: im ersten
    verifizierten Lauf kamen 35 von 37 Faktoren als `reported` zurück, und `reported` dämpft
    in [factMapping.ts](src/llm/factMapping.ts) mit 0,25. Die Sicherheitsachse wirkt damit
@@ -452,6 +466,131 @@ Hash und seine neun Nullzeilen; die tragen zum gepaarten Vergleich nichts bei.
 **Warum das eine Reparatur war und kein Tuning:** die Begründung steht vollständig ohne einen
 Blick auf ein einziges Ergebnis dieser Saison. Der Hash hat sich entsprechend geändert
 (`llmPromptFingerprint`), und `forward-eval` trennt die beiden Gruppen von selbst.
+
+### Vorgefallen: Spieltag 3, repariert am 10.09.2026
+
+**Befund.** Die Tipps waren offen unsinnig: Dortmund–Paderborn 0:0 mit 86 %, Hamburg–Leipzig
+mit Quote 1,00 und häufigstem Ergebnis 10:0, Hoffenheim–Stuttgart mit einer Torerwartung von
+21 968 : 32 944.
+
+**Ursache.** Die Teamstärken entstanden über Saisonblöcke: ein eigener Fit je Saison, danach
+nach Aktualität gemittelt mit `SEASON_RECENCY_WEIGHTS` = [0,6, 0,3, …]. Die Stufung setzt
+stillschweigend voraus, dass die neueste Saison eine **fertige** Saison ist. Mitten im
+Saisonverlauf stimmt das nie. Bei 18 gespielten Spielen ist der Ein-Saison-Fit gar nicht
+identifiziert — er divergiert —, und 60 % der fertigen Stärke hingen daran. Bayern bekam so
+den schwächsten Angriff der Liga (exp(attack) = 0,18), Werder Bremen den stärksten (15,2).
+
+Der Zeitverlauf im Vorwärts-Log zeigt es sauber: Spieltag 1 wurde geloggt, als 2026 noch
+**null** Spiele hatte — die neueste Saison war 2025, vollständig, und Bayern–Stuttgart stand
+bei plausiblen 3,15 : 1,17. Mit den ersten neun Ergebnissen kippte es (Stuttgart–Köln
+1,11 : 1,33), mit achtzehn brach es zusammen. Der Fehler ist am Saisonanfang am größten und
+verschwindet gegen Saisonende — also genau umgekehrt zur Intuition.
+
+Drei Nebenbefunde, alle für sich schon Fehler: `DEFAULT_MAX_SWEEPS` = 200 war zu niedrig
+(der Ridge braucht 600–1600), das Flag `converged` wurde berechnet und nirgends geprüft, und
+`PipelineConfig` führte `ridgePseudoMatches` und `seasonRecencyWeights` im Hash, ohne dass
+sie je an `buildLeagueModel` weitergereicht wurden — der Hash beschrieb eine Konfiguration,
+die so gar nicht lief.
+
+**Reparatur.** Produktiv läuft jetzt `PRODUCTION_MODEL_OPTIONS`: ein einziger Fit über alle
+Spiele mit exponentieller Zeitgewichtung (Halbwertszeit 500 Tage) und Ridge 8. Der Weg hat
+das Problem bauartbedingt nicht — 18 junge Spiele sind dort 18 Spiele unter 3690, und ihr
+Gewicht wächst von selbst mit dem Saisonverlauf. Dazu: Sweep-Deckel hoch, Nichtkonvergenz
+wirft jetzt statt still weiterzurechnen, und die Fit-Felder der `PipelineConfig` kommen aus
+derselben Quelle wie der Fit.
+
+**Warum keine Zahl den Wechsel belegt.** `npm run tune-model` auf Validation: **0 von 39**
+Kandidaten überschreiten die Annahmeschwelle. Das ist kein Zufall — `buildContexts` trainiert
+ausnahmslos auf Saisons *vor* der Testsaison, die jüngste Trainingssaison ist dort also immer
+vollständig, und die Lage, in der die Saisonblöcke auseinanderfliegen, kommt in **keinem**
+Backtest vor. Sie kommt nur jeden Samstag vor. Der Wechsel ist deshalb strukturell begründet;
+was die Messung beisteuert, ist die Auskunft, dass er im messbaren Bereich nichts kostet
+(RPS 0,2040 gegen 0,2044). Die eine belastbare Aussage der Tabelle: kurze Halbwertszeiten
+(≤ 250 d) sind messbar **schlechter** — „einfach aktueller rechnen" wäre die falsche Antwort
+gewesen.
+
+**Der neue Riegel.** `selfCheck` prüft ab jetzt nicht nur Bausteine gegen Referenzrechnungen,
+sondern das fertige Produkt: die Torerwartungen des nächsten Spieltags auf echten Daten,
+gegen eine weite Plausibilitätsschranke, plus eine zweite unabhängige Schranke darauf, dass
+keine Ergebniszelle über 35 % kommt. Genau das fehlte — alle 4406 bisherigen Prüfungen liefen
+grün durch, während die Startseite 10:0 anzeigte, weil jeder Baustein für sich in Ordnung war
+und nur ihr Zusammenspiel auf den heutigen Daten kaputt war.
+
+**Was das gekostet hat:** Spieltag 2 und 3 an Evidenz. Spieltag 2 wurde mit dem verzerrten
+Fit geloggt und behält seinen alten Hash.
+
+### Am selben Tag: die Messlatte auf `marketAverageClose` umgestellt
+
+Kein Pipeline-Eingriff — die Messlatte ist Auswertung, ändert keine Vorhersage und keinen
+`configHash`, und ist rückwirkend auf alle geloggten Zeilen anwendbar. Sie ändert aber, was
+**jede** berichtete Vergleichszahl bedeutet, deshalb steht sie hier.
+
+Anlass: football-data führt für 2026/27 **keine** Pinnacle-Schlussquote mehr — 0 von 18
+Partien. Da `evaluateRun` Spiele ohne Messlatte überspringt (`requireBenchmark`), hätte der
+Vorwärtsvergleich dieser Saison nicht „Fehler" gemeldet, sondern Fallzahl 0 — und eine leere
+Auswertung sieht aus wie eine, die nur noch keine Daten hat.
+
+| Split | pinnacleClose | marketAverageClose | marketAverageOpen |
+|---|---|---|---|
+| VALIDATION 2018–2022 | 1529 (100 %) | 1224 (80 %) | 1530 (100 %) |
+| TEST 2023–2025 | 761 (83 %) | 918 (100 %) | 918 (100 %) |
+| laufend 2026 | **0 (0 %)** | 18 (100 %) | 18 (100 %) |
+
+Der Preis: Saison 2018 hat 0/306 Marktmittel-Schlusskurse und fällt aus der Validation, die
+von 1529 auf 1224 Spiele schrumpft. **Alle früher berichteten Validation-Zahlen beziehen sich
+auf die größere Menge und sind mit den neuen nicht direkt vergleichbar.**
+
+Nicht gewählt wurde `marketAverageOpen`, obwohl es überall 100 % abdeckt: die
+Eröffnungsquote ist der schwächere Gegner, weil zwischen Eröffnung und Anpfiff genau die
+Information einfließt, die das Modell schlagen können muss.
+
+Zu erwarten und **nicht** als Fortschritt zu lesen: gegen das Marktmittel ist der
+1X2-Abstand kleiner (RPS Δ −0,0026, p = 0,144 statt Δ −0,0033, p = 0,039). Das Marktmittel
+enthält weichere Buchmacher als Pinnacle, und die Spielmenge ist eine andere. Der
+Torsummen-Markt bleibt unverändert die klare Schwachstelle (Δ −0,0212, p = 0,001).
+
+Ein Riegel dazu im selfCheck: die **voreingestellte** Quelle muss die laufende Saison zu über
+90 % abdecken. Die vorhandene Prüfung genügte nicht — ihr reichte, dass *irgendeine* Quelle
+die Saison abdeckt, auch wenn die voreingestellte es nicht tut.
+
+### Ebenfalls am selben Tag: `npm run walk-forward`
+
+Auch das ist reine Auswertung — kein Eingriff in die Vorhersage, kein `configHash`.
+
+`buildContexts` trainiert ausnahmslos auf Saisons **vor** der Testsaison. Die jüngste
+Trainingssaison ist dort also immer vollständig, und der Zustand „mitten in einer
+angefangenen Saison" — der Zustand, in dem das Modell jeden Samstag läuft — kommt kein
+einziges Mal vor. `halfLifeDays` und `ridgePseudoMatches` waren damit nur auf *eine* ihrer
+zwei Wirkungen gemessen: „wie weit soll die Historie zurückreichen". Die andere Hälfte,
+die Reaktionsgeschwindigkeit im Saisonverlauf, hatte nie ein Messgerät.
+
+`buildWalkForwardContexts` fittet vor jedem Spieltag neu, mit allem bis dahin Gespielten.
+Schnitt vor dem **frühesten** Anpfiff des Spieltags — die getreue Nachbildung des
+Echtbetriebs, wo die Automatik einmal je Spieltag läuft (ein Sonntagsspiel kennt das
+Freitagsergebnis auch produktiv noch nicht). Ein Fit kostet 23 ms, ein voller Durchlauf
+wenige Sekunden; die Rechenzeit war also nie der Grund, warum es das nicht gab.
+
+**Erster Befund, auf Validation, über RPS und LogLoss gleichlautend:** der Refit im
+Saisonverlauf bringt **nichts**. RPS Δ −0,0004 (p = 0,63), LogLoss Δ −0,0017 (p = 0,53) —
+walk-forward ist eher minimal schlechter. Und kurze Halbwertszeiten sind auch dann
+schlechter, wenn das Modell den laufenden Saisonstand wirklich sehen darf, jetzt sogar
+signifikant: 250 d −0,0012 (p = 0,021), 180 d −0,0021 (p = 0,008), 90 d −0,0050 (p = 0,001).
+Die produktiven 500 d + Ridge 8 liegen im flachen Feld an der Spitze.
+
+Das ist eine echte Antwort und nicht die erwartete: der laufende Saisonstand trägt zur
+**Stärkeschätzung** praktisch nichts bei. Die aktuelle Information kommt über die
+Formkurve, und die läuft ohnehin ausschließlich auf dieser Saison.
+
+**Der Nachweis, dass das Werkzeug taugt:** mit der alten Saisonblock-Einstellung läuft
+`buildContexts` an der Saisongrenze anstandslos durch — genau deshalb blieb der Fehler
+wochenlang unsichtbar. Derselbe Aufbau walk-forward bricht ab mit
+
+> `Fit fuer Saison 2018 (18 Spiele) ist nach 20000 Sweeps nicht konvergiert`
+
+**18 Spiele** — exakt der Saisonstand, bei dem diese Woche die Tipps zerbrachen. Beides ist
+im selfCheck festgenagelt, zusammen mit dem Nachweis, dass kein Spiel in einen Fit fließt,
+das zum Vorhersagezeitpunkt noch nicht gespielt war (ein Datenleck sieht aus wie ein
+besseres Modell und wäre sonst nicht zu bemerken).
 
 ---
 

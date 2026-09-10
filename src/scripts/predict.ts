@@ -12,7 +12,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { loadEnvLocal } from "../data/loadEnv";
 import { loadAllMatches } from "../data/loadMatches";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
 import { computeXgForm } from "../model/xgForm";
 import { formatOdds } from "../model/priceSheet";
@@ -50,7 +50,7 @@ if (matchday == null) {
 }
 
 const fixtures = allFixtures.filter((f) => f.matchday === matchday);
-const model = buildLeagueModel(loadAllMatches());
+const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
 
 // Nur lesen, nie abrufen. Der LLM-Refresh kostet Geld und laeuft ausschliesslich auf
 // ausdruecklichen Knopfdruck (npm run refresh-llm).

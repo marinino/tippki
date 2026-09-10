@@ -18,7 +18,7 @@ import {
   type VariantName,
 } from "../eval/backtestCore";
 import { BENCHMARK_LABELS, parseBenchmarkSource } from "../eval/benchmarkOdds";
-import { buildLeagueModel } from "../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { loadAllMatches } from "../data/loadMatches";
 
 function flag(name: string): string | undefined {
@@ -86,7 +86,7 @@ if (hasFlag("baselines")) {
 
   const contexts = buildContexts(
     seasonsFor(split),
-    {},
+    PRODUCTION_MODEL_OPTIONS,
     loadAllMatches(),
     buildLeagueModel,
     benchmark

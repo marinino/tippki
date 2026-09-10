@@ -8,6 +8,13 @@ export const OUR_NAME_TO_UNDERSTAT: Record<string, string> = {
   Darmstadt: "Darmstadt",
   Dortmund: "Borussia Dortmund",
   "Ein Frankfurt": "Eintracht Frankfurt",
+  // Fehlte bis zum 10.09.2026, und das war teuer: computeXgForm steigt bei fehlender
+  // Zuordnung mit 0 aus. Elversberg hatte damit als einzige Mannschaft der Liga eine
+  // dauerhaft abgeschaltete Formkurve -- nicht "keine Form gerade", sondern nie eine, die
+  // ganze Saison lang. Aufgefallen ist es nur, weil im Formfenster "(nichts)" stand, wo bei
+  // allen anderen zwei Spieldaten standen. Understat fuehrt den Verein unter genau diesem
+  // Namen; es fehlte nichts als diese Zeile.
+  Elversberg: "Elversberg",
   "FC Koln": "FC Cologne",
   "Fortuna Dusseldorf": "Fortuna Duesseldorf",
   Freiburg: "Freiburg",

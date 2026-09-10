@@ -9,6 +9,7 @@
 import { loadEnvLocal } from "../data/loadEnv";
 import { isLlmConfigured } from "../llm/anthropicClient";
 import { refreshLlmContext } from "../llm/refreshLlmContext";
+import { EXTRACTION_BLOCK_SIZE } from "../llm/matchContext";
 
 loadEnvLocal();
 
@@ -37,6 +38,35 @@ if (failureCount > 0) {
   console.log(`\n${failureCount} Fehlschlaege:`);
   for (const [key, reason] of Object.entries(summary.failures)) {
     console.log(`  ${key}: ${reason}`);
+  }
+}
+
+// Zuordnung je Extraktionsblock. Steht direkt unter den Fehlschlaegen, weil sie erklaert,
+// WAS fuer ein Fehlschlag es war: ein Block, der nichts zurueckgab, ist ein anderes Problem
+// als einer, der etwas zurueckgab, das wir nicht zuordnen konnten. An Spieltag 2 fielen
+// genau die Partien 4 bis 6 aus -- also exakt ein Block -- und ohne diese Tabelle war das
+// aus dem Cache nicht zu sehen.
+const anyLoss = summary.matching.blocks.some((b) => b.matched < b.requested);
+if (anyLoss || summary.matching.unmatched.length > 0) {
+  console.log(`\nZuordnung je Extraktionsblock (je ${EXTRACTION_BLOCK_SIZE} Partien):`);
+  for (const b of summary.matching.blocks) {
+    const flagged = b.matched < b.requested ? "  <-- Verlust" : "";
+    console.log(
+      `  Block ${b.block}: ${b.requested} angefragt, ${b.returned} zurueck, ${b.matched} zugeordnet${flagged}`
+    );
+  }
+  if (summary.matching.unmatched.length > 0) {
+    console.log(`\nAntworten ohne Partie -- unter diesen Namen kamen sie zurueck:`);
+    for (const u of summary.matching.unmatched) {
+      console.log(
+        `  Block ${u.block}: "${u.homeTeam}" vs "${u.awayTeam}" (${u.keyFactorCount} Faktoren)`
+      );
+    }
+    console.log(
+      `Das ist ein Zuordnungsproblem, KEIN Rechercheproblem: die Fakten liegen vor.\n` +
+        `Zu reparieren in matchToFixtures (src/llm/anthropicClient.ts) -- der Prompt bleibt\n` +
+        `unangetastet und damit auch der Fingerabdruck der Pipeline.`
+    );
   }
 }
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { loadAllMatches } from "../../../data/loadMatches";
-import { buildLeagueModel } from "../../../model/teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
 import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
 import { computeSimulatedForm, type SimpleResult } from "../../../model/simulateForm";
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
   const fixtures = allFixtures.filter((f) => f.matchday === matchday);
 
   const matches = loadAllMatches();
-  const model = buildLeagueModel(matches);
+  const model = buildLeagueModel(matches, PRODUCTION_MODEL_OPTIONS);
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
     const out = predictPipeline({

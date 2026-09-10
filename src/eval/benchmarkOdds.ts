@@ -83,7 +83,37 @@ export const BENCHMARK_LABELS: Record<BenchmarkSource, string> = {
   marketAverageOpen: "Marktmittel Eroeffnung",
 };
 
-export const DEFAULT_BENCHMARK: BenchmarkSource = "pinnacleClose";
+// Umgestellt am 10.09.2026 von "pinnacleClose" auf "marketAverageClose".
+//
+// Der Grund ist nicht Geschmack, sondern Abdeckung. Pinnacle ist in den football-data-
+// Dateien ausgeduennt worden, und zwar fortschreitend:
+//
+//   Split                  pinnacleClose   marketAverageClose   marketAverageOpen
+//   VALIDATION 2018-2022    1529 (100%)      1224 ( 80%)          1530 (100%)
+//   TEST       2023-2025     761 ( 83%)       918 (100%)           918 (100%)
+//   laufend    2026            0 (  0%)        18 (100%)            18 (100%)
+//
+// Die letzte Zeile entscheidet: fuer die laufende Saison gibt es KEINE Pinnacle-
+// Schlussquote mehr, in keiner einzigen Partie. Der Vorwaertsvergleich -- der eigentliche
+// Zweck dieser Saison -- haette gegen eine leere Messlatte gemessen. Da Spiele ohne
+// Messlatte in evaluateRun komplett uebersprungen werden (requireBenchmark), waere das
+// nicht als Fehler aufgefallen, sondern als Fallzahl null.
+//
+// Der Preis ist ehrlich zu benennen: Saison 2018 hat 0/306 Marktmittel-Schlusskurse und
+// faellt damit aus der Validation heraus, die von 1529 auf 1224 Spiele schrumpft. Alle
+// frueher berichteten Validation-Zahlen beziehen sich auf die groessere Menge und sind
+// mit den neuen nicht direkt vergleichbar.
+//
+// Warum nicht "marketAverageOpen", das ueberall 100% abdeckt: die Eroeffnungsquote ist der
+// schwaechere Gegner. Zwischen Eroeffnung und Anpfiff fliesst genau die Information ein,
+// die das Modell schlagen koennen muss. Sich die leichtere Messlatte auszusuchen, weil sie
+// besser abgedeckt ist, waere die Art von Entscheidung, gegen die dieses Projekt gebaut
+// ist -- gemessen wird gegen die bestinformierte Linie, nicht gegen die bequemste.
+//
+// Wichtig bei Vergleichen ueber die Zeit: forward-eval UND Backtest muessen dieselbe Quelle
+// benutzen, sonst meinen zwei Zahlen verschiedene Gegner. Deshalb steht hier eine
+// Voreinstellung und nicht je Skript eine eigene.
+export const DEFAULT_BENCHMARK: BenchmarkSource = "marketAverageClose";
 
 export interface BenchmarkHandicap {
   // Aus Heimsicht, Buchmacherkonvention: -1.5 heisst "Heim gewinnt mit mindestens 2 Toren".

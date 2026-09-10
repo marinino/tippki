@@ -21,7 +21,17 @@ import {
   llmPromptFingerprint,
   type PipelineConfig,
 } from "../model/pipelineConfig";
-import { loadAllMatches, parseMatchDate, deriveSeasonFromDate } from "../data/loadMatches";
+import {
+  loadAllMatches,
+  parseMatchDate,
+  deriveSeasonFromDate,
+  type Match,
+} from "../data/loadMatches";
+import {
+  MATCHES_PER_REFIT,
+  buildContexts,
+  buildWalkForwardContexts,
+} from "../eval/backtestCore";
 import {
   FIXTURE_TIMEZONE,
   firstKickoffOf,
@@ -36,7 +46,13 @@ import { describeProvenance } from "../app/lib/format";
 import { OUR_NAME_TO_UNDERSTAT } from "../data/understatTeamNames";
 import { XG_FORM_WINDOW, computeXgForm, computeXgFormResidual } from "../model/xgForm";
 import { predictFromLambdas } from "../model/predictMatch";
-import { buildLeagueModel, exponentialTimeWeights, fitPoissonModel } from "../model/teamStrength";
+import {
+  PRODUCTION_MODEL_OPTIONS,
+  buildLeagueModel,
+  exponentialTimeWeights,
+  fitPoissonModel,
+  type LeagueModelOptions,
+} from "../model/teamStrength";
 import { lookupMatchXg } from "../model/xgLookup";
 import { predictPipeline } from "../model/predictPipeline";
 import { aggregateFactors, toLambdaExponents } from "../llm/factMapping";
@@ -46,9 +62,14 @@ import {
   outcomeProbsOf,
   toLlmAdjustment,
 } from "../llm/llmAdjustment";
+import { matchToFixtures } from "../llm/anthropicClient";
 import {
+  CERTAINTY_LEVELS,
+  DIRECTIONS,
   EXTRACTION_BLOCK_SIZE,
   FACT_CATEGORIES,
+  IMPORTANCE_LEVELS,
+  PLAYER_ROLES,
   extractionBlocks,
   isGiveUpSignature,
   isValidMatchContext,
@@ -84,6 +105,7 @@ import {
 } from "../eval/metrics";
 import { mcnemarExact, mulberry32, pairedBootstrap } from "../eval/significance";
 import {
+  DEFAULT_BENCHMARK,
   benchmarkQuote,
   devigThreeWay,
   devigTwoWay,
@@ -608,6 +630,250 @@ section("Recherchefenster", () => {
 
 // ---------------------------------------------------------------------------
 
+// Der Walk-forward-Aufbau. Geprueft wird die eine Eigenschaft, an der alles haengt: dass
+// kein Spiel in den Fit einfliesst, das zum Zeitpunkt der Vorhersage noch nicht gespielt
+// war. Ohne sie waere jede Zahl daraus zu gut und niemand saehe es -- ein Leck sieht
+// naemlich exakt aus wie ein besseres Modell.
+section("Walk-forward leckt keine Zukunft", () => {
+  const seasons = ["2022"];
+  const all = loadAllMatches();
+
+  // Statt in die Funktion hineinzuschauen wird der Modellbau abgefangen: jeder Fit meldet,
+  // welches das SPAETESTE Spiel in seinen Trainingsdaten war. Danach muss fuer jede
+  // Vorhersage gelten, dass dieses Spiel vor ihrem Anpfiff lag.
+  const fits: { latestTrainTime: number; teams: number }[] = [];
+  const spy = (matches: Match[], options: LeagueModelOptions) => {
+    const times = matches.map((m) => parseMatchDate(m.date).getTime());
+    fits.push({ latestTrainTime: Math.max(...times), teams: new Set(matches.map((m) => m.homeTeam)).size });
+    return buildLeagueModel(matches, options);
+  };
+
+  const contexts = buildWalkForwardContexts(
+    seasons,
+    PRODUCTION_MODEL_OPTIONS,
+    all,
+    spy,
+    DEFAULT_BENCHMARK
+  );
+
+  const season = contexts[0];
+  check(() => assert.equal(season.contexts.length, 306, "alle 306 Spiele der Saison bewertet"));
+  check(() => assert.equal(fits.length, 34, "34 Refits, also einer je Spieltag"));
+
+  // Kein Spiel darf doppelt oder gar nicht vorkommen -- beim Blocken passiert genau das
+  // leicht, und beides faellt in den Metriken nicht auf.
+  const keys = season.contexts.map((c) => `${c.date}|${c.homeTeam}|${c.awayTeam}`);
+  check(() => assert.equal(new Set(keys).size, keys.length, "kein Spiel doppelt bewertet"));
+
+  // Die Kernpruefung. Die Blockgrenzen sind bekannt: je 9 Spiele, chronologisch.
+  const seasonMatches = all
+    .filter((m) => m.season === seasons[0])
+    .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
+
+  for (let block = 0; block < fits.length; block++) {
+    const first = seasonMatches[block * MATCHES_PER_REFIT];
+    const cutoff = parseMatchDate(first.date).getTime();
+    check(() =>
+      assert.ok(
+        fits[block].latestTrainTime < cutoff,
+        `Refit ${block + 1}: juengstes Trainingsspiel liegt nicht vor dem Anpfiff ` +
+          `(${new Date(fits[block].latestTrainTime).toISOString()} gegen ${first.date})`
+      )
+    );
+  }
+
+  // Die Trainingsmenge muss ueber die Saison wachsen -- sonst waere gar nicht nachgezogen
+  // worden und der ganze Aufbau waere eine teure Kopie von buildContexts.
+  for (let i = 1; i < fits.length; i++) {
+    check(() =>
+      assert.ok(
+        fits[i].latestTrainTime > fits[i - 1].latestTrainTime,
+        `Refit ${i + 1} sieht keine neueren Spiele als Refit ${i}`
+      )
+    );
+  }
+
+  // Gegenprobe zum bisherigen Aufbau: dort ist die Trainingsmenge ueber die ganze Saison
+  // konstant. Waeren beide gleich, brauchte es den neuen Weg nicht.
+  const boundaryFits: number[] = [];
+  buildContexts(
+    seasons,
+    PRODUCTION_MODEL_OPTIONS,
+    all,
+    (matches, options) => {
+      boundaryFits.push(Math.max(...matches.map((m) => parseMatchDate(m.date).getTime())));
+      return buildLeagueModel(matches, options);
+    },
+    DEFAULT_BENCHMARK
+  );
+  check(() => assert.equal(boundaryFits.length, 1, "Saisongrenzen-Aufbau fittet genau einmal"));
+  check(() =>
+    assert.ok(
+      fits[fits.length - 1].latestTrainTime > boundaryFits[0],
+      "der letzte Walk-forward-Fit muss neuere Spiele kennen als der Saisongrenzen-Fit"
+    )
+  );
+
+  // Und der Nachweis, dass das neue Messgeraet die Fehlerklasse ueberhaupt SIEHT.
+  //
+  // Die Saisonblock-Einstellung ist genau die, die bis zum 10.09.2026 produktiv lief und
+  // die Tipps zu Spieltag 3 zerlegt hat. An der Saisongrenze faellt sie nicht auf -- der
+  // Aufbau darueber laeuft anstandslos durch, und das ist der ganze Grund, warum der
+  // Fehler wochenlang unsichtbar blieb. Walk-forward trifft dieselbe Einstellung auf eine
+  // ANGEFANGENE Saison und bricht mit derselben Meldung wie der Echtbetrieb.
+  //
+  // Der Test behauptet also nicht "Saisonbloecke sind schlecht", sondern: dieses Werkzeug
+  // haette es gefunden. Faellt er eines Tages aus, ist entweder der Riegel in
+  // fitLeagueModel weg oder der Walk-forward-Aufbau stellt die Lage nicht mehr her -- in
+  // beiden Faellen ist die Aussage dieses Skripts nicht mehr dieselbe.
+  const boundaryRunsFine = (() => {
+    try {
+      buildContexts(["2018"], {}, all, buildLeagueModel, DEFAULT_BENCHMARK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  check(() =>
+    assert.ok(boundaryRunsFine, "an der Saisongrenze bleibt die alte Einstellung unauffaellig")
+  );
+
+  let walkForwardCaughtIt = "";
+  try {
+    buildWalkForwardContexts(["2018"], {}, all, buildLeagueModel, DEFAULT_BENCHMARK);
+  } catch (error) {
+    walkForwardCaughtIt = error instanceof Error ? error.message : String(error);
+  }
+  check(() =>
+    assert.match(
+      walkForwardCaughtIt,
+      /nicht konvergiert/,
+      "Walk-forward muss die Teilsaison-Pathologie sichtbar machen, die an der " +
+        `Saisongrenze verborgen bleibt (bekam: ${walkForwardCaughtIt || "keinen Fehler"})`
+    )
+  );
+});
+
+// ---------------------------------------------------------------------------
+
+// Die Zuordnung der LLM-Antworten auf die angefragten Partien.
+//
+// Sie entscheidet, ob ein recherchierter Fakt ankommt oder verschwindet, und lief bis zum
+// 10.09.2026 ohne eine einzige Pruefung. An Spieltag 2 fielen drei Partien mit "keine
+// zuordenbare Antwort" aus -- und zwar exakt die Partien 4 bis 6, also genau ein
+// Extraktionsblock. Ob das Modell nichts geliefert hatte oder ob wir seine Antwort nur
+// nicht zuordnen konnten, war aus dem Artefakt nicht zu entscheiden.
+section("LLM-Antworten den Partien zuordnen", () => {
+  const ctx = (homeTeam: string, awayTeam: string, factors = 0) => ({
+    homeTeam,
+    awayTeam,
+    foundAnything: factors > 0,
+    summary: "",
+    keyFactors: Array.from({ length: factors }, () => ({
+      team: "home" as const,
+      category: FACT_CATEGORIES[0],
+      subject: "X",
+      role: PLAYER_ROLES[0],
+      importance: IMPORTANCE_LEVELS[0],
+      direction: DIRECTIONS[0],
+      certainty: CERTAINTY_LEVELS[0],
+      note: "",
+      source: "https://example.org/x",
+    })),
+  });
+
+  const kickoff = new Date("2026-09-12T13:30:00Z");
+  const block = [
+    { homeTeam: "M'gladbach", awayTeam: "Elversberg", kickoff },
+    { homeTeam: "Werder Bremen", awayTeam: "RB Leipzig", kickoff },
+    { homeTeam: "Paderborn", awayTeam: "Freiburg", kickoff },
+  ];
+
+  // Fall 1: exakte Namen. Alles zugeordnet, nichts uebrig.
+  {
+    const answers = block.map((f) => ctx(f.homeTeam, f.awayTeam, 1));
+    const { matched, unmatched } = matchToFixtures(answers, block, []);
+    check(() => assert.equal(matched.size, 3, "exakte Namen: alle drei zugeordnet"));
+    check(() => assert.equal(unmatched.length, 0, "exakte Namen: nichts uebrig"));
+  }
+
+  // Fall 2: das Modell benutzt Vereinsnamen statt unserer Kuerzel. Nichts laesst sich
+  // zuordnen -- und genau das muss als "uebrig" sichtbar werden, samt der Namen, die das
+  // Modell benutzt hat. Ohne sie ist nicht entscheidbar, ob die Recherche oder die
+  // Normalisierung das Problem ist.
+  {
+    const answers = [
+      ctx("Borussia Moenchengladbach", "SV Elversberg", 2),
+      ctx("SV Werder Bremen", "RasenBallsport Leipzig", 1),
+      ctx("SC Paderborn 07", "SC Freiburg", 3),
+    ];
+    const { matched, unmatched } = matchToFixtures(answers, block, []);
+    check(() => assert.equal(matched.size, 0, "abweichende Vereinsnamen: nichts zugeordnet"));
+    check(() => assert.equal(unmatched.length, 3, "abweichende Vereinsnamen: drei uebrig"));
+    check(() =>
+      assert.equal(
+        unmatched[2].homeTeam,
+        "SC Paderborn 07",
+        "die uebrig gebliebene Antwort behaelt den Namen des MODELLS"
+      )
+    );
+    check(() =>
+      assert.equal(unmatched[2].keyFactors.length, 3, "und ihre Faktoren, damit sichtbar ist, was verloren ging")
+    );
+  }
+
+  // Fall 3: der Positionsrueckfall. Zwei passen ueber den Namen, die dritte ist eindeutig
+  // uebrig -- dann wird sie zugeordnet.
+  //
+  // Der zweite Teil ist der eigentliche Grund fuer diese Pruefung: die so zugeordnete
+  // Antwort darf NICHT zusaetzlich als "uebrig" gemeldet werden. Vorher blieb sie in
+  // `unclaimed` stehen, weil der Rueckfall sie nie daraus entfernte. Das fiel nicht auf,
+  // solange niemand die Restmenge auswertete -- ab jetzt wird sie ausgewertet, und dann
+  // haette sie einen erfolgreich zugeordneten Fakt als Verlust gemeldet.
+  {
+    const answers = [
+      ctx("M'gladbach", "Elversberg", 1),
+      ctx("Werder Bremen", "RB Leipzig", 1),
+      ctx("SC Paderborn 07", "SC Freiburg", 2),
+    ];
+    const { matched, unmatched } = matchToFixtures(answers, block, []);
+    check(() => assert.equal(matched.size, 3, "Positionsrueckfall ordnet die letzte Partie zu"));
+    check(() =>
+      assert.equal(unmatched.length, 0, "die per Rueckfall zugeordnete Antwort gilt nicht als uebrig")
+    );
+    const rescued = matched.get("Paderborn|Freiburg");
+    check(() =>
+      assert.equal(rescued?.context.homeTeam, "Paderborn", "Rueckfall zieht die Namen auf unsere Schreibweise")
+    );
+  }
+
+  // Fall 4: mehrdeutig -- zwei fehlen, zwei sind uebrig. Dann wird NICHT geraten, denn eine
+  // vertauschte Zuordnung haengt die Ausfaelle der falschen Mannschaft an.
+  {
+    const answers = [
+      ctx("M'gladbach", "Elversberg", 1),
+      ctx("SV Werder Bremen", "RasenBallsport Leipzig", 1),
+      ctx("SC Paderborn 07", "SC Freiburg", 1),
+    ];
+    const { matched, unmatched } = matchToFixtures(answers, block, []);
+    check(() => assert.equal(matched.size, 1, "mehrdeutig: nur der eindeutige Treffer zaehlt"));
+    check(() => assert.equal(unmatched.length, 2, "mehrdeutig: es wird nicht geraten"));
+  }
+
+  // Keine Antwort darf gleichzeitig zugeordnet und uebrig sein -- sonst zaehlt dieselbe
+  // Recherche als Treffer und als Verlust.
+  {
+    const answers = [ctx("M'gladbach", "Elversberg", 1), ctx("Fremd A", "Fremd B", 1)];
+    const { matched, unmatched } = matchToFixtures(answers, block, []);
+    const matchedContexts = new Set([...matched.values()].map((v) => v.context));
+    for (const u of unmatched) {
+      check(() => assert.ok(!matchedContexts.has(u), "keine Antwort ist zugleich zugeordnet und uebrig"));
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+
 // Der Marker auf der Karte. Geprueft wird die reine Funktion, nicht ueber eine
 // hingelegte Cache-Datei -- eine erfundene llm_context_cache.json im Arbeitsverzeichnis
 // wuerde von forward-log gelesen und als echter Befund protokolliert.
@@ -1039,6 +1305,25 @@ section("Referenzquoten (Entvigen)", () => {
   }
   checkCount += seasonsFor("all").length;
 
+  // Die VOREINGESTELLTE Quelle muss die laufende Saison abdecken.
+  //
+  // Der Fall, der am 10.09.2026 fast durchgerutscht waere: football-data hat Pinnacle fuer
+  // 2026/27 gar nicht mehr gefuehrt, 0 von 18 Partien. Da evaluateRun Spiele ohne Messlatte
+  // ueberspringt (requireBenchmark), haette der Vorwaertsvergleich nicht "Fehler" gemeldet,
+  // sondern Fallzahl 0 -- und eine leere Auswertung sieht aus wie eine, die nur noch keine
+  // Daten hat. Die obige Pruefung faengt das nicht: ihr genuegt, dass IRGENDEINE Quelle die
+  // Saison abdeckt, auch wenn die voreingestellte es nicht tut.
+  const runningSeason = [...new Set(matches.map((m) => m.season))].sort().pop()!;
+  const defaultCoverage = coverage[DEFAULT_BENCHMARK].get(runningSeason);
+  check(() =>
+    assert.ok(
+      defaultCoverage !== undefined && defaultCoverage.withQuote > defaultCoverage.n * 0.9,
+      `DEFAULT_BENCHMARK ("${DEFAULT_BENCHMARK}") deckt die laufende Saison ${runningSeason} nur zu ` +
+        `${defaultCoverage ? defaultCoverage.withQuote : 0}/${defaultCoverage ? defaultCoverage.n : 0} ab -- ` +
+        `der Vorwaertsvergleich liefe auf fast keinen Spielen`
+    )
+  );
+
   // Die bekannte Luecke festnageln. Waechst sie, oder schliesst sich eine andere, soll das
   // auffallen statt still die Fallzahlen zu verschieben.
   const pinnacle2025 = coverage.pinnacleClose.get("2025");
@@ -1207,6 +1492,31 @@ section("xG-Form == Referenzimplementierung", () => {
     )
   );
   check(() => assert.ok(rawBias > 0.2, `rohe Form traegt erwartungsgemaess Staerke: ${rawBias.toFixed(3)}`));
+
+  // Jede Mannschaft der laufenden Saison braucht eine Understat-Zuordnung.
+  //
+  // computeXgForm steigt bei fehlender Zuordnung mit `return 0` aus -- kein Fehler, keine
+  // Warnung, nur dauerhaft keine Form. Genau das passierte Elversberg als Aufsteiger: alle
+  // 17 anderen Mannschaften hatten eine Formkurve, eine hatte still keine, und keine der
+  // 4400 Pruefungen sah es. Ein Aufsteiger kommt jede Saison dazu, der Fehler also auch.
+  //
+  // Bewusst nur die LAUFENDE Saison: historische Namen ohne Zuordnung sind harmlos, weil
+  // fuer diese Mannschaften nichts mehr vorhergesagt wird.
+  const currentSeason = [...new Set(loadAllMatches().map((m) => m.season))].sort().pop()!;
+  const currentTeams = new Set<string>();
+  for (const m of loadAllMatches().filter((m) => m.season === currentSeason)) {
+    currentTeams.add(m.homeTeam);
+    currentTeams.add(m.awayTeam);
+  }
+  for (const team of [...currentTeams].sort()) {
+    check(() =>
+      assert.ok(
+        OUR_NAME_TO_UNDERSTAT[team],
+        `${team} (Saison ${currentSeason}) fehlt in OUR_NAME_TO_UNDERSTAT -- ` +
+          `die Formkurve dieser Mannschaft waere dauerhaft 0`
+      )
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1323,6 +1633,87 @@ section("Gewichteter Fit und xG-Ziel", () => {
     );
   }
   checkCount += plain.teams.size;
+});
+
+// ---------------------------------------------------------------------------
+
+// Der Abschnitt, der am 2026-09-10 gefehlt hat.
+//
+// Die Tipps zu Spieltag 3 waren offen kaputt -- 0:0 mit 86 Prozent, ein haeufigstes
+// Ergebnis von 10:0, Torerwartungen ueber 20000 -- und KEINE der 4400 Pruefungen sprang
+// an. Der Grund ist lehrreich: alles hier prueft Bausteine gegen Referenzrechnungen, und
+// jeder Baustein war fuer sich in Ordnung. Kaputt war erst ihr Zusammenspiel auf den
+// ECHTEN Daten von heute, und darauf schaute nichts.
+//
+// Auch der Backtest konnte es nicht sehen. buildContexts trainiert ausschliesslich auf
+// Saisons VOR der Testsaison; die juengste Trainingssaison ist dort also immer fertig.
+// Der Fehler brauchte aber genau das Gegenteil -- eine ANGEFANGENE Saison in den
+// Trainingsdaten -- und diese Lage kommt in keinem Backtest der Welt vor, sie kommt nur
+// jeden Samstag vor.
+//
+// Deshalb prueft dieser Abschnitt keine Formel, sondern das fertige Produkt: die
+// Torerwartungen, die fuer den naechsten Spieltag wirklich herauskommen. Die Schranken
+// sind bewusst weit -- sie sollen kein Modell bewerten, sondern nur das Unsinnige
+// abfangen. Zum Vergleich: das hoechste je in der Bundesliga plausible Lambda liegt bei
+// gut 4 (Bayern gegen einen Aufsteiger), das niedrigste bei etwa 0.4.
+section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
+  const fixtures: { homeTeam: string; awayTeam: string; date: string; matchday: number }[] =
+    JSON.parse(readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8"));
+
+  const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
+
+  // Nichtkonvergenz wirft inzwischen in fitLeagueModel; hier steht es trotzdem noch
+  // einmal ausdruecklich, weil ein halbfertiger Fit die eine Ursache ist, die alle
+  // folgenden Zahlen gleichzeitig verdirbt.
+  check(() => assert.ok(model.diagnostics?.converged, "Produktiver Fit konvergiert"));
+
+  const now = new Date();
+  const upcoming = fixtures.filter((f) => new Date(f.date) >= now);
+  const nextMatchday =
+    upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
+
+  if (nextMatchday == null) return;
+
+  const MIN_LAMBDA = 0.25;
+  const MAX_LAMBDA = 6;
+
+  for (const fixture of fixtures.filter((f) => f.matchday === nextMatchday)) {
+    const matchDate = new Date(fixture.date);
+    const out = predictPipeline({
+      model,
+      homeTeam: fixture.homeTeam,
+      awayTeam: fixture.awayTeam,
+      homeForm: computeXgForm(fixture.homeTeam, matchDate),
+      awayForm: computeXgForm(fixture.awayTeam, matchDate),
+    });
+
+    const pairing = `${fixture.homeTeam} vs ${fixture.awayTeam}`;
+    for (const [side, lambda] of [
+      ["Heim", out.lambdaHome],
+      ["Auswaerts", out.lambdaAway],
+    ] as [string, number][]) {
+      check(() =>
+        assert.ok(
+          Number.isFinite(lambda) && lambda >= MIN_LAMBDA && lambda <= MAX_LAMBDA,
+          `${pairing}: ${side}-Torerwartung ${lambda.toFixed(3)} liegt ausserhalb ` +
+            `[${MIN_LAMBDA}, ${MAX_LAMBDA}]`
+        )
+      );
+    }
+
+    // Zweite, unabhaengige Schranke: keine einzelne Ergebniszelle darf den Spieltag
+    // dominieren. Das faengt Faelle, in denen beide Lambdas fuer sich im Rahmen liegen,
+    // die Verteilung aber trotzdem auf einen Punkt zusammengefallen ist -- 0:0 mit 86
+    // Prozent war genau das.
+    const topCell = Math.max(...out.matrix.cells);
+    check(() =>
+      assert.ok(
+        topCell < 0.35,
+        `${pairing}: wahrscheinlichstes Ergebnis hat ${(topCell * 100).toFixed(1)}% -- ` +
+          `die Verteilung ist kollabiert`
+      )
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1964,7 +2355,7 @@ section("Konfigurations-Hash", () => {
   // wurde -- der haeufigste Weg, wie so ein Hash still nutzlos wird.
   const variations: [string, Partial<PipelineConfig>][] = [
     ["ridgePseudoMatches", { ridgePseudoMatches: DEFAULT_PIPELINE.ridgePseudoMatches + 1 }],
-    ["seasonRecencyWeights", { seasonRecencyWeights: [...DEFAULT_PIPELINE.seasonRecencyWeights, 0.1] }],
+    ["halfLifeDays", { halfLifeDays: DEFAULT_PIPELINE.halfLifeDays + 1 }],
     ["xgFormWindow", { xgFormWindow: DEFAULT_PIPELINE.xgFormWindow + 1 }],
     ["xgFormWeight", { xgFormWeight: DEFAULT_PIPELINE.xgFormWeight + 0.01 }],
     ["maxGoals", { maxGoals: DEFAULT_PIPELINE.maxGoals + 1 }],

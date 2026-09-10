@@ -17,6 +17,7 @@
 
 import { loadAllMatches, parseMatchDate, type Match } from "../data/loadMatches";
 import {
+  PRODUCTION_MODEL_OPTIONS,
   buildLeagueModel,
   type LeagueModel,
   type LeagueModelOptions,
@@ -110,7 +111,52 @@ export interface SeasonContexts {
   contexts: PredictionContext[];
 }
 
-// Strikt walk-forward: trainiert wird ausschliesslich auf Saisons VOR der Testsaison.
+// Eine Vorhersagelage aus einem gefitteten Modell und einem Spiel.
+//
+// Bewusst EINE Funktion fuer beide Aufbauwege. Stuende sie zweimal da, liefen die
+// Saisongrenzen-Variante und die Walk-forward-Variante beim ersten hinzugefuegten Feld
+// auseinander -- und der Vergleich zwischen ihnen, der ganze Zweck des Zweiten, waere
+// still nicht mehr gepaart.
+function makeContext(
+  model: LeagueModel,
+  match: Match,
+  benchmark: BenchmarkSource
+): PredictionContext {
+  const matchDate = parseMatchDate(match.date);
+  const base = baseLambdas(model, match.homeTeam, match.awayTeam);
+
+  return {
+    season: match.season,
+    date: match.date,
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    actualHome: match.homeGoals,
+    actualAway: match.awayGoals,
+    actual: outcomeOf(match.homeGoals, match.awayGoals),
+    actualTotal: match.homeGoals + match.awayGoals,
+    baseLambdaHome: base.lambdaHome,
+    baseLambdaAway: base.lambdaAway,
+    homeForm: computeXgForm(match.homeTeam, matchDate),
+    awayForm: computeXgForm(match.awayTeam, matchDate),
+    homeFormResidual: computeXgFormResidual(match.homeTeam, matchDate),
+    awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
+    homeIsEstimated: base.homeIsEstimated,
+    awayIsEstimated: base.awayIsEstimated,
+    benchmark: benchmarkQuote(match, benchmark),
+  };
+}
+
+// Trainiert ausschliesslich auf Saisons VOR der Testsaison -- EIN Fit je Saison.
+//
+// Das ist die historisch gewachsene Variante, und sie hat eine Eigenschaft, die lange
+// niemandem auffiel: die juengste Trainingssaison ist hier IMMER vollstaendig. Der Zustand
+// "mitten in einer angefangenen Saison", also genau der Zustand, in dem das Modell jeden
+// Samstag wirklich laeuft, kommt darin nicht ein einziges Mal vor.
+//
+// Am 10.09.2026 hat das Geld gekostet: die Saisonbloecke gaben einer Saison mit 18
+// gespielten Spielen dasselbe Gewicht wie einer fertigen, der Fit divergierte, und weder
+// Backtest noch Tuner konnten es sehen -- sie hatten diese Lage nie vor Augen. Fuer die
+// Fragen, die davon abhaengen, gibt es jetzt buildWalkForwardContexts.
 export function buildContexts(
   seasons: string[],
   modelOptions: LeagueModelOptions = {},
@@ -125,35 +171,88 @@ export function buildContexts(
     const testMatches = allMatches.filter((m) => m.season === testSeason);
     const model = buildModel(trainMatches, modelOptions);
 
-    const contexts = testMatches.map((match): PredictionContext => {
-      const matchDate = parseMatchDate(match.date);
-      const base = baseLambdas(model, match.homeTeam, match.awayTeam);
-
-      return {
-        season: match.season,
-        date: match.date,
-        homeTeam: match.homeTeam,
-        awayTeam: match.awayTeam,
-        actualHome: match.homeGoals,
-        actualAway: match.awayGoals,
-        actual: outcomeOf(match.homeGoals, match.awayGoals),
-        actualTotal: match.homeGoals + match.awayGoals,
-        baseLambdaHome: base.lambdaHome,
-        baseLambdaAway: base.lambdaAway,
-        homeForm: computeXgForm(match.homeTeam, matchDate),
-        awayForm: computeXgForm(match.awayTeam, matchDate),
-        homeFormResidual: computeXgFormResidual(match.homeTeam, matchDate),
-        awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
-        homeIsEstimated: base.homeIsEstimated,
-        awayIsEstimated: base.awayIsEstimated,
-        benchmark: benchmarkQuote(match, benchmark),
-      };
-    });
+    const contexts = testMatches.map((match) => makeContext(model, match, benchmark));
 
     return {
       season: testSeason,
       trainMatchCount: trainMatches.length,
       baseRates: baseRatesOf(trainMatches),
+      contexts,
+    };
+  });
+}
+
+// Bundesliga: 18 Mannschaften, also 9 Spiele je Spieltag. Die CSVs fuehren kein
+// Spieltagsfeld, deshalb chronologisch in 9er-Bloecke gruppiert -- dieselbe Naeherung, die
+// simulateSeason.ts benutzt. Bei Nachholspielen driftet die Einteilung gegenueber dem
+// echten Spielplan; fuer die Frage "wie schnell soll das Modell innerhalb der Saison
+// reagieren" ist das ohne Belang, denn die Trennlinie bleibt in jedem Fall ein echter
+// Zeitpunkt, vor dem nichts bekannt ist.
+export const MATCHES_PER_REFIT = 9;
+
+// Walk-forward INNERHALB der Saison: vor jedem Spieltag neu fitten, mit allem, was bis
+// dahin gespielt wurde -- die laufende Saison eingeschlossen.
+//
+// Das ist der Aufbau, der bisher fehlte, und ohne ihn ist eine ganze Klasse von Fragen
+// unbeantwortbar. "Wie schnell soll das Modell innerhalb der Saison reagieren?" haengt an
+// halfLifeDays und ridgePseudoMatches -- aber buildContexts trainiert nur bis zur
+// Saisongrenze, misst also ausschliesslich "wie weit soll die Historie zurueckreichen".
+// Zwei verschiedene Fragen, ein Parameter, und bisher nur die eine gemessen. Die 500 Tage
+// in PRODUCTION_MODEL_OPTIONS stammen aus der ersten; fuer die zweite gab es schlicht kein
+// Messgeraet.
+//
+// Der Schnitt liegt vor dem FRUEHESTEN Anpfiff des Blocks, nicht vor jedem einzelnen
+// Spiel. Das ist kein Kompromiss, sondern die getreue Nachbildung des Echtbetriebs: die
+// Automatik holt den Spielkontext und schreibt das Vorwaerts-Log einmal je Spieltag, drei
+// Stunden vor dem ersten Anpfiff. Ein Sonntagsspiel kennt also auch produktiv das
+// Freitagsergebnis noch nicht.
+//
+// Kosten: ein Fit dauert rund 23 ms, macht 34 Fits je Saison und wenige Sekunden fuer
+// einen vollen Durchlauf. Der Grund, warum es das nicht laengst gab, war also nicht die
+// Rechenzeit.
+export function buildWalkForwardContexts(
+  seasons: string[],
+  modelOptions: LeagueModelOptions = PRODUCTION_MODEL_OPTIONS,
+  allMatches = loadAllMatches(),
+  buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
+  benchmark: BenchmarkSource = DEFAULT_BENCHMARK,
+  matchesPerRefit = MATCHES_PER_REFIT
+): SeasonContexts[] {
+  // Einmal vorsortieren statt in jeder Schleife: die Zeitachse ist die einzige Struktur,
+  // auf die es hier ankommt.
+  const byTime = [...allMatches].sort(
+    (a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime()
+  );
+
+  return seasons.map((testSeason) => {
+    const seasonMatches = byTime.filter((m) => m.season === testSeason);
+    const beforeSeason = allMatches.filter((m) => m.season < testSeason);
+
+    const contexts: PredictionContext[] = [];
+    let lastTrainCount = beforeSeason.length;
+
+    for (let start = 0; start < seasonMatches.length; start += matchesPerRefit) {
+      const block = seasonMatches.slice(start, start + matchesPerRefit);
+      const cutoff = parseMatchDate(block[0].date).getTime();
+
+      // Strikt kleiner: ein Spiel, das exakt zum Schnittzeitpunkt angepfiffen wird, ist
+      // Teil dieses Blocks und darf sich nicht selbst ins Training schmuggeln.
+      const trainMatches = byTime.filter((m) => parseMatchDate(m.date).getTime() < cutoff);
+      lastTrainCount = trainMatches.length;
+
+      const model = buildModel(trainMatches, modelOptions);
+      for (const match of block) contexts.push(makeContext(model, match, benchmark));
+    }
+
+    return {
+      season: testSeason,
+      // Der Stand beim LETZTEN Refit, also am Saisonende. Bei buildContexts ist die Zahl
+      // ueber die Saison konstant; hier waechst sie, und die groesste ist die aussagekraeftige.
+      trainMatchCount: lastTrainCount,
+      // Grundraten bewusst aus den Spielen VOR der Saison, exakt wie bei buildContexts.
+      // Sie sind die modellfreie Untergrenze, an der beide Aufbauwege gemessen werden --
+      // waere sie hier eine andere, waeren die beiden Zahlen nicht mehr vergleichbar.
+      baseRates: baseRatesOf(beforeSeason),
       contexts,
     };
   });
@@ -438,7 +537,13 @@ export function runBacktest(opts: BacktestOptions = {}): BacktestResult {
   const variant = opts.variant ?? "model";
   const benchmark = opts.benchmark ?? DEFAULT_BENCHMARK;
 
-  const seasonContexts = buildContexts(seasons, {}, loadAllMatches(), buildLeagueModel, benchmark);
+  const seasonContexts = buildContexts(
+    seasons,
+    PRODUCTION_MODEL_OPTIONS,
+    loadAllMatches(),
+    buildLeagueModel,
+    benchmark
+  );
   const spec: RunSpec = { name: variant, variant };
   const evaluations = evaluateRun(seasonContexts, spec);
 

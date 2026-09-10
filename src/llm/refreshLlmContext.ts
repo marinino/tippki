@@ -11,7 +11,13 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { FORWARD_SEASON } from "../eval/splits";
-import { fetchMatchdayContext, isLlmConfigured } from "./anthropicClient";
+import {
+  fetchMatchdayContext,
+  isLlmConfigured,
+  type MatchdayResult,
+  type MatchingDiagnostics,
+} from "./anthropicClient";
+import { EXTRACTION_BLOCK_SIZE } from "./matchContext";
 import { LLM_CACHE_VERSION, cacheKey, writeLlmCache, type LlmCacheFile } from "./llmCache";
 
 interface Fixture {
@@ -33,6 +39,9 @@ export interface RefreshLlmSummary {
   estimatedCostUsd: number;
   searchErrors: string[];
   researchChars: number;
+  // Was die Zuordnung getan hat. Gehoert in die Zusammenfassung, weil ein Ausfall hier
+  // anders zu reparieren ist als einer in der Recherche -- siehe describeUnmatched.
+  matching: MatchingDiagnostics;
 }
 
 export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSummary> {
@@ -91,16 +100,28 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
   const fetchedAt = new Date().toISOString();
   let withFactors = 0;
 
-  for (const fixture of fixtures) {
+  for (const [index, fixture] of fixtures.entries()) {
     const key = cacheKey(fixture.homeTeam, fixture.awayTeam);
+    // Dieselbe Aufteilung wie in extractionBlocks -- der Block ist die Einheit, in der die
+    // Extraktion und damit auch ihr Scheitern passiert.
+    const blockNumber = Math.floor(index / EXTRACTION_BLOCK_SIZE) + 1;
     const found = result.value.contexts.get(key);
     if (!found) {
-      // Zwei verschiedene Gruende, und der Unterschied gehoert in den Cache: entweder ist
-      // der ganze Extraktionsblock gescheitert (dann steht der echte Grund in
-      // blockFailures), oder die Antwort liess sich nicht eindeutig zuordnen und wurde
-      // verworfen statt geraten -- die Ausfaelle der falschen Mannschaft waeren schlimmer
-      // als keine.
-      failures[key] = result.value.blockFailures[key] ?? "keine zuordenbare Antwort";
+      // DREI verschiedene Gruende, und sie verlangen drei verschiedene Reparaturen:
+      //
+      //   1. Der ganze Extraktionsblock ist gescheitert -- echter Grund in blockFailures.
+      //   2. Das Modell hat geantwortet, nur unter Namen, die wir nicht zuordnen konnten.
+      //      Dann liegt der Fakt bereits vor und unsere Normalisierung ist zu streng; die
+      //      Reparatur waere rein lokal und wuerde den Prompt nicht anfassen.
+      //   3. Das Modell hat zu dieser Partie schlicht nichts geliefert. Erst DAS ist ein
+      //      Recherche- oder Prompt-Problem.
+      //
+      // Bis zum 10.09.2026 landeten 2 und 3 gemeinsam als "keine zuordenbare Antwort" im
+      // Cache. An Spieltag 2 fielen darueber drei Partien aus, und aus dem Artefakt liess
+      // sich nicht entscheiden, welcher der beiden Faelle es war -- also auch nicht, ob die
+      // Reparatur eine Zeile Normalisierung oder ein neuer Prompt ist. Das ist der
+      // Unterschied zwischen "kostet nichts" und "spaltet das Vorwaerts-Log".
+      failures[key] = result.value.blockFailures[key] ?? describeUnmatched(result.value, blockNumber);
       continue;
     }
     if (found.context.keyFactors.length > 0) withFactors++;
@@ -127,6 +148,7 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
       costUsd: result.value.costUsd,
       searchErrors: result.value.searchErrors,
       researchChars: result.value.researchChars,
+      matching: result.value.matching,
     },
   });
 
@@ -142,5 +164,34 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
     estimatedCostUsd: result.value.costUsd,
     searchErrors: result.value.searchErrors,
     researchChars: result.value.researchChars,
+    matching: result.value.matching,
   };
+}
+
+// Unterscheidet die beiden Zustaende, die frueher beide "keine zuordenbare Antwort" hiessen.
+//
+// Der Text landet unveraendert im Cache und in der Job-Zusammenfassung, ist also das, was
+// man beim naechsten Ausfall als Erstes liest. Deshalb nennt er die Namen, die das MODELL
+// benutzt hat: steht dort "SC Freiburg" statt "Freiburg", ist die Ursache in einer Zeile
+// zu sehen und die Reparatur bleibt lokal.
+function describeUnmatched(result: MatchdayResult, blockNumber: number): string {
+  const block = result.matching.blocks.find((b) => b.block === blockNumber);
+  const returned = block?.returned ?? 0;
+  const requested = block?.requested ?? 0;
+  const stray = result.matching.unmatched.filter((u) => u.block === blockNumber);
+
+  if (stray.length > 0) {
+    const names = stray.map((u) => `"${u.homeTeam} vs ${u.awayTeam}"`).join(", ");
+    return (
+      `Antwort kam zurueck, war aber keiner Partie zuzuordnen -- das Modell nannte ${names}. ` +
+      `Block ${blockNumber}: ${returned} Antworten auf ${requested} Partien, ` +
+      `${block?.matched ?? 0} zugeordnet. Verdacht: Namensnormalisierung, nicht die Recherche.`
+    );
+  }
+
+  return (
+    `das Modell hat zu dieser Partie nichts geliefert. Block ${blockNumber}: ` +
+    `${returned} Antworten auf ${requested} Partien, alle uebrigen zugeordnet. ` +
+    `Verdacht: Recherche oder Extraktion, nicht die Zuordnung.`
+  );
 }

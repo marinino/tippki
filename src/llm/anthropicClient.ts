@@ -91,6 +91,26 @@ export interface MatchdayResult {
   researchChars: number;
   // Partien, deren Extraktionsblock gescheitert ist, mit dem echten Grund.
   blockFailures: Record<string, string>;
+  // Was die Zuordnung gemacht hat. Siehe matchToFixtures: eine Partie ohne Kontext kann
+  // zwei sehr verschiedene Ursachen haben, und ohne diese Zahlen ist aus dem Cache nicht
+  // entscheidbar, welche es war.
+  matching: MatchingDiagnostics;
+}
+
+// Antwort, die das Modell geliefert hat, die aber keiner angefragten Partie zugeordnet
+// werden konnte -- mit den Namen, die das MODELL benutzt hat. Genau die braucht man, um zu
+// sehen, ob die Normalisierung zu streng ist ("SC Freiburg" gegen "Freiburg").
+export interface UnmatchedAnswer {
+  block: number;
+  homeTeam: string;
+  awayTeam: string;
+  keyFactorCount: number;
+}
+
+export interface MatchingDiagnostics {
+  // Je Extraktionsblock: angefragt, zurueckgekommen, zugeordnet.
+  blocks: { block: number; requested: number; returned: number; matched: number }[];
+  unmatched: UnmatchedAnswer[];
 }
 
 export interface LlmFailure {
@@ -165,8 +185,11 @@ export async function fetchMatchdayContext(
 
     const contexts = new Map<string, { context: LlmMatchContext; sources: string[] }>();
     const blockFailures: Record<string, string> = {};
+    const matching: MatchingDiagnostics = { blocks: [], unmatched: [] };
 
+    let blockIndex = 0;
     for (const block of extractionBlocks(fixtures)) {
+      blockIndex++;
       const extracted = await runExtraction(client, profile, block, research.value.text, usage);
       // Ein gescheiterter Block darf die uebrigen nicht mitreissen: zwei Drittel
       // Spielkontext sind besser als keiner. Der Grund wird aber mitgenommen, statt die
@@ -177,14 +200,33 @@ export async function fetchMatchdayContext(
           ? `Extraktion ${extracted.error.reason}: ${extracted.error.detail}`
           : `Extraktion ${extracted.error.reason}`;
         for (const f of block) blockFailures[`${f.homeTeam}|${f.awayTeam}`] = reason;
+        matching.blocks.push({
+          block: blockIndex,
+          requested: block.length,
+          returned: 0,
+          matched: 0,
+        });
         continue;
       }
-      for (const [key, value] of matchToFixtures(
+      const { matched, unmatched } = matchToFixtures(
         extracted.value,
         block,
         research.value.sources
-      )) {
-        contexts.set(key, value);
+      );
+      for (const [key, value] of matched) contexts.set(key, value);
+      matching.blocks.push({
+        block: blockIndex,
+        requested: block.length,
+        returned: extracted.value.length,
+        matched: matched.size,
+      });
+      for (const answer of unmatched) {
+        matching.unmatched.push({
+          block: blockIndex,
+          homeTeam: answer.homeTeam,
+          awayTeam: answer.awayTeam,
+          keyFactorCount: answer.keyFactors.length,
+        });
       }
     }
 
@@ -218,6 +260,7 @@ export async function fetchMatchdayContext(
         searchErrors: research.value.searchErrors,
         researchChars: research.value.text.length,
         blockFailures,
+        matching,
       },
     };
   } catch (error) {
@@ -396,11 +439,25 @@ function harvest(
 // falschen Mannschaft zuordnen. Deshalb erst ueber die Namen, und nur wo das eindeutig
 // scheitert, ueber die Position -- und ein Eintrag, der sich nicht zuordnen laesst, wird
 // verworfen statt geraten.
-function matchToFixtures(
+// Exportiert allein zum Pruefen: die Zuordnung entscheidet, ob ein recherchierter Fakt
+// ankommt oder verschwindet, und sie lief bis jetzt ohne eine einzige Pruefung.
+export function matchToFixtures(
   matches: LlmMatchContext[],
   fixtures: FixtureForPrompt[],
   sources: string[]
-): Map<string, { context: LlmMatchContext; sources: string[] }> {
+): {
+  matched: Map<string, { context: LlmMatchContext; sources: string[] }>;
+  // Antworten, die uebrig blieben -- mit den Namen, die das MODELL benutzt hat.
+  //
+  // Vorher verschwanden sie hier stillschweigend, und der Cache meldete fuer die Partie
+  // nur "keine zuordenbare Antwort". Das wirft zwei voellig verschiedene Zustaende in
+  // einen Topf: "das Modell hat zu dieser Partie nichts geliefert" (dann ist die
+  // Recherche das Problem) und "das Modell hat geliefert, wir konnten es nur nicht
+  // zuordnen" (dann ist unsere Normalisierung das Problem, und der Fakt liegt bereits
+  // vor). Die Reparatur dafuer waere in beiden Faellen eine voellig andere -- und die am
+  // Prompt haette den Fingerabdruck und damit die Pipeline geaendert.
+  unmatched: LlmMatchContext[];
+} {
   const result = new Map<string, { context: LlmMatchContext; sources: string[] }>();
   const unclaimed = new Set(matches);
 
@@ -433,7 +490,8 @@ function matchToFixtures(
       context: { ...context, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam },
       sources,
     });
+    unclaimed.delete(context);
   }
 
-  return result;
+  return { matched: result, unmatched: [...unclaimed] };
 }
