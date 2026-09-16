@@ -42,6 +42,7 @@ import {
   parseBenchmarkSource,
   type BenchmarkQuote,
 } from "../eval/benchmarkOdds";
+import { latestPerKey } from "../eval/forwardLogRules";
 
 const LOG_PATH = join(process.cwd(), "data", "forward_log.jsonl");
 
@@ -52,6 +53,7 @@ interface Variant {
 }
 
 interface LogEntry {
+  loggedAt?: string;
   season: string;
   matchday: number;
   homeTeam: string;
@@ -102,14 +104,25 @@ const pool = process.argv.includes("--pool");
 const forceMatchList = process.argv.includes("--matches");
 const benchmark = parseBenchmarkSource(flag("benchmark"));
 
-const entries: LogEntry[] = [];
+const rawEntries: LogEntry[] = [];
 for (const line of readFileSync(LOG_PATH, "utf-8").split("\n")) {
   if (!line.trim()) continue;
   try {
-    entries.push(JSON.parse(line));
+    rawEntries.push(JSON.parse(line));
   } catch {
     console.warn("Unlesbare Logzeile uebersprungen.");
   }
+}
+
+// Je Partie und Konfiguration zaehlt eine Zeile, die zuletzt geschriebene. Mehrere gibt es
+// nur, wenn forwardLog nach einer gescheiterten Recherche vor Anpfiff nachgetragen hat --
+// die Regel und ihre Begruendung stehen in forwardLogRules.ts.
+const { kept: entries, superseded } = latestPerKey(rawEntries);
+if (superseded > 0) {
+  console.log(
+    `${superseded} Logzeile(n) durch einen Nachtrag mit Spielkontext ersetzt ` +
+      `(Recherche war gescheitert und wurde vor Anpfiff wiederholt).\n`
+  );
 }
 
 if (entries.length === 0) {

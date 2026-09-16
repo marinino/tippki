@@ -32,6 +32,7 @@ import { argmaxCell } from "../model/scoreMatrix";
 import { DEFAULT_PIPELINE, configHash } from "../model/pipelineConfig";
 import { FORWARD_SEASON } from "../eval/splits";
 import { cacheKey, readLlmCache } from "../llm/llmCache";
+import { logDecision, logKey } from "../eval/forwardLogRules";
 
 loadEnvLocal();
 
@@ -70,15 +71,21 @@ if (fixtures.length === 0) {
 // Idempotent: bereits protokollierte Spiele derselben Konfiguration werden uebersprungen.
 // Ein zweiter Aufruf am selben Tag darf keine Duplikate erzeugen, sonst waeren die
 // gepaarten Tests spaeter verzerrt.
-const alreadyLogged = new Set<string>();
+//
+// Eine Ausnahme: stand bisher nur eine Zeile OHNE Spielkontext da und liegt jetzt einer
+// vor, wird nachgetragen -- die Recherche ist gescheitert und vor Anpfiff repariert
+// worden. Welche Zeile dann zaehlt, legt dieselbe Regel in forwardLogRules.ts fest, die
+// auch forwardEval benutzt.
+const loggedContextByKey = new Map<string, boolean[]>();
 if (existsSync(LOG_PATH)) {
   for (const line of readFileSync(LOG_PATH, "utf-8").split("\n")) {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);
-      alreadyLogged.add(
-        `${entry.season}|${entry.matchday}|${entry.configHash}|${entry.homeTeam}|${entry.awayTeam}`
-      );
+      const key = logKey(entry);
+      const seen = loggedContextByKey.get(key) ?? [];
+      seen.push(entry.llm != null);
+      loggedContextByKey.set(key, seen);
     } catch {
       // Kaputte Zeile ueberspringen statt abbrechen -- ein append-only-Log darf nicht an
       // einer einzelnen unlesbaren Zeile scheitern.
@@ -115,6 +122,7 @@ if (!llmMatchesMatchday) {
 const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
 
 let written = 0;
+let supplemented = 0;
 let skipped = 0;
 let withContext = 0;
 
@@ -135,8 +143,16 @@ function variantOf(out: ReturnType<typeof predictPipeline>) {
 }
 
 for (const fixture of fixtures) {
-  const key = `${FORWARD_SEASON}|${matchday}|${hash}|${fixture.homeTeam}|${fixture.awayTeam}`;
-  if (alreadyLogged.has(key)) {
+  const key = logKey({
+    season: FORWARD_SEASON,
+    matchday,
+    configHash: hash,
+    homeTeam: fixture.homeTeam,
+    awayTeam: fixture.awayTeam,
+  });
+  const cachedLlm = llmByFixture[cacheKey(fixture.homeTeam, fixture.awayTeam)];
+  const decision = logDecision(loggedContextByKey.get(key) ?? [], cachedLlm != null);
+  if (decision === "vorhanden") {
     skipped++;
     continue;
   }
@@ -162,7 +178,6 @@ for (const fixture of fixtures) {
     awayForm,
   };
 
-  const cachedLlm = llmByFixture[cacheKey(fixture.homeTeam, fixture.awayTeam)];
   if (cachedLlm) withContext++;
 
   const base = predictPipeline(shared);
@@ -178,6 +193,10 @@ for (const fixture of fixtures) {
     awayTeam: fixture.awayTeam,
     kickoff: fixture.date,
     configHash: hash,
+    // Nur gesetzt, wenn diese Zeile eine fruehere ohne Spielkontext ergaenzt. Fuer die
+    // Auswertung nicht noetig (die spaetere Zeile zaehlt ohnehin), aber beim Lesen des
+    // Logs sonst nicht von einem Duplikat zu unterscheiden.
+    ...(decision === "nachtrag" ? { nachtrag: true } : {}),
     form: { home: homeForm, away: awayForm },
     llm: cachedLlm
       ? {
@@ -207,9 +226,10 @@ for (const fixture of fixtures) {
 
   appendFileSync(LOG_PATH, `${JSON.stringify(entry)}\n`);
   written++;
+  if (decision === "nachtrag") supplemented++;
 
   console.log(
-    `  ${fixture.homeTeam} vs ${fixture.awayTeam}: ` +
+    `  ${decision === "nachtrag" ? "[Nachtrag] " : ""}${fixture.homeTeam} vs ${fixture.awayTeam}: ` +
       `${(base.probs.homeWinProb * 100).toFixed(0)}/${(base.probs.drawProb * 100).toFixed(0)}/` +
       `${(base.probs.awayWinProb * 100).toFixed(0)}  ` +
       `wahrscheinlichstes Ergebnis ${argmaxCell(base.matrix)}`
@@ -217,8 +237,9 @@ for (const fixture of fixtures) {
 }
 
 console.log(
-  `\nSpieltag ${matchday}: ${written} protokolliert, ${skipped} uebersprungen ` +
-    `(bereits im Log oder angepfiffen), ${withContext} mit Spielkontext.`
+  `\nSpieltag ${matchday}: ${written} protokolliert` +
+    (supplemented > 0 ? ` (davon ${supplemented} Nachtraege mit Spielkontext)` : "") +
+    `, ${skipped} uebersprungen (bereits im Log oder angepfiffen), ${withContext} mit Spielkontext.`
 );
 console.log(
   `Konfiguration ${hash} (Prompt ${DEFAULT_PIPELINE.llmPromptFingerprint}, Modell ` +

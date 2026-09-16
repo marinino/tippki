@@ -110,13 +110,15 @@ jobs:
           if [ -n "$SPIELTAG" ]; then args="--matchday=$SPIELTAG"; fi
           npm run refresh-llm -- $args
 
-      # Muss unmittelbar nach der Recherche laufen und noch vor Anpfiff. Laeuft es davor,
-      # faellt die withLlm-Variante mit dem Basismodell zusammen, und die Idempotenzpruefung
-      # ueberspringt die Partien danach -- die Zeilen waeren dauerhaft wertlos fuer den
-      # gepaarten Test. Laeuft es gar nicht, entsteht fuer diesen Spieltag keine Evidenz.
+      # Muss unmittelbar nach der Recherche laufen und noch vor Anpfiff. Laeuft es gar nicht,
+      # entsteht fuer diesen Spieltag keine Evidenz.
       #
       # Laeuft auch nach einer gescheiterten Recherche: dann steht in den Zeilen llm: null,
       # und sie sind als "nicht recherchiert" von einem echten Nullbefund unterscheidbar.
+      # Wird die Recherche vor Anpfiff von Hand wiederholt, traegt forward-log die Partien
+      # mit Spielkontext nach (Feld "nachtrag"), und forward-eval wertet die spaetere Zeile
+      # aus -- Regel und Begruendung in src/eval/forwardLogRules.ts. Eine Zeile, die schon
+      # Kontext hat, wird nie ersetzt.
       - name: Vorhersagen protokollieren
         if: steps.pruefung.outputs.due == 'true'
         run: npm run forward-log

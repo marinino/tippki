@@ -113,6 +113,7 @@ import {
   type BenchmarkSource,
 } from "../eval/benchmarkOdds";
 import { accuracyStandardError, seasonsFor } from "../eval/splits";
+import { latestPerKey, logDecision, logKey } from "../eval/forwardLogRules";
 import { readdirSync, statSync } from "node:fs";
 
 let sectionCount = 0;
@@ -2378,6 +2379,80 @@ section("Konfigurations-Hash", () => {
         `${name} veraendert den Hash nicht -- fehlt es in configHash?`
       )
     );
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Vorwaerts-Log: Nachtrag nach gescheiterter Recherche", () => {
+  // Der Fall, der einen Spieltag gekostet haette: Recherche scheitert, protokolliert wird
+  // trotzdem (llm: null), vor Anpfiff wird repariert. Derselbe Hash, derselbe Schluessel --
+  // frueher uebersprungen, jetzt nachgetragen.
+  check(() => assert.equal(logDecision([], false), "neu"));
+  check(() => assert.equal(logDecision([], true), "neu"));
+  check(() => assert.equal(logDecision([false], true), "nachtrag"));
+
+  // Zweiter Lauf ohne Kontext: nichts gewonnen, also auch keine zweite Zeile.
+  check(() => assert.equal(logDecision([false], false), "vorhanden"));
+
+  // Eine Zeile MIT Kontext wird nie ersetzt, auch nicht durch einen neuen Kontext. Sonst
+  // liesse sich neu recherchieren, bis der Befund gefaellt.
+  check(() => assert.equal(logDecision([true], true), "vorhanden"));
+  check(() => assert.equal(logDecision([true], false), "vorhanden"));
+  check(() => assert.equal(logDecision([false, true], true), "vorhanden"));
+
+  const row = (loggedAt: string | undefined, hash: string, marker: string) => ({
+    loggedAt,
+    season: "2026",
+    matchday: 4,
+    configHash: hash,
+    homeTeam: "Bayern Munich",
+    awayTeam: "Schalke 04",
+    marker,
+  });
+
+  // Die spaetere Zeile gewinnt, unabhaengig von der Reihenfolge in der Datei.
+  {
+    const early = row("2026-09-18T15:30:00.000Z", "aaaa", "ohne");
+    const late = row("2026-09-18T16:15:00.000Z", "aaaa", "mit");
+    for (const order of [[early, late], [late, early]]) {
+      const { kept, superseded } = latestPerKey(order);
+      check(() => assert.equal(kept.length, 1));
+      check(() => assert.equal(kept[0].marker, "mit"));
+      check(() => assert.equal(superseded, 1));
+    }
+  }
+
+  // Verschiedene Hashes sind verschiedene Pipelines und ersetzen einander nicht.
+  {
+    const { kept, superseded } = latestPerKey([
+      row("2026-09-18T15:30:00.000Z", "aaaa", "a"),
+      row("2026-09-18T16:15:00.000Z", "bbbb", "b"),
+    ]);
+    check(() => assert.equal(kept.length, 2));
+    check(() => assert.equal(superseded, 0));
+  }
+
+  // Ohne loggedAt verliert eine Zeile gegen jede mit; untereinander gewinnt die spaetere.
+  {
+    const { kept } = latestPerKey([row(undefined, "aaaa", "alt"), row("2026-09-18T15:30:00.000Z", "aaaa", "neu")]);
+    check(() => assert.equal(kept[0].marker, "neu"));
+    const { kept: both } = latestPerKey([row(undefined, "aaaa", "erste"), row(undefined, "aaaa", "zweite")]);
+    check(() => assert.equal(both[0].marker, "zweite"));
+  }
+
+  // Der Schluessel muss alle fuenf Felder tragen. Faellt eines weg, ersetzen sich Zeilen
+  // verschiedener Spieltage oder Konfigurationen gegenseitig.
+  {
+    const base = row("2026-09-18T15:30:00.000Z", "aaaa", "x");
+    const variants = [
+      { ...base, season: "2027" },
+      { ...base, matchday: 5 },
+      { ...base, configHash: "bbbb" },
+      { ...base, homeTeam: "Hamburg" },
+      { ...base, awayTeam: "Hamburg" },
+    ];
+    for (const v of variants) check(() => assert.notEqual(logKey(v), logKey(base)));
   }
 });
 

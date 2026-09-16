@@ -79,9 +79,19 @@ npm run forward-log
 ```
 
 Friert beide Varianten ein, `model` und `withLlm`, für jede Partie. **Erst nach
-`refresh-llm`.** Läuft es vorher, fällt `withLlm` mit `model` zusammen, und die
-Idempotenz-Prüfung überspringt die Partien danach — die Zeilen wären dauerhaft wertlos für
-den gepaarten Test.
+`refresh-llm`.** Läuft es vorher, fällt `withLlm` mit `model` zusammen und die Zeilen tragen
+`llm: null`.
+
+Das ist seit dem 16.09.2026 reparabel, solange nicht angepfiffen ist: ein erneuter Lauf mit
+Spielkontext schreibt für jede Partie, die bisher nur Zeilen *ohne* Kontext hatte, einen
+Nachtrag (`"nachtrag": true`). `forward-eval` wertet je Partie und Konfiguration die zuletzt
+geschriebene Zeile aus. Eine Zeile **mit** Kontext wird nie ersetzt — auch nicht durch
+eine neuere Recherche, sonst ließe sich recherchieren, bis der Befund gefällt. Regel und
+Tests: `src/eval/forwardLogRules.ts`, selfCheck-Abschnitt „Vorwaerts-Log: Nachtrag".
+
+Vorher übersprang die Idempotenzprüfung den zweiten Lauf, weil ihr Schlüssel nicht kannte,
+ob ein Kontext vorlag. Ein Spieltag mit gescheiterter Recherche war damit auch dann
+verloren, wenn zwei Stunden vor Anpfiff repariert wurde.
 
 **Nach dem Spielwochenende**
 
