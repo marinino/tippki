@@ -1,21 +1,29 @@
-# Recherche des Spielkontexts, drei Stunden vor dem ersten Anpfiff eines Spieltags.
+# Recherche des Spielkontexts vor dem ersten Anpfiff eines Spieltags, und das Protokoll
+# der Vorhersagen.
 #
-# Der Zeitplan ist absichtlich stumpf und die Entscheidung liegt im Skript: Cron in GitHub
-# Actions feuert nicht puenktlich, sondern irgendwann in den Minuten danach. Deshalb laeuft
-# die Pruefung viertelstuendlich, und `research-due` entscheidet, ob der Sollzeitpunkt
-# gerade erreicht ist (drei Stunden vor Anpfiff, plus/minus zwanzig Minuten). Ein
-# verspaeteter Tick faellt so in denselben Korridor wie ein puenktlicher.
+# Der Zeitplan ist absichtlich stumpf und die Entscheidung liegt im Skript. `research-due`
+# entscheidet zweierlei:
+#   due      -- recherchieren: der erste Lauf zwischen 200 und 90 Minuten vor dem ersten
+#               Anpfiff (Sollzeitpunkt 180, Details in src/data/researchWindow.ts)
+#   log_due  -- das Basismodell protokollieren: ab 48 Stunden vor dem ersten Anpfiff,
+#               auch ohne Recherche
 #
-# Die Stundenangaben sind UTC -- Cron kennt nichts anderes. 08:00-16:59 UTC deckt jedes
-# Fenster dieser Saison ab, im Sommer wie im Winter; der selfCheck-Abschnitt
-# "Recherchefenster" rechnet das fuer alle 34 Spieltage nach und schlaegt fehl, sobald ein
-# Spielplan daraus herauslaeuft.
+# Bis zum 16.09.2026 war das Fenster 180 plus/minus 20 Minuten, und der Zeitplan lief
+# viertelstuendlich an fuenf Wochentagen. GitHub hat davon an Spieltags-Freitagen 2 bis 3
+# Laeufe tatsaechlich gestartet, keiner lag je im Fenster, und Spieltag 3 fehlt deshalb
+# komplett im Vorwaerts-Log. Seitdem jeden Tag und bis 18:59 UTC: jeder zusaetzliche Tick
+# ist eine Chance mehr, und ein Lauf ohne Faelligkeit kostet nur ein paar Sekunden.
+#
+# Die Stundenangaben sind UTC. 08:00-18:59 deckt jedes Recherchefenster dieser Saison ganz
+# ab, auch im Winter; der selfCheck-Abschnitt "Recherchefenster" rechnet das fuer alle 34
+# Spieltage nach. Ob GitHub die Ticks auch AUSFUEHRT, kann kein Test pruefen -- dafuer
+# schlaegt `forward-log-check` im Ergebnis-Workflow Alarm, wenn nach Anpfiff Zeilen fehlen.
 
 name: Spielkontext
 
 on:
   schedule:
-    - cron: "*/15 8-16 * * 2,3,5,6,0"
+    - cron: "*/15 8-18 * * *"
   workflow_dispatch:
     inputs:
       spieltag:
@@ -110,15 +118,21 @@ jobs:
           if [ -n "$SPIELTAG" ]; then args="--matchday=$SPIELTAG"; fi
           npm run refresh-llm -- $args
 
-      # Muss unmittelbar nach der Recherche laufen und noch vor Anpfiff. Laeuft es davor,
-      # faellt die withLlm-Variante mit dem Basismodell zusammen, und die Idempotenzpruefung
-      # ueberspringt die Partien danach -- die Zeilen waeren dauerhaft wertlos fuer den
-      # gepaarten Test. Laeuft es gar nicht, entsteht fuer diesen Spieltag keine Evidenz.
+      # Muss unmittelbar nach der Recherche laufen und noch vor Anpfiff. Laeuft es gar nicht,
+      # entsteht fuer diesen Spieltag keine Evidenz.
       #
       # Laeuft auch nach einer gescheiterten Recherche: dann steht in den Zeilen llm: null,
       # und sie sind als "nicht recherchiert" von einem echten Nullbefund unterscheidbar.
+      # Wird die Recherche vor Anpfiff von Hand wiederholt, traegt forward-log die Partien
+      # mit Spielkontext nach (Feld "nachtrag"), und forward-eval wertet die spaetere Zeile
+      # aus -- Regel und Begruendung in src/eval/forwardLogRules.ts. Eine Zeile, die schon
+      # Kontext hat, wird nie ersetzt.
+      #
+      # Laeuft ausserdem ohne Recherche, sobald log_due gilt. Dann stehen fuer den Spieltag
+      # schon Zeilen mit llm: null, bevor recherchiert wird -- faellt die Recherche aus, ist
+      # wenigstens das Basismodell gesichert.
       - name: Vorhersagen protokollieren
-        if: steps.pruefung.outputs.due == 'true'
+        if: steps.pruefung.outputs.due == 'true' || steps.pruefung.outputs.log_due == 'true'
         run: npm run forward-log
 
       # Laeuft immer, nicht nur bei faelliger Recherche: hat sich oben eine Anstosszeit
@@ -144,6 +158,8 @@ jobs:
             git commit -m "Vorhersagen Spieltag ${SPIELTAG} ohne Spielkontext (Recherche fehlgeschlagen)"
           elif [ "$RECHERCHIERT" = "true" ]; then
             git commit -m "Spielkontext Spieltag ${SPIELTAG} (${GRUND})"
+          elif ! git diff --cached --quiet -- data/forward_log.jsonl; then
+            git commit -m "Basismodell Spieltag ${SPIELTAG} protokolliert (vor der Recherche)"
           else
             git commit -m "Spielplan aufgefrischt"
           fi

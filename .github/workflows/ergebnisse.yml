@@ -85,3 +85,26 @@ jobs:
           fi
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
+
+      # Der Alarm fuer das, was kein Zeitplan-Test sehen kann: ob GitHub die Recherche-Ticks
+      # auch wirklich ausgefuehrt hat. Steht fuer eine angepfiffene Partie keine Logzeile
+      # da, wird dieser Lauf rot. Hier, weil der Workflow am Spielabend laeuft -- ein Ausfall
+      # am Freitag meldet sich damit noch am Freitag, solange Samstag und Sonntag zu retten
+      # sind. Ohne continue-on-error und als letzter Schritt: committet ist vorher.
+      - name: Vorwaertstest vollstaendig?
+        run: |
+          # Ohne set +e braeche die Standard-Shell (bash -eo pipefail) beim Fehlschlag sofort
+          # ab, und die Zusammenfassung darunter bliebe leer -- ausgerechnet im Alarmfall.
+          set +e
+          npm run forward-log-check > pruefung.txt 2>&1
+          status=$?
+          cat pruefung.txt
+          {
+            echo "### Vorwärts-Log"
+            echo ""
+            echo '```'
+            cat pruefung.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f pruefung.txt
+          exit $status

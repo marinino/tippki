@@ -38,7 +38,13 @@ import {
   nextMatchdayOf,
   parseKickoff,
 } from "../data/kickoff";
-import { LEAD_MINUTES, decideResearch } from "../data/researchWindow";
+import {
+  HARD_FLOOR_MINUTES,
+  LEAD_MINUTES,
+  TOLERANCE_MINUTES,
+  decideBaseLog,
+  decideResearch,
+} from "../data/researchWindow";
 import { DATA_FILES, isKnownDataFile } from "../data/dataFiles";
 import { createZip, crc32 } from "../data/zip";
 import { llmStatusOf } from "../llm/llmCache";
@@ -113,6 +119,24 @@ import {
   type BenchmarkSource,
 } from "../eval/benchmarkOdds";
 import { accuracyStandardError, seasonsFor } from "../eval/splits";
+import {
+  KNOWN_GAPS,
+  latestPerKey,
+  logDecision,
+  logKey,
+  missingAfterKickoff,
+  researchTooLate,
+} from "../eval/forwardLogRules";
+import {
+  MIN_PASSWORD_LENGTH,
+  MIN_TOKEN_SECRET_LENGTH,
+  adminConfigProblem,
+  checkPassword,
+  isAdminConfigured,
+  issueToken,
+  verifyToken,
+} from "../data/adminAuth";
+import { createHmac } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 
 let sectionCount = 0;
@@ -523,16 +547,29 @@ section("Recherchefenster", () => {
   const decide = (now: Date, extra: Partial<Parameters<typeof decideResearch>[0]> = {}) =>
     decideResearch({ fixtures, now, cachedMatchday: null, ...extra });
 
-  // Punktgenau, und am Rand des Toleranzbereichs beidseitig.
+  // Das Fenster reicht vom Sollzeitpunkt minus Toleranz bis zur Untergrenze. Bis zum
+  // 16.09.2026 endete es 20 Minuten NACH dem Sollzeitpunkt -- und kein geplanter Lauf hat es
+  // in drei Spieltagen je getroffen.
   check(() => assert.equal(decide(soll).due, true));
-  check(() => assert.equal(decide(min(-19)).due, true));
-  check(() => assert.equal(decide(min(19)).due, true));
-  // Genau ausserhalb -- ein verspaeteter Cron-Tick faellt hier durch, und das ist gewollt.
+  check(() => assert.equal(decide(min(-20)).due, true));
   check(() => assert.equal(decide(min(-21)).due, false));
-  check(() => assert.equal(decide(min(21)).due, false));
-  // Weit davor und weit danach.
+  check(() => assert.ok(decide(min(-21)).reason.includes("zu früh")));
+  check(() => assert.equal(decide(min(21)).due, true));
+  check(() => assert.equal(decide(min(90)).due, true)); // genau 90 Minuten vor Anpfiff
+  check(() => assert.equal(decide(min(91)).due, false)); // 89 Minuten vor Anpfiff
+  // Weit davor und nach der Untergrenze.
   check(() => assert.equal(decide(new Date("2026-08-25T15:30:00Z")).due, false));
   check(() => assert.equal(decide(new Date("2026-08-28T17:30:00Z")).due, false));
+
+  // Der Fall, der das alte Fenster zu Fall gebracht hat: Spieltag 3, erster Anpfiff Fr
+  // 11.09. 20:30 (18:30 UTC). GitHub startete nur zwei geplante Laeufe, um 12:42 und 16:46
+  // UTC. Der erste ist zu frueh und bleibt es, der zweite muss faellig sein.
+  {
+    const st3 = [{ date: "2026-09-11T20:30:00", matchday: 3 }];
+    const at = (iso: string) => decideResearch({ fixtures: st3, now: new Date(iso), cachedMatchday: null });
+    check(() => assert.equal(at("2026-09-11T12:42:00Z").due, false));
+    check(() => assert.equal(at("2026-09-11T16:46:00Z").due, true));
+  }
 
   // Der Sollzeitpunkt bemisst sich am FRUEHESTEN Anpfiff des Spieltags, nicht am ersten
   // Eintrag in der Datei -- sonst haenge die Recherche an der Sortierung von fixtures.json.
@@ -557,16 +594,22 @@ section("Recherchefenster", () => {
   check(() => assert.equal(decide(soll, { cachedMatchday: 1, force: true }).due, true));
 
   // Die Untergrenze: naeher als 90 Minuten an den Anpfiff geht die Automatik nie, weil
-  // dann die Aufstellungen stehen. 100 Minuten vorher ist das Fenster laengst verpasst,
-  // aber es ist die Untergrenze, die den Fall begruendet -- beides muss "nein" ergeben.
+  // dann die Aufstellungen stehen.
   const kickoff = new Date("2026-08-28T18:30:00Z");
   const vorAnpfiff = (n: number) => new Date(kickoff.getTime() - n * 60000);
   check(() => assert.equal(decide(vorAnpfiff(89)).due, false));
   check(() => assert.ok(decide(vorAnpfiff(89)).reason.includes("Untergrenze")));
-  check(() => assert.ok(decide(vorAnpfiff(100)).reason.includes("verpasst")));
+  check(() => assert.equal(decide(vorAnpfiff(100)).due, true));
 
-  // Von Hand darf die Untergrenze uebergangen werden -- aber nicht der Anpfiff selbst.
-  check(() => assert.equal(decide(vorAnpfiff(30), { force: true }).due, true));
+  // Von Hand wird das Fenster uebergangen, die Untergrenze nicht. Bis zum 16.09.2026 stand
+  // hier das Gegenteil, im Widerspruch zu Kommentar und SAISONBETRIEB.md -- und seit dem
+  // Nachtrag im Vorwaerts-Log kaeme ein Befund mit bekannten Aufstellungen sonst in den
+  // gepaarten Test.
+  check(() => assert.equal(decide(vorAnpfiff(100), { force: true }).due, true));
+  check(() => assert.equal(decide(vorAnpfiff(90), { force: true }).due, true));
+  check(() => assert.equal(decide(vorAnpfiff(89), { force: true }).due, false));
+  check(() => assert.equal(decide(vorAnpfiff(30), { force: true }).due, false));
+  check(() => assert.ok(decide(vorAnpfiff(30), { force: true }).reason.includes("auch von Hand")));
   check(() => assert.equal(decide(vorAnpfiff(-1), { force: true }).due, false));
   check(() => assert.ok(decide(vorAnpfiff(-1), { force: true }).reason.includes("begonnen")));
 
@@ -600,31 +643,49 @@ section("Recherchefenster", () => {
   check(() => assert.equal(decide(new Date("2027-07-01T12:00:00Z")).due, false));
   check(() => assert.equal(decide(new Date("2027-07-01T12:00:00Z")).matchday, null));
 
-  // Und der echte Spielplan: jedes Fenster muss auf einen Wochentag fallen, den der
-  // Cron-Ausdruck in .github/workflows/spielkontext.yml abdeckt (Di, Mi, Fr, Sa, So) und
-  // in dessen Stundenfenster liegen. Faellt ein Spieltag hier durch, faellt er im Betrieb
-  // stumm durch -- und genau das soll hier auffliegen, nicht erst im Oktober.
+  // Und der echte Spielplan: das GANZE Fenster jedes Spieltags muss im Stundenbereich des
+  // Cron-Ausdrucks in .github/workflows/spielkontext.yml liegen (jeden Tag, 8-18 UTC). Nicht
+  // nur sein Anfang -- GitHub startet nur einen Bruchteil der Ticks, und jede Minute des
+  // Fensters, die kein Tick erreichen kann, ist verschenkt. Ob GitHub die Ticks auch
+  // ausfuehrt, prueft kein Test; dafuer gibt es npm run forward-log-check.
   const echte: { date: string; matchday: number }[] = JSON.parse(
     readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
   );
-  const CRON_TAGE = new Set([2, 3, 5, 6, 0]);
+  const CRON_STUNDEN = { von: 8, bis: 18 };
   const spieltage = [...new Set(echte.map((f) => f.matchday))];
   for (const md of spieltage) {
     check(() => {
       const anpfiff = firstKickoffOf(echte, md)!;
-      const fenster = new Date(anpfiff.getTime() - LEAD_MINUTES * 60000);
+      const anfang = new Date(anpfiff.getTime() - (LEAD_MINUTES + TOLERANCE_MINUTES) * 60000);
+      const ende = new Date(anpfiff.getTime() - HARD_FLOOR_MINUTES * 60000);
       assert.ok(
-        CRON_TAGE.has(fenster.getUTCDay()),
-        `Spieltag ${md}: Fenster ${fenster.toISOString()} faellt auf UTC-Wochentag ` +
-          `${fenster.getUTCDay()}, den der Zeitplan nicht abdeckt`
-      );
-      const stunde = fenster.getUTCHours();
-      assert.ok(
-        stunde >= 8 && stunde <= 16,
-        `Spieltag ${md}: Fenster ${fenster.toISOString()} liegt bei ${stunde} Uhr UTC, ` +
-          `ausserhalb des Zeitplans (8-16)`
+        anfang.getUTCHours() >= CRON_STUNDEN.von &&
+          ende.getUTCHours() <= CRON_STUNDEN.bis &&
+          anfang.getUTCDate() === ende.getUTCDate(),
+        `Spieltag ${md}: Fenster ${anfang.toISOString()} bis ${ende.toISOString()} liegt nicht ` +
+          `ganz im Zeitplan (${CRON_STUNDEN.von}-${CRON_STUNDEN.bis} Uhr UTC)`
       );
     });
+  }
+
+  // Das Basis-Log: ab 48 Stunden vor dem ersten Anpfiff, auch waehrend der Spieltag laeuft.
+  {
+    const fx = [
+      { date: "2026-09-18T20:30:00", matchday: 4 }, // 18:30 UTC
+      { date: "2026-09-19T15:30:00", matchday: 4 },
+      { date: "2026-09-25T20:30:00", matchday: 5 },
+    ];
+    const at = (iso: string) => decideBaseLog(fx, new Date(iso));
+    check(() => assert.equal(at("2026-09-16T18:29:00Z").due, false)); // 48 h + 1 min
+    check(() => assert.equal(at("2026-09-16T18:31:00Z").due, true));
+    check(() => assert.equal(at("2026-09-17T09:00:00Z").matchday, 4)); // Donnerstag
+    // Freitagspartie laeuft, Samstagspartie noch nicht: weiter Spieltag 4.
+    check(() => assert.equal(at("2026-09-18T19:00:00Z").due, true));
+    check(() => assert.equal(at("2026-09-18T19:00:00Z").matchday, 4));
+    // Nach dem letzten Anpfiff: Spieltag 5, eine Woche entfernt, noch nicht faellig.
+    check(() => assert.equal(at("2026-09-19T14:00:00Z").due, false));
+    check(() => assert.equal(at("2026-09-19T14:00:00Z").matchday, 5));
+    check(() => assert.equal(at("2027-07-01T12:00:00Z").due, false));
   }
 });
 
@@ -1517,6 +1578,33 @@ section("xG-Form == Referenzimplementierung", () => {
       )
     );
   }
+
+  // Ein Eintrag allein reicht nicht: auch der WERT muss in den xG-Daten vorkommen. Ein
+  // Tippfehler rechts ("Elversburg") ist ein Eintrag, computeXgForm findet unter dem Namen
+  // aber nichts und steigt genauso still mit 0 aus wie ohne Eintrag.
+  //
+  // Erst geprueft, wenn der xG-Feed die laufende Saison ueberhaupt fuehrt. Ein Aufsteiger
+  // hat bei Understat keine Vorgeschichte, sein Name erscheint erst mit dem ersten Spiel --
+  // vorher waere jede Pruefung rot, ohne dass etwas falsch ist.
+  const xgRows = JSON.parse(readFileSync(join(process.cwd(), "data", "xg_bundesliga.json"), "utf-8")) as {
+    season: string;
+    homeTeam: string;
+    awayTeam: string;
+  }[];
+  if (xgRows.some((r) => r.season === currentSeason)) {
+    const xgNames = new Set(xgRows.flatMap((r) => [r.homeTeam, r.awayTeam]));
+    for (const team of [...currentTeams].sort()) {
+      const mapped = OUR_NAME_TO_UNDERSTAT[team];
+      if (!mapped) continue;
+      check(() =>
+        assert.ok(
+          xgNames.has(mapped),
+          `${team} ist auf "${mapped}" abgebildet, aber unter diesem Namen stehen keine ` +
+            `xG-Daten -- die Formkurve waere dauerhaft 0`
+        )
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -2378,6 +2466,225 @@ section("Konfigurations-Hash", () => {
         `${name} veraendert den Hash nicht -- fehlt es in configHash?`
       )
     );
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Vorwaerts-Log: Nachtrag nach gescheiterter Recherche", () => {
+  // Der Fall, der einen Spieltag gekostet haette: Recherche scheitert, protokolliert wird
+  // trotzdem (llm: null), vor Anpfiff wird repariert. Derselbe Hash, derselbe Schluessel --
+  // frueher uebersprungen, jetzt nachgetragen.
+  check(() => assert.equal(logDecision([], false), "neu"));
+  check(() => assert.equal(logDecision([], true), "neu"));
+  check(() => assert.equal(logDecision([false], true), "nachtrag"));
+
+  // Zweiter Lauf ohne Kontext: nichts gewonnen, also auch keine zweite Zeile.
+  check(() => assert.equal(logDecision([false], false), "vorhanden"));
+
+  // Eine Zeile MIT Kontext wird nie ersetzt, auch nicht durch einen neuen Kontext. Sonst
+  // liesse sich neu recherchieren, bis der Befund gefaellt.
+  check(() => assert.equal(logDecision([true], true), "vorhanden"));
+  check(() => assert.equal(logDecision([true], false), "vorhanden"));
+  check(() => assert.equal(logDecision([false, true], true), "vorhanden"));
+
+  const row = (loggedAt: string | undefined, hash: string, marker: string) => ({
+    loggedAt,
+    season: "2026",
+    matchday: 4,
+    configHash: hash,
+    homeTeam: "Bayern Munich",
+    awayTeam: "Schalke 04",
+    marker,
+  });
+
+  // Die spaetere Zeile gewinnt, unabhaengig von der Reihenfolge in der Datei.
+  {
+    const early = row("2026-09-18T15:30:00.000Z", "aaaa", "ohne");
+    const late = row("2026-09-18T16:15:00.000Z", "aaaa", "mit");
+    for (const order of [[early, late], [late, early]]) {
+      const { kept, superseded } = latestPerKey(order);
+      check(() => assert.equal(kept.length, 1));
+      check(() => assert.equal(kept[0].marker, "mit"));
+      check(() => assert.equal(superseded, 1));
+    }
+  }
+
+  // Verschiedene Hashes sind verschiedene Pipelines und ersetzen einander nicht.
+  {
+    const { kept, superseded } = latestPerKey([
+      row("2026-09-18T15:30:00.000Z", "aaaa", "a"),
+      row("2026-09-18T16:15:00.000Z", "bbbb", "b"),
+    ]);
+    check(() => assert.equal(kept.length, 2));
+    check(() => assert.equal(superseded, 0));
+  }
+
+  // Ohne loggedAt verliert eine Zeile gegen jede mit; untereinander gewinnt die spaetere.
+  {
+    const { kept } = latestPerKey([row(undefined, "aaaa", "alt"), row("2026-09-18T15:30:00.000Z", "aaaa", "neu")]);
+    check(() => assert.equal(kept[0].marker, "neu"));
+    const { kept: both } = latestPerKey([row(undefined, "aaaa", "erste"), row(undefined, "aaaa", "zweite")]);
+    check(() => assert.equal(both[0].marker, "zweite"));
+  }
+
+  // Der Schluessel muss alle fuenf Felder tragen. Faellt eines weg, ersetzen sich Zeilen
+  // verschiedener Spieltage oder Konfigurationen gegenseitig.
+  {
+    const base = row("2026-09-18T15:30:00.000Z", "aaaa", "x");
+    const variants = [
+      { ...base, season: "2027" },
+      { ...base, matchday: 5 },
+      { ...base, configHash: "bbbb" },
+      { ...base, homeTeam: "Hamburg" },
+      { ...base, awayTeam: "Hamburg" },
+    ];
+    for (const v of variants) check(() => assert.notEqual(logKey(v), logKey(base)));
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Vorwaerts-Log: Alarm und zu spaete Recherche", () => {
+  const fx = [
+    { homeTeam: "A", awayTeam: "B", date: "2026-09-18T20:30:00", matchday: 4 },
+    { homeTeam: "C", awayTeam: "D", date: "2026-09-19T15:30:00", matchday: 4 },
+    { homeTeam: "E", awayTeam: "F", date: "2026-09-11T20:30:00", matchday: 3 },
+  ];
+  const line = (matchday: number, homeTeam: string, awayTeam: string, season = "2026") => ({
+    season,
+    matchday,
+    homeTeam,
+    awayTeam,
+  });
+  const samstagAbend = new Date("2026-09-19T20:00:00Z");
+
+  // Angepfiffen und nicht im Log -> Alarm. Nicht angepfiffen -> kein Alarm.
+  check(() => {
+    const miss = missingAfterKickoff(fx, [line(4, "C", "D")], "2026", samstagAbend, parseKickoff, []);
+    assert.deepEqual(miss.map((m) => `${m.homeTeam}${m.awayTeam}`).sort(), ["AB", "EF"]);
+  });
+  check(() =>
+    assert.equal(missingAfterKickoff(fx, [], "2026", new Date("2026-09-10T00:00:00Z"), parseKickoff, []).length, 0)
+  );
+  // Eine bekannte Luecke schweigt, aber nur fuer ihre Saison und ihren Spieltag.
+  check(() => {
+    const gaps = [{ season: "2026", matchday: 3 }];
+    const miss = missingAfterKickoff(fx, [line(4, "A", "B"), line(4, "C", "D")], "2026", samstagAbend, parseKickoff, gaps);
+    assert.equal(miss.length, 0);
+    const andereSaison = missingAfterKickoff(fx, [line(4, "A", "B"), line(4, "C", "D")], "2026", samstagAbend, parseKickoff, [{ season: "2025", matchday: 3 }]);
+    assert.equal(andereSaison.length, 1);
+  });
+  // Zeilen einer anderen Saison zaehlen nicht als Evidenz fuer diese.
+  check(() =>
+    assert.equal(
+      missingAfterKickoff(fx, [line(4, "A", "B", "2025"), line(4, "C", "D"), line(3, "E", "F")], "2026", samstagAbend, parseKickoff, []).length,
+      1
+    )
+  );
+
+  // Der echte Stand am 16.09.2026: ohne Ausnahmen fehlt genau Spieltag 3, mit KNOWN_GAPS
+  // nichts. Das Log ist append-only, die Aussage bleibt also wahr.
+  check(() => {
+    const echteFx = JSON.parse(readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8"));
+    const log = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const stichtag = new Date("2026-09-16T12:00:00Z");
+    const ohne = missingAfterKickoff(echteFx, log, "2026", stichtag, parseKickoff, []);
+    assert.deepEqual([...new Set(ohne.map((m) => m.matchday))], [3]);
+    assert.equal(ohne.length, 9);
+    assert.equal(missingAfterKickoff(echteFx, log, "2026", stichtag, parseKickoff, KNOWN_GAPS).length, 0);
+  });
+  check(() => assert.ok(KNOWN_GAPS.every((g) => g.grund.length > 40), "jede bekannte Luecke braucht einen Grund"));
+
+  // Zu spaete Recherche, gemessen am Anpfiff der jeweiligen Partie.
+  const anpfiff = new Date("2026-09-04T18:30:00Z");
+  const vorher = (n: number) => new Date(anpfiff.getTime() - n * 60000).toISOString();
+  check(() => assert.equal(researchTooLate(anpfiff, vorher(31), HARD_FLOOR_MINUTES), true));
+  check(() => assert.equal(researchTooLate(anpfiff, vorher(89), HARD_FLOOR_MINUTES), true));
+  check(() => assert.equal(researchTooLate(anpfiff, vorher(90), HARD_FLOOR_MINUTES), false));
+  check(() => assert.equal(researchTooLate(anpfiff, "kein Datum", HARD_FLOOR_MINUTES), false));
+
+  // Im echten Log genau eine solche Zeile: die Freitagspartie von Spieltag 2. Kommt eine
+  // dazu, hat die Untergrenze versagt -- das soll hier auffallen.
+  check(() => {
+    const log = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const zuSpaet = log.filter(
+      (e) => e.llm?.fetchedAt && researchTooLate(parseKickoff(e.kickoff), e.llm.fetchedAt, HARD_FLOOR_MINUTES)
+    );
+    assert.deepEqual(
+      zuSpaet.map((e) => `${e.matchday}|${e.kickoff}`),
+      ["2|2026-09-04T20:30:00"]
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+section("Admin-Token verraet das Passwort nicht", () => {
+  const saved = {
+    password: process.env.ADMIN_PASSWORD,
+    secret: process.env.ADMIN_TOKEN_SECRET,
+  };
+  const setEnv = (password: string | undefined, secret: string | undefined) => {
+    if (password === undefined) delete process.env.ADMIN_PASSWORD;
+    else process.env.ADMIN_PASSWORD = password;
+    if (secret === undefined) delete process.env.ADMIN_TOKEN_SECRET;
+    else process.env.ADMIN_TOKEN_SECRET = secret;
+  };
+
+  const PASSWORT = "ein-langes-testpasswort-2026";
+  const GEHEIMNIS = "a".repeat(MIN_TOKEN_SECRET_LENGTH) + "-geheimnis";
+  const jetzt = new Date("2026-09-16T12:00:00Z");
+
+  try {
+    // Konfiguration: ohne Geheimnis, mit zu kurzem Passwort oder mit dem Passwort als
+    // Geheimnis gibt es keinen Admin-Modus -- und jedes Mal einen benannten Grund.
+    setEnv(undefined, undefined);
+    check(() => assert.equal(isAdminConfigured(), false));
+    setEnv(PASSWORT, undefined);
+    check(() => assert.ok(adminConfigProblem()!.includes("ADMIN_TOKEN_SECRET")));
+    setEnv("x".repeat(MIN_PASSWORD_LENGTH - 1), GEHEIMNIS);
+    check(() => assert.ok(adminConfigProblem()!.includes("kuerzer")));
+    setEnv("x".repeat(MIN_PASSWORD_LENGTH), "y".repeat(MIN_TOKEN_SECRET_LENGTH - 1));
+    check(() => assert.ok(adminConfigProblem()!.includes("ADMIN_TOKEN_SECRET")));
+    setEnv(GEHEIMNIS, GEHEIMNIS);
+    check(() => assert.ok(adminConfigProblem()!.includes("nicht dasselbe")));
+    setEnv(PASSWORT, GEHEIMNIS);
+    check(() => assert.equal(adminConfigProblem(), null));
+
+    // Der Normalweg.
+    check(() => assert.equal(checkPassword(PASSWORT), true));
+    check(() => assert.equal(checkPassword(PASSWORT + "x"), false));
+    check(() => assert.equal(checkPassword(undefined), false));
+    const token = issueToken(jetzt);
+    check(() => assert.equal(verifyToken(token, jetzt), true));
+
+    // Ablaufzeit laesst sich ohne Geheimnis nicht verlaengern.
+    const [payload, signature] = [token.slice(0, token.lastIndexOf(".")), token.slice(token.lastIndexOf(".") + 1)];
+    check(() => assert.equal(verifyToken(`${Number(payload) + 86400}.${signature}`, jetzt), false));
+    check(() => assert.equal(verifyToken(token, new Date((Number(payload) + 1) * 1000)), false));
+
+    // Der Angriff aus der Fragerunde: mit dem Token und dem RICHTIGEN Passwort die Signatur
+    // nachrechnen. Frueher traf das -- es war exakt die Signatur. Ohne Geheimnis darf es
+    // nicht treffen, sonst liesse sich jeder Kandidat offline pruefen.
+    check(() => {
+      const alterWeg = createHmac("sha256", PASSWORT).update(`tippki-admin-v1|${payload}`).digest("hex");
+      assert.notEqual(alterWeg, signature, "Token laesst sich mit dem Passwort allein nachrechnen");
+    });
+
+    // Neues Passwort oder neues Geheimnis entwertet alle ausgegebenen Token.
+    setEnv(PASSWORT + "-neu", GEHEIMNIS);
+    check(() => assert.equal(verifyToken(token, jetzt), false, "neues Passwort, altes Token gilt noch"));
+    setEnv(PASSWORT, GEHEIMNIS + "-neu");
+    check(() => assert.equal(verifyToken(token, jetzt), false, "neues Geheimnis, altes Token gilt noch"));
+  } finally {
+    setEnv(saved.password, saved.secret);
   }
 });
 

@@ -2,23 +2,38 @@
 // Dateisystem.
 //
 // Der Zeitplan in GitHub Actions ist eine grobe Kelle: Cron feuert dort nicht puenktlich,
-// sondern irgendwann in den Minuten danach, unter Last auch deutlich spaeter. Ein
-// Workflow, der "um 17:30" recherchiert, recherchiert in Wahrheit irgendwann zwischen
-// 17:30 und 17:50. Deshalb laeuft der Zeitplan haeufig und stumpf, und die Entscheidung
-// faellt hier: ist der erste Anpfiff des naechsten Spieltags rund drei Stunden entfernt?
-// Ein verspaeteter Tick faellt dann in denselben Korridor wie ein puenktlicher.
+// und vor allem nicht zuverlaessig. Deshalb laeuft der Zeitplan haeufig und stumpf, und
+// die Entscheidung faellt hier.
 //
-// Das Fenster ist bewusst eng. SAISONBETRIEB.md haelt den Recherchezeitpunkt fuer Teil des
-// Eingefrorenen: wer mal drei und mal acht Stunden vorher recherchiert, sammelt zwei
-// Populationen, die kein Hash auseinanderhaelt. Ein grosszuegiges Fenster waere bequemer
-// und richtete genau das an. Faellt ein Spieltag durch, ist das ehrlicher als ein Spieltag
-// mit anderem Informationsstand -- und der Admin-Knopf holt ihn bei Bedarf nach.
+// BIS ZUM 16.09.2026 war das Fenster drei Stunden plus/minus zwanzig Minuten, mit der
+// Begruendung, ein verspaeteter Tick falle in denselben Korridor wie ein puenktlicher. Das
+// setzte voraus, dass die Ticks ueberhaupt kommen. Sie kommen nicht: der Zeitplan
+// `*/15 8-16` saehe an einem Freitag 36 Laeufe vor, GitHub hat an den ersten drei
+// Spieltags-Freitagen 2, 3 und 2 davon gestartet (nachgesehen ueber die Actions-API). Kein
+// geplanter Lauf lag je im 40-Minuten-Fenster. Spieltag 1 und 2 wurden von Hand
+// nachgeholt, Spieltag 3 fiel lautlos durch -- beide Laeufe gruen, "nicht faellig", und
+// nicht einmal das Basismodell steht im Vorwaerts-Log.
+//
+// Jetzt ist faellig, wer als ERSTER zwischen dem Sollzeitpunkt (abzueglich der alten
+// Toleranz) und der 90-Minuten-Untergrenze kommt. Der Recherchezeitpunkt streut damit um
+// bis zu 110 Minuten statt 40. SAISONBETRIEB.md haelt ihn fuer Teil des Eingefrorenen, und
+// das bleibt richtig -- aber ein Zeitpunkt, den die Infrastruktur nie trifft, friert nichts
+// ein, er verliert nur Spieltage. Die Untergrenze bleibt der eigentliche Schutz: vor ihr
+// stehen keine Aufstellungen, jeder Spieltag sieht also weiter dasselbe Informationsregime.
 
 import { firstKickoffOf, nextMatchdayOf } from "./kickoff";
 
-// Drei Stunden vor dem ersten Anpfiff, plus/minus zwanzig Minuten.
+// Sollzeitpunkt drei Stunden vor dem ersten Anpfiff. Faellig ab zwanzig Minuten davor --
+// die Toleranz nach vorn bleibt, damit ein frueher Tick nicht verloren geht.
 export const LEAD_MINUTES = 180;
 export const TOLERANCE_MINUTES = 20;
+
+// Das Basismodell wird schon vor der Recherche protokolliert, sobald der erste Anpfiff so
+// nah ist. Grund ist derselbe Befund: faellt die Recherche aus, fehlte bisher auch die
+// Basisvorhersage. Kommt die Recherche spaeter doch, ersetzt der Nachtrag die Zeile (siehe
+// src/eval/forwardLogRules.ts). 48 Stunden, damit ein Freitagsspieltag am Donnerstag schon
+// sicher ist, und nicht frueher, damit die Ergebnisse des Vorspieltags drin sind.
+export const BASE_LOG_LEAD_HOURS = 48;
 
 // Naeher als das geht die Automatik nie von selbst an den Anpfiff heran: Aufstellungen
 // erscheinen 60 bis 75 Minuten vorher, und ein Spieltag, der sie kennt, waere mit den
@@ -40,7 +55,8 @@ export interface ResearchInput {
   cachedMatchday: number | null;
   cachedFetchedAt?: string | null;
   cachedFailures?: number;
-  // Von Hand ausgeloest: das Fenster wird uebergangen, die Untergrenze bleibt.
+  // Von Hand ausgeloest: das Fenster wird uebergangen, die Untergrenze bleibt (seit dem
+  // 16.09.2026 auch im Code, vorher nur in diesem Kommentar).
   force?: boolean;
   // Nur diesen Spieltag pruefen statt des naechsten.
   matchday?: number | null;
@@ -97,6 +113,21 @@ export function decideResearch(input: ResearchInput): ResearchDecision {
     );
   }
 
+  // Die Untergrenze VOR dem Handbetrieb. Bis zum 16.09.2026 stand sie dahinter, und von
+  // Hand liess sich damit bis kurz vor Anpfiff recherchieren -- im Widerspruch zum Kommentar
+  // an `force` und zu SAISONBETRIEB.md, die beide "die Untergrenze bleibt" sagten. Die
+  // Begruendung der Grenze haengt nicht daran, wer ausloest: um diese Zeit stehen die
+  // Aufstellungen, und seit forward-log nach einer gescheiterten Recherche nachtragen kann,
+  // landete so ein Befund sonst im gepaarten Test.
+  if (minutesToKickoff < HARD_FLOOR_MINUTES) {
+    return verdict(
+      false,
+      `Zu spät: Anpfiff in ${Math.round(minutesToKickoff)} Minuten, die Untergrenze liegt bei ` +
+        `${HARD_FLOOR_MINUTES}${force ? ", auch von Hand" : ""}. Um diese Zeit stehen die ` +
+        "Aufstellungen — ein Spieltag mit diesem Wissen wäre mit den übrigen nicht vergleichbar."
+    );
+  }
+
   if (force) {
     return verdict(
       true,
@@ -105,33 +136,58 @@ export function decideResearch(input: ResearchInput): ResearchDecision {
     );
   }
 
-  if (minutesToKickoff < HARD_FLOOR_MINUTES) {
-    return verdict(
-      false,
-      `Zu spät: Anpfiff in ${Math.round(minutesToKickoff)} Minuten, die Untergrenze liegt bei ` +
-        `${HARD_FLOOR_MINUTES}. Um diese Zeit stehen die Aufstellungen — ein Spieltag mit ` +
-        "diesem Wissen wäre mit den übrigen nicht vergleichbar."
-    );
-  }
-
   if (offBy < -TOLERANCE_MINUTES) {
     return verdict(
       false,
-      `Noch zu früh: ${Math.round(-offBy)} Minuten bis zum Fenster (${target.toISOString()}).`
+      `Noch zu früh: ${Math.round(-offBy - TOLERANCE_MINUTES)} Minuten bis zum Fenster ` +
+        `(ab ${new Date(target.getTime() - TOLERANCE_MINUTES * 60000).toISOString()}).`
     );
   }
 
-  if (offBy > TOLERANCE_MINUTES) {
-    return verdict(
-      false,
-      `Fenster um ${Math.round(offBy)} Minuten verpasst (${target.toISOString()}). Der Spieltag ` +
-        "bleibt ohne Spielkontext, sofern er nicht von Hand nachgeholt wird."
-    );
-  }
-
+  // Kein "verpasst" mehr zwischen Sollzeitpunkt und Untergrenze -- siehe Kopf der Datei.
   return verdict(
     true,
     `Im Fenster: ${Math.round(Math.abs(offBy))} Minuten ${offBy >= 0 ? "nach" : "vor"} dem ` +
       `Sollzeitpunkt, Anpfiff in ${Math.round(minutesToKickoff)} Minuten.`
   );
+}
+
+export interface BaseLogDecision {
+  due: boolean;
+  matchday: number | null;
+  reason: string;
+}
+
+// Ob jetzt das Basismodell fuer den naechsten Spieltag protokolliert werden soll --
+// unabhaengig davon, ob recherchiert wird.
+//
+// Faellig, sobald der erste Anpfiff des naechsten Spieltags hoechstens BASE_LOG_LEAD_HOURS
+// entfernt ist oder schon laeuft. Letzteres ist der Samstag eines Spieltags: die
+// Freitagspartie ist angepfiffen, die uebrigen acht nicht -- die sollen trotzdem noch ins
+// Log, wenn es bis dahin keiner geschafft hat. Welche Partien wirklich geschrieben werden,
+// entscheidet forward-log (Sperre nach Anpfiff, Idempotenz, Nachtrag).
+export function decideBaseLog(
+  fixtures: readonly { date: string; matchday: number }[],
+  now: Date
+): BaseLogDecision {
+  const matchday = nextMatchdayOf(fixtures, now);
+  if (matchday == null) return { due: false, matchday, reason: "Kein kommender Spieltag." };
+
+  const firstKickoff = firstKickoffOf(fixtures, matchday)!;
+  const hours = (firstKickoff.getTime() - now.getTime()) / 3600000;
+  if (hours > BASE_LOG_LEAD_HOURS) {
+    return {
+      due: false,
+      matchday,
+      reason: `Erster Anpfiff von Spieltag ${matchday} in ${Math.round(hours)} Stunden, protokolliert wird ab ${BASE_LOG_LEAD_HOURS}.`,
+    };
+  }
+  return {
+    due: true,
+    matchday,
+    reason:
+      hours >= 0
+        ? `Erster Anpfiff von Spieltag ${matchday} in ${Math.round(hours)} Stunden.`
+        : `Spieltag ${matchday} läuft, noch nicht angepfiffene Partien werden protokolliert.`,
+  };
 }
