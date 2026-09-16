@@ -97,20 +97,26 @@ export function decideResearch(input: ResearchInput): ResearchDecision {
     );
   }
 
+  // Die Untergrenze VOR dem Handbetrieb. Bis zum 16.09.2026 stand sie dahinter, und von
+  // Hand liess sich damit bis kurz vor Anpfiff recherchieren -- im Widerspruch zum Kommentar
+  // an `force` und zu SAISONBETRIEB.md, die beide "die Untergrenze bleibt" sagten. Die
+  // Begruendung der Grenze haengt nicht daran, wer ausloest: um diese Zeit stehen die
+  // Aufstellungen, und seit forward-log nach einer gescheiterten Recherche nachtragen kann,
+  // landete so ein Befund sonst im gepaarten Test.
+  if (minutesToKickoff < HARD_FLOOR_MINUTES) {
+    return verdict(
+      false,
+      `Zu spät: Anpfiff in ${Math.round(minutesToKickoff)} Minuten, die Untergrenze liegt bei ` +
+        `${HARD_FLOOR_MINUTES}${force ? ", auch von Hand" : ""}. Um diese Zeit stehen die ` +
+        "Aufstellungen — ein Spieltag mit diesem Wissen wäre mit den übrigen nicht vergleichbar."
+    );
+  }
+
   if (force) {
     return verdict(
       true,
       `Von Hand ausgelöst für Spieltag ${matchday}. Anpfiff in ${Math.round(minutesToKickoff)} ` +
         `Minuten, planmäßig wären es ${LEAD_MINUTES} gewesen.`
-    );
-  }
-
-  if (minutesToKickoff < HARD_FLOOR_MINUTES) {
-    return verdict(
-      false,
-      `Zu spät: Anpfiff in ${Math.round(minutesToKickoff)} Minuten, die Untergrenze liegt bei ` +
-        `${HARD_FLOOR_MINUTES}. Um diese Zeit stehen die Aufstellungen — ein Spieltag mit ` +
-        "diesem Wissen wäre mit den übrigen nicht vergleichbar."
     );
   }
 

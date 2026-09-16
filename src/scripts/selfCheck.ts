@@ -566,8 +566,15 @@ section("Recherchefenster", () => {
   check(() => assert.ok(decide(vorAnpfiff(89)).reason.includes("Untergrenze")));
   check(() => assert.ok(decide(vorAnpfiff(100)).reason.includes("verpasst")));
 
-  // Von Hand darf die Untergrenze uebergangen werden -- aber nicht der Anpfiff selbst.
-  check(() => assert.equal(decide(vorAnpfiff(30), { force: true }).due, true));
+  // Von Hand wird das Fenster uebergangen, die Untergrenze nicht. Bis zum 16.09.2026 stand
+  // hier das Gegenteil, im Widerspruch zu Kommentar und SAISONBETRIEB.md -- und seit dem
+  // Nachtrag im Vorwaerts-Log kaeme ein Befund mit bekannten Aufstellungen sonst in den
+  // gepaarten Test.
+  check(() => assert.equal(decide(vorAnpfiff(100), { force: true }).due, true));
+  check(() => assert.equal(decide(vorAnpfiff(90), { force: true }).due, true));
+  check(() => assert.equal(decide(vorAnpfiff(89), { force: true }).due, false));
+  check(() => assert.equal(decide(vorAnpfiff(30), { force: true }).due, false));
+  check(() => assert.ok(decide(vorAnpfiff(30), { force: true }).reason.includes("auch von Hand")));
   check(() => assert.equal(decide(vorAnpfiff(-1), { force: true }).due, false));
   check(() => assert.ok(decide(vorAnpfiff(-1), { force: true }).reason.includes("begonnen")));
 

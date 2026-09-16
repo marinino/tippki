@@ -183,21 +183,6 @@ Praktisch schützt die **Passwortlänge**. **Fix:** Kommentar korrigieren und
 `isAdminConfigured()` ein Passwort unter z. B. 20 Zeichen ablehnen lassen. Eine echte
 Ratenbegrenzung gehört, wenn überhaupt, vor die Funktion (Edge/Hoster), nicht in sie.
 
-### 11. `erzwingen` übergeht die 90-Minuten-Grenze, die Doku sagt das Gegenteil
-
-`src/data/researchWindow.ts:43` und `:100`, `SAISONBETRIEB.md:224`, `selfCheck.ts:568`
-
-Gefunden beim Umsetzen von Punkt 7. Kommentar an `force` und `SAISONBETRIEB.md` sagen
-beide: das Fenster wird übergangen, **die Untergrenze bleibt**. Im Code steht
-`if (force) return due` vor der Prüfung auf `HARD_FLOOR_MINUTES`, und selfCheck hält genau
-das fest („Von Hand darf die Untergrenze übergangen werden"). So seit dem ersten Commit der
-Datei.
-
-Die Begründung der Untergrenze gilt für Handläufe genauso: unter 90 Minuten stehen die
-Aufstellungen, „ein Spieltag mit diesem Wissen wäre mit den übrigen nicht vergleichbar".
-Mit dem Nachtrag aus Punkt 7 wird das wichtiger — vorher hat die Idempotenzsperre so einen
-Lauf teils zufällig aus dem Log gehalten, jetzt nicht mehr.
-
 ---
 
 ## Abgeschlossen
@@ -222,3 +207,16 @@ Geprüft mit 22 Checks im selfCheck und einem Lauf des echten Skripts in einer i
 Kopie (9 Zeilen ohne Kontext → 2 Nachträge für die 2 Partien mit Kontext → dritter Lauf
 schreibt nichts → `forward-eval` meldet 2 ersetzte Zeilen). Workflow-Kommentar und
 `SAISONBETRIEB.md` nachgezogen.
+
+### 11. `erzwingen` überging die 90-Minuten-Grenze, die Doku sagte das Gegenteil
+
+Gefunden beim Umsetzen von Punkt 7. Kommentar an `force` und `SAISONBETRIEB.md` sagten:
+das Fenster wird übergangen, die Untergrenze bleibt. Im Code stand `if (force) return due`
+vor der Prüfung auf `HARD_FLOOR_MINUTES`, und selfCheck hielt genau das fest. So seit dem
+ersten Commit der Datei. Mit dem Nachtrag aus Punkt 7 wäre eine Recherche mit bekannten
+Aufstellungen in den gepaarten Test gekommen.
+
+**Entschieden:** die Grenze gilt auch von Hand. **Umgesetzt** in
+`src/data/researchWindow.ts` (Untergrenze vor dem Handbetrieb, Meldung „auch von Hand"),
+selfCheck-Abschnitt „Recherchefenster" umgedreht und an der Grenze geschärft (100, 90, 89,
+30 Minuten). Die Doku stimmte schon und blieb unverändert.
