@@ -1535,6 +1535,33 @@ section("xG-Form == Referenzimplementierung", () => {
       )
     );
   }
+
+  // Ein Eintrag allein reicht nicht: auch der WERT muss in den xG-Daten vorkommen. Ein
+  // Tippfehler rechts ("Elversburg") ist ein Eintrag, computeXgForm findet unter dem Namen
+  // aber nichts und steigt genauso still mit 0 aus wie ohne Eintrag.
+  //
+  // Erst geprueft, wenn der xG-Feed die laufende Saison ueberhaupt fuehrt. Ein Aufsteiger
+  // hat bei Understat keine Vorgeschichte, sein Name erscheint erst mit dem ersten Spiel --
+  // vorher waere jede Pruefung rot, ohne dass etwas falsch ist.
+  const xgRows = JSON.parse(readFileSync(join(process.cwd(), "data", "xg_bundesliga.json"), "utf-8")) as {
+    season: string;
+    homeTeam: string;
+    awayTeam: string;
+  }[];
+  if (xgRows.some((r) => r.season === currentSeason)) {
+    const xgNames = new Set(xgRows.flatMap((r) => [r.homeTeam, r.awayTeam]));
+    for (const team of [...currentTeams].sort()) {
+      const mapped = OUR_NAME_TO_UNDERSTAT[team];
+      if (!mapped) continue;
+      check(() =>
+        assert.ok(
+          xgNames.has(mapped),
+          `${team} ist auf "${mapped}" abgebildet, aber unter diesem Namen stehen keine ` +
+            `xG-Daten -- die Formkurve waere dauerhaft 0`
+        )
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

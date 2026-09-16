@@ -91,20 +91,6 @@ Beide gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehme
 den Hash und spaltet das Log. Also entweder jetzt mit bewusstem Schnitt, oder zur
 nächsten Saison zusammen mit Punkt 1.
 
-### 5. Das Understat-Namensmapping ist unbewachtes Gebiet
-
-`src/data/understatTeamNames.ts`
-
-Fehlt ein Mapping, steigt `computeXgForm` mit `return 0` aus — das Team läuft still ohne
-Form, keine Warnung, keine Spur im Log. Passiert am 10.09.2026, im Kommentar der Datei
-dokumentiert. Die Reparatur verändert jede Vorhersage dieses Teams und bewegt den
-`configHash` nicht.
-
-**Fix:** kein Hash-Eintrag (das Mapping ist eine Datenzuordnung, keine Stellschraube),
-sondern ein Test in `selfCheck.ts`, der prüft, dass **jedes** Team der laufenden Saison
-aus `fixtures.json` eine Understat-Zuordnung hat. Fällt dann beim Aufstieg sofort auf
-statt nach vier Spieltagen.
-
 ### 6. Die Formkurve ist ungeklammert und größer als der geklammerte LLM-Layer [eingefroren]
 
 `src/model/predictPipeline.ts:80`, `src/llm/llmAdjustment.ts:43`
@@ -221,3 +207,20 @@ dieser Änderung.
 
 **Betrieb:** ist das Passwort bei Vercel kürzer als 20 Zeichen, ist der Admin-Link nach
 dem nächsten Deployment ebenfalls weg.
+
+### 5. Das Understat-Namensmapping war nur halb bewacht
+
+**Korrektur am Befund:** die Behauptung „unbewachtes Gebiet" war falsch. Seit dem
+10.09.2026 prüft selfCheck („xG-Form == Referenzimplementierung"), dass jede Mannschaft der
+laufenden Saison einen Eintrag hat. Das wurde in Runde 1 übersehen. Der vorgeschlagene
+Umweg über `fixtures.json` bringt praktisch nichts: an Spieltag 1 ist die Form ohnehin 0,
+und die Montags-Nachbereitung läuft `npm test`, bevor Spieltag 2 protokolliert wird.
+
+**Die echte Lücke:** geprüft wurde nur, *dass* es einen Eintrag gibt, nicht, ob der
+**Wert** in den xG-Daten vorkommt. Ein Tippfehler rechts wäre durchgerutscht, mit
+demselben stillen `return 0`.
+
+**Umgesetzt:** der bestehende Abschnitt prüft zusätzlich jeden Wert gegen die Namen in
+`xg_bundesliga.json`, sobald der Feed die laufende Saison führt (davor hat ein Aufsteiger
+dort keinen Namen). Gegenprobe mit `Elversberg: "Elversburg"` schlägt an; auf dem echten
+Stand grün. Aktuell ist kein Wert betroffen.
