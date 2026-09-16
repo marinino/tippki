@@ -12,7 +12,7 @@
 import { appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { parseKickoff } from "../data/kickoff";
-import { decideResearch, LEAD_MINUTES } from "../data/researchWindow";
+import { decideBaseLog, decideResearch, LEAD_MINUTES } from "../data/researchWindow";
 import { readLlmCache } from "../llm/llmCache";
 
 interface Fixture {
@@ -55,10 +55,16 @@ const decision = decideResearch({
   matchday: requested ? Number(requested) : null,
 });
 
+// Unabhaengig von der Recherche: soll das Basismodell jetzt schon ins Log? Mit einem
+// ausdruecklich gewaehlten Spieltag nicht -- das ist Handbetrieb fuer die Recherche.
+const baseLog = decideBaseLog(fixtures, new Date());
+
 // Im Vorschaumodus wird nie ausgeloest -- der Lauf soll nur zeigen, was ansteht.
 const effective = preflight ? false : decision.due;
+const logEffective = preflight || requested ? false : baseLog.due;
 
 emit("due", String(effective));
+emit("log_due", String(logEffective));
 if (decision.matchday != null) emit("matchday", String(decision.matchday));
 if (decision.firstKickoff) emit("kickoff", decision.firstKickoff.toISOString());
 if (decision.target) emit("target", decision.target.toISOString());
@@ -67,6 +73,7 @@ console.log(`Jetzt:       ${new Date().toISOString()}`);
 console.log(`Spieltag:    ${decision.matchday ?? "—"}`);
 console.log(`Faellig:     ${effective ? "ja" : "nein"}${preflight ? " (Vorschau)" : ""}`);
 console.log(`Begruendung: ${decision.reason}`);
+console.log(`Basis-Log:   ${logEffective ? "ja" : "nein"} — ${baseLog.reason}`);
 
 if (preflight && decision.firstKickoff && decision.target) {
   // Der Wochentag in UTC ist genau das, was der Cron-Ausdruck sieht. Faellt das Fenster auf

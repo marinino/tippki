@@ -42,7 +42,9 @@ import {
   parseBenchmarkSource,
   type BenchmarkQuote,
 } from "../eval/benchmarkOdds";
-import { latestPerKey } from "../eval/forwardLogRules";
+import { latestPerKey, researchTooLate } from "../eval/forwardLogRules";
+import { parseKickoff } from "../data/kickoff";
+import { HARD_FLOOR_MINUTES } from "../data/researchWindow";
 
 const LOG_PATH = join(process.cwd(), "data", "forward_log.jsonl");
 
@@ -65,12 +67,13 @@ interface LogEntry {
   // ein leerer Befund, siehe researchStateOf().
   llm?: {
     foundAnything: boolean;
+    fetchedAt?: string;
     // Seit dem 01.09.2026 mitgeschrieben. Aeltere Zeilen kennen das Feld nicht.
     webSearches?: number | null;
   } | null;
 }
 
-// Drei Zustaende, die im gepaarten Test NICHT dasselbe sind:
+// Vier Zustaende, die im gepaarten Test NICHT dasselbe sind:
 //
 //   "recherchiert"   -- die Behandlung wurde verabreicht. Ob sie etwas gefunden hat, ist
 //                       das Ergebnis und gehoert in die Auswertung, auch als Nullbefund.
@@ -80,10 +83,19 @@ interface LogEntry {
 //   "unbekannt"      -- Zeile von vor dem 01.09.2026: ein Kontext lag vor, aber ohne
 //                       Suchzahl laesst sich nicht mehr pruefen, ob wirklich recherchiert
 //                       wurde. Genau dieser blinde Fleck hat Spieltag 1 gekostet.
-type ResearchState = "recherchiert" | "ohne_recherche" | "unbekannt";
+//   "zu_spaet"       -- recherchiert, aber naeher als 90 Minuten vor dem Anpfiff dieser
+//                       Partie. Der Befund kann die Aufstellung kennen; siehe
+//                       researchTooLate in forwardLogRules.ts.
+type ResearchState = "recherchiert" | "ohne_recherche" | "unbekannt" | "zu_spaet";
 
 function researchStateOf(entry: LogEntry): ResearchState {
   if (entry.llm == null) return "ohne_recherche";
+  if (
+    entry.llm.fetchedAt &&
+    researchTooLate(parseKickoff(entry.kickoff), entry.llm.fetchedAt, HARD_FLOOR_MINUTES)
+  ) {
+    return "zu_spaet";
+  }
   if (entry.llm.webSearches == null) return "unbekannt";
   // Null Suchen kann seit dem Riegel in refreshLlmContext nicht mehr entstehen. Bleibt
   // als Pruefung stehen, weil aeltere Zeilen es enthalten koennen.
@@ -265,6 +277,7 @@ for (const group of groups) {
     recherchiert: 0,
     ohne_recherche: 0,
     unbekannt: 0,
+    zu_spaet: 0,
   };
 
   for (const s of settled) {
@@ -278,6 +291,10 @@ for (const group of groups) {
     // das druckt n hoch, ohne ein einziges Bit Evidenz beizusteuern.
     if (state === "ohne_recherche") {
       skipped.ohne_recherche++;
+      continue;
+    }
+    if (state === "zu_spaet") {
+      skipped.zu_spaet++;
       continue;
     }
     if (state === "unbekannt") skipped.unbekannt++;
@@ -315,6 +332,13 @@ for (const group of groups) {
         `  ${skipped.ohne_recherche} Spiele ohne Spielkontext ausgeschlossen. Dort wurde die\n` +
           `  Recherche nie verabreicht -- solche Zeilen sind keine Beobachtung des Layers,\n` +
           `  sondern nur Nullen, die n aufblaehen.`
+      );
+    }
+    if (skipped.zu_spaet > 0) {
+      console.log(
+        `  ${skipped.zu_spaet} Spiele ausgeschlossen, weil die Recherche naeher als ` +
+          `${HARD_FLOOR_MINUTES} Minuten\n  vor ihrem Anpfiff lag -- der Befund kann die ` +
+          `Aufstellung kennen.`
       );
     }
     if (skipped.unbekannt > 0) {

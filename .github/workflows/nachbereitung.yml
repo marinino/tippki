@@ -116,6 +116,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           rm -f vorschau.txt
 
+      # Zweite Stelle fuer den Alarm aus ergebnisse.yml. Faellt dort ein Abend komplett aus,
+      # meldet sich die Luecke spaetestens hier. continue-on-error, damit der Zeitplan-Test
+      # darunter trotzdem laeuft; rot wird der Lauf ueber den letzten Schritt.
+      - name: Vorwaertstest vollstaendig?
+        id: logpruefung
+        continue-on-error: true
+        run: npm run forward-log-check
+
       # Bewusst als letzter Schritt und bewusst ohne continue-on-error.
       #
       # Der Abschnitt "Recherchefenster" im selfCheck rechnet fuer ALLE 34 Spieltage nach,
@@ -129,3 +137,10 @@ jobs:
       # dem das Stundenfenster eng bleiben darf: eine Luecke meldet sich, statt zu warten.
       - name: Zeitplan gegen den Spielplan pruefen
         run: npm test
+
+      - name: Fehlende Logzeilen melden
+        if: ${{ !cancelled() && steps.logpruefung.outcome == 'failure' }}
+        run: |
+          echo "Im Vorwaerts-Log fehlen angepfiffene Partien -- Ausgabe im Schritt" >> "$GITHUB_STEP_SUMMARY"
+          echo "\"Vorwaertstest vollstaendig?\" oben. Nachholen laesst sich nichts mehr." >> "$GITHUB_STEP_SUMMARY"
+          exit 1

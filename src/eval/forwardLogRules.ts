@@ -45,6 +45,67 @@ export function logDecision(
   return hasContextNow ? "nachtrag" : "vorhanden";
 }
 
+// Spieltage, deren Fehlen im Log bekannt, erklaert und nicht mehr zu beheben ist. Der
+// Alarm in forwardLogCheck.ts schweigt fuer sie -- sonst waere er ab dem ersten Ausfall fuer
+// immer rot und wuerde nicht mehr gelesen. Ein Eintrag hier ist ein Eingestaendnis, kein
+// Schalter: jeder braucht einen Grund.
+export const KNOWN_GAPS: readonly { season: string; matchday: number; grund: string }[] = [
+  {
+    season: "2026",
+    matchday: 3,
+    grund:
+      "Kein geplanter Lauf lag im alten Recherchefenster (180 +/- 20 min); GitHub startete am " +
+      "11.09. nur zwei von 36 Ticks. Ohne Faelligkeit lief auch forward-log nicht. Anlass " +
+      "fuer das breitere Fenster und das vorgezogene Basis-Log (16.09.2026).",
+  },
+];
+
+export interface MissingLogEntry {
+  matchday: number;
+  homeTeam: string;
+  awayTeam: string;
+  kickoff: string;
+}
+
+// Partien, die angepfiffen sind und fuer die in dieser Saison keine einzige Logzeile
+// existiert -- gleich unter welchem Hash. Ob eine Zeile Kontext hat, spielt hier keine
+// Rolle: der Alarm fragt nur, ob ueberhaupt Evidenz entstanden ist.
+export function missingAfterKickoff(
+  fixtures: readonly { homeTeam: string; awayTeam: string; date: string; matchday: number }[],
+  entries: readonly { season: string; matchday: number; homeTeam: string; awayTeam: string }[],
+  season: string,
+  now: Date,
+  kickoffOf: (date: string) => Date,
+  gaps: readonly { season: string; matchday: number }[] = KNOWN_GAPS
+): MissingLogEntry[] {
+  const logged = new Set(
+    entries
+      .filter((e) => e.season === season)
+      .map((e) => `${e.matchday}|${e.homeTeam}|${e.awayTeam}`)
+  );
+  const excused = new Set(gaps.filter((g) => g.season === season).map((g) => g.matchday));
+  return fixtures
+    .filter((f) => kickoffOf(f.date).getTime() <= now.getTime())
+    .filter((f) => !excused.has(f.matchday))
+    .filter((f) => !logged.has(`${f.matchday}|${f.homeTeam}|${f.awayTeam}`))
+    .map((f) => ({ matchday: f.matchday, homeTeam: f.homeTeam, awayTeam: f.awayTeam, kickoff: f.date }));
+}
+
+// Lag die Recherche naeher am Anpfiff DIESER Partie als die Untergrenze erlaubt?
+//
+// Die Untergrenze schuetzt davor, dass ein Befund die Aufstellung schon kennt. Bis zum
+// 16.09.2026 liess sich von Hand darunter recherchieren (Punkt 11 der Verbesserungsliste),
+// und Spieltag 2 wurde 31 Minuten vor der Freitagspartie recherchiert. Solche Zeilen sind
+// mit den uebrigen nicht vergleichbar und gehen nicht in den gepaarten Test.
+//
+// Gemessen am eigenen Anpfiff, nicht am ersten des Spieltags: fuer die Samstagspartie
+// desselben Laufs lagen ueber 20 Stunden dazwischen, sie ist unbelastet.
+export function researchTooLate(kickoff: Date, fetchedAt: string, floorMinutes: number): boolean {
+  const fetched = new Date(fetchedAt).getTime();
+  if (!Number.isFinite(fetched)) return false;
+  return (kickoff.getTime() - fetched) / 60000 < floorMinutes;
+}
+
 // Welche Zeile je Partie und Hash in die Auswertung geht: die zuletzt geschriebene.
 //
 // Die Regel ist vor jeder Auswertung festgelegt und haengt an keinem Ergebnis, nur am

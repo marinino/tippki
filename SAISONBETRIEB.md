@@ -69,10 +69,22 @@ dort auch nicht stehen — er ist eine Handlung, kein Parameter. Er verändert d
 Informationsgehalt der Eingabe aber erheblich: wer zehn Spieltage früh recherchiert und
 danach spät, sammelt zwei Populationen, die kein Hash je auseinanderhalten wird.
 
-Genau deshalb ist das Zeitfenster der Automatik eng (±20 Minuten) und nicht großzügig.
-Ein weites Fenster wäre bequemer und richtete exakt diesen Schaden an. Verpasst ein
-Spieltag sein Fenster, bleibt er ohne Spielkontext — das ist ehrlicher als ein Spieltag mit
-anderem Informationsstand, und die Zeile im Log sagt es (`llm: null`).
+Bis zum 16.09.2026 war das Zeitfenster der Automatik deshalb eng: drei Stunden ± 20
+Minuten. **Das hat nie funktioniert.** GitHub startet geplante Läufe nicht zuverlässig — an
+den ersten drei Spieltags-Freitagen 2, 3 und 2 von 36 vorgesehenen —, und kein einziger lag
+im Fenster. Spieltag 1 und 2 wurden von Hand nachgeholt (121 und 31 Minuten vor Anpfiff),
+Spieltag 3 fiel lautlos durch und fehlt im Vorwärts-Log komplett.
+
+Seitdem ist **der erste Lauf zwischen 200 und 90 Minuten vor dem ersten Anpfiff** fällig.
+Der Zeitpunkt streut damit um bis zu 110 Minuten statt 40. Das ist ein Zugeständnis an den
+eingefrorenen Zeitpunkt, aber ein Zeitpunkt, den die Infrastruktur nie trifft, friert
+nichts ein. Die Grenze, auf die es inhaltlich ankommt, bleibt hart: **nie unter 90
+Minuten**, auch nicht von Hand — dann stehen die Aufstellungen.
+
+Zusätzlich wird das **Basismodell schon ab 48 Stunden vor dem ersten Anpfiff**
+protokolliert, unabhängig von der Recherche. Kommt sie später durch, ersetzt ein Nachtrag
+diese Zeilen (siehe unten). Fällt sie aus, ist wenigstens die Basisvorhersage gesichert, und
+die Zeilen sagen es (`llm: null`).
 
 ```bash
 npm run forward-log
@@ -117,9 +129,17 @@ Workflows an, statt selbst zu schreiben.
 
 | Workflow | Wann | Was |
 |---|---|---|
-| `spielkontext.yml` | alle 15 min, 08–16 UTC, Di/Mi/Fr/Sa/So | prüft die Fälligkeit; im Fenster: `refresh-llm`, dann `forward-log` |
-| `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG |
-| `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, Vorschau aufs nächste Fenster |
+| `spielkontext.yml` | alle 15 min, 08–18 UTC, täglich | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
+| `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG; danach `forward-log-check` (Alarm) |
+| `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, Vorschau aufs nächste Fenster |
+
+**Der Alarm.** `npm run forward-log-check` wird rot, sobald eine angepfiffene Partie keine
+einzige Zeile im Vorwärts-Log hat. Das ist die einzige Prüfung, die sieht, ob GitHub die
+Läufe auch *ausgeführt* hat — alle anderen prüfen nur, ob der Zeitplan sie *vorsieht*. Am
+Spielabend läuft sie in `ergebnisse.yml`: fällt der Freitag aus, meldet es sich noch am
+Freitag, und Samstag und Sonntag sind über „Spielkontext" von Hand zu retten. Eine Lücke,
+die sich nicht mehr beheben lässt, wird mit Grund in `KNOWN_GAPS`
+(`src/eval/forwardLogRules.ts`) eingetragen — derzeit Spieltag 3.
 
 ### Der Spielplan wächst mit
 
@@ -150,13 +170,11 @@ statt einen auf unter 90 % geschrumpften Spielplan zu schreiben, und von Hand ge
 Wappen in `teamLogos.json` bleiben stehen.
 
 **Was passiert, wenn eine Ansetzung aus dem Zeitplan fällt.** Verlegt die DFL einen
-Spieltagsauftakt auf einen Montag oder auf 13:00, läge das Fenster außerhalb der
-`cron`-Zeilen, und der Spieltag fiele stumm durch. Deshalb läuft `npm test` als letzter
-Schritt der Nachbereitung: der Abschnitt „Recherchefenster" rechnet für alle 34 Spieltage
-nach, dass ihr Fenster auf einen abgedeckten UTC-Wochentag und in dessen Stundenfenster
-fällt. Der Lauf wird rot — Wochen bevor der betroffene Spieltag ansteht, und ohne dass
-Daten verloren gehen, weil vorher schon committet wurde. Das ist der Grund, aus dem das
-Stundenfenster eng bleiben darf: eine Lücke meldet sich von selbst.
+Spieltagsauftakt auf 11:00, läge das Fenster außerhalb der `cron`-Zeilen, und der Spieltag
+fiele stumm durch. Deshalb läuft `npm test` als letzter Schritt der Nachbereitung: der
+Abschnitt „Recherchefenster" rechnet für alle 34 Spieltage nach, dass ihr ganzes Fenster im
+Stundenbereich liegt. Der Lauf wird rot — Wochen bevor der betroffene Spieltag ansteht, und
+ohne dass Daten verloren gehen, weil vorher schon committet wurde.
 
 **Absetzungen.** Wird eine einzelne Partie in den Dezember verlegt, ist der nächste
 Spieltag trotzdem der nächste *chronologisch* — nicht die kleinste Spieltagsnummer, die
@@ -164,20 +182,21 @@ noch etwas vor sich hat. Sonst bliebe der 5. bis Dezember der „nächste", sein
 im Dezember, und die Spieltage 6 bis 15 liefen unrecherchiert durch. Siehe
 `nextMatchdayOf` in [kickoff.ts](src/data/kickoff.ts).
 
-Aus all dem folgt: der Zeitplan bleibt breiter, als er heute sein müsste. Nach dem
-derzeitigen Spielplan lägen 28 von 34 Fenstern samstags — auf Fr/Sa/Di eingedampft würde
-das rund 40 % sparen und genau dann brechen, wenn die echten Termine kommen.
+Aus all dem folgt: der Zeitplan ist breiter, als der Spielplan es verlangt — seit dem
+16.09.2026 täglich statt an fünf Wochentagen. Sparen lässt sich daran nichts Sinnvolles:
+ein Lauf ohne Fälligkeit dauert Sekunden, und jeder zusätzliche Tick ist eine Chance mehr,
+dass GitHub überhaupt einen startet.
 
 **Warum der Zeitplan stumpf ist und die Entscheidung im Skript liegt.** Cron in GitHub
-Actions feuert nicht pünktlich, sondern irgendwann in den Minuten danach, unter Last auch
-deutlich später. Ein Workflow, der „um 17:30" recherchiert, recherchiert in Wahrheit
-irgendwann zwischen 17:30 und 17:50. Deshalb läuft die Prüfung viertelstündlich, und
-[researchWindow.ts](src/data/researchWindow.ts) entscheidet: liegt der erste Anpfiff des
-nächsten Spieltags gerade drei Stunden ± 20 Minuten entfernt? Ein verspäteter Tick fällt so
-in denselben Korridor wie ein pünktlicher. Zwei Sperren stehen daneben: der Cache eines
-bereits recherchierten Spieltags wird nicht überschrieben (sonst kostete jeder Tick im
-Fenster erneut Geld), und näher als 90 Minuten vor Anpfiff läuft nichts mehr — dann stehen
-die Aufstellungen.
+Actions feuert weder pünktlich noch zuverlässig: von viertelstündlich vorgesehenen Läufen
+kamen an Spieltags-Freitagen zwei bis drei am Tag an. Deshalb läuft die Prüfung so oft wie
+möglich, und [researchWindow.ts](src/data/researchWindow.ts) entscheidet: liegt der erste
+Anpfiff des nächsten Spieltags zwischen 200 und 90 Minuten entfernt? Der erste Tick darin
+recherchiert. Zwei Sperren stehen daneben: der Cache eines bereits recherchierten Spieltags
+wird nicht überschrieben (sonst kostete jeder weitere Tick erneut Geld), und näher als 90
+Minuten vor Anpfiff läuft nichts mehr, auch nicht von Hand — dann stehen die Aufstellungen.
+`forward-eval` schließt außerdem jede Partie aus dem gepaarten Test aus, deren Recherche
+näher als 90 Minuten an *ihrem* Anpfiff lag; das betrifft die Freitagspartie von Spieltag 2.
 
 **Zeitzonen.** In `fixtures.json` stehen Anstoßzeiten ohne Zone (`2026-08-28T20:30:00`).
 `new Date()` liest so etwas als Ortszeit der ausführenden Maschine — auf einem Runner in
@@ -190,9 +209,10 @@ die Anzeige, sondern die Sperre in `forward-log`, die nach Anpfiff nicht mehr pr
 unter UTC hätte ein laufendes Spiel zwei Stunden lang noch zukünftig ausgesehen.
 
 **Läuft ein Fenster aus dem Zeitplan?** Der selfCheck rechnet für alle 34 Spieltage nach,
-dass das Recherchefenster auf einen abgedeckten UTC-Wochentag und in das Stundenfenster
-fällt. Ein Spielplan mit einer Montagspartie als Auftakt würde dort auffliegen, nicht erst
-im Oktober. `nachbereitung.yml` zeigt zusätzlich jede Woche, wann das nächste Fenster liegt.
+dass das *ganze* Recherchefenster im Stundenbereich des Zeitplans liegt (08–18 UTC). Ein
+Auftakt um 13:00 würde dort auffliegen, nicht erst im Oktober. Mit dem alten Bereich bis
+16:59 wären 13 Spieltage angeschlagen, darunter jeder Freitagsauftakt. `nachbereitung.yml`
+zeigt zusätzlich jede Woche, wann das nächste Fenster liegt.
 
 **Was in GitHub hinterlegt sein muss:** ein einziges Secret, `ANTHROPIC_API_KEY`. Sonst
 nichts — den Rest erledigt der mitgelieferte `GITHUB_TOKEN`.
