@@ -153,36 +153,6 @@ Modellseite nicht.
 Stufe 1 bewegt den Hash einmalig; das ist ein bewusster Schnitt und gehört vor jede
 weitere Reparatur auf der Modellseite.
 
-### 9. Ein Admin-Token verrät das Passwort an jeden, der raten kann
-
-`src/data/adminAuth.ts:23`
-
-Die Signatur ist `HMAC-SHA256(Schlüssel = ADMIN_PASSWORD, "tippki-admin-v1|<Ablauf>")`.
-Nachricht und Ergebnis stehen beide im Token. Wer an ein Token kommt, kann Passwörter
-**offline** durchprobieren: kein Server, keine 400-ms-Bremse, keine Spur.
-
-Nachgestellt mit dem echten `issueToken`: Passwort `schalke04` aus 120.010 Kandidaten
-in 0,43 s gefunden, rund 280.000 Versuche/s auf einem CPU-Kern in Node. Online mit 50
-parallelen Anfragen hätten dieselben Kandidaten 960 s gebraucht.
-
-**Fix:** eigenes Signaturgeheimnis `ADMIN_TOKEN_SECRET` (32 zufällige Bytes) statt des
-Passworts. Das Token verrät dann nichts mehr über das Passwort. Die Eigenschaft „neues
-Passwort entwertet alle Token" geht dabei verloren; stattdessen entwertet ein neues
-Geheimnis alle Token.
-
-### 10. Die Login-Bremse bremst keinen parallelen Angriff (niedrige Priorität)
-
-`src/app/api/admin/login/route.ts:11`
-
-Der Kommentar sagt, 400 ms je Versuch „machen das Durchprobieren teuer". Parallel
-gesendet sind es 50 / 0,4 s = 125 Versuche/s, mit 500 Anfragen 1.250/s. Die Grenze setzt
-die Parallelität, nicht die Bremse. Bezahlt wird die Verzögerung als Funktionslaufzeit
-vom Betreiber, nicht vom Angreifer.
-
-Praktisch schützt die **Passwortlänge**. **Fix:** Kommentar korrigieren und
-`isAdminConfigured()` ein Passwort unter z. B. 20 Zeichen ablehnen lassen. Eine echte
-Ratenbegrenzung gehört, wenn überhaupt, vor die Funktion (Edge/Hoster), nicht in sie.
-
 ---
 
 ## Abgeschlossen
@@ -220,3 +190,34 @@ Aufstellungen in den gepaarten Test gekommen.
 `src/data/researchWindow.ts` (Untergrenze vor dem Handbetrieb, Meldung „auch von Hand"),
 selfCheck-Abschnitt „Recherchefenster" umgedreht und an der Grenze geschärft (100, 90, 89,
 30 Minuten). Die Doku stimmte schon und blieb unverändert.
+
+### 9. Ein Admin-Token verriet das Passwort an jeden, der raten kann
+
+Die Signatur war `HMAC-SHA256(Schlüssel = ADMIN_PASSWORD, "tippki-admin-v1|<Ablauf>")`,
+Nachricht und Ergebnis standen beide im Token. Wer an ein Token kam, konnte Passwörter
+offline durchprobieren. Nachgestellt: `schalke04` aus 120.010 Kandidaten in 0,43 s, rund
+280.000 Versuche/s auf einem CPU-Kern.
+
+**Umgesetzt** in `src/data/adminAuth.ts`: signiert wird mit einem eigenen
+`ADMIN_TOKEN_SECRET` (≥ 32 Zeichen, nicht das Passwort). Das Passwort geht nur noch als
+Fingerabdruck *unter* dem Geheimnis ein — dadurch meldet ein neues Passwort weiterhin alle
+Sitzungen ab, ohne dass das Token etwas verrät. selfCheck-Abschnitt „Admin-Token verraet
+das Passwort nicht" (15 Checks) prüft unter anderem, dass der alte Angriff mit dem
+richtigen Passwort nicht mehr trifft. Die Route-Handler mit vier Konfigurationen
+durchgespielt.
+
+**Betrieb:** bei Vercel `ADMIN_TOKEN_SECRET` setzen, sonst ist der Admin-Link nach dem
+nächsten Deployment weg. Grund steht dann im Server-Log.
+
+### 10. Die Login-Bremse bremste keinen parallelen Angriff
+
+Der Kommentar versprach, 400 ms je Versuch „machen das Durchprobieren teuer". Parallel
+sind es trotzdem 125 Versuche/s bei 50 Anfragen, bezahlt vom Betreiber.
+
+**Umgesetzt** zusammen mit Punkt 9 (dieselbe Datei): Kommentar in der Login-Route
+korrigiert, `ADMIN_PASSWORD` muss mindestens 20 Zeichen haben (`MIN_PASSWORD_LENGTH`).
+Eine echte Ratenbegrenzung gehört, wenn überhaupt, vor die Funktion und ist nicht Teil
+dieser Änderung.
+
+**Betrieb:** ist das Passwort bei Vercel kürzer als 20 Zeichen, ist der Admin-Link nach
+dem nächsten Deployment ebenfalls weg.

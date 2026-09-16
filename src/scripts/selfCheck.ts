@@ -114,6 +114,16 @@ import {
 } from "../eval/benchmarkOdds";
 import { accuracyStandardError, seasonsFor } from "../eval/splits";
 import { latestPerKey, logDecision, logKey } from "../eval/forwardLogRules";
+import {
+  MIN_PASSWORD_LENGTH,
+  MIN_TOKEN_SECRET_LENGTH,
+  adminConfigProblem,
+  checkPassword,
+  isAdminConfigured,
+  issueToken,
+  verifyToken,
+} from "../data/adminAuth";
+import { createHmac } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 
 let sectionCount = 0;
@@ -2460,6 +2470,70 @@ section("Vorwaerts-Log: Nachtrag nach gescheiterter Recherche", () => {
       { ...base, awayTeam: "Hamburg" },
     ];
     for (const v of variants) check(() => assert.notEqual(logKey(v), logKey(base)));
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+section("Admin-Token verraet das Passwort nicht", () => {
+  const saved = {
+    password: process.env.ADMIN_PASSWORD,
+    secret: process.env.ADMIN_TOKEN_SECRET,
+  };
+  const setEnv = (password: string | undefined, secret: string | undefined) => {
+    if (password === undefined) delete process.env.ADMIN_PASSWORD;
+    else process.env.ADMIN_PASSWORD = password;
+    if (secret === undefined) delete process.env.ADMIN_TOKEN_SECRET;
+    else process.env.ADMIN_TOKEN_SECRET = secret;
+  };
+
+  const PASSWORT = "ein-langes-testpasswort-2026";
+  const GEHEIMNIS = "a".repeat(MIN_TOKEN_SECRET_LENGTH) + "-geheimnis";
+  const jetzt = new Date("2026-09-16T12:00:00Z");
+
+  try {
+    // Konfiguration: ohne Geheimnis, mit zu kurzem Passwort oder mit dem Passwort als
+    // Geheimnis gibt es keinen Admin-Modus -- und jedes Mal einen benannten Grund.
+    setEnv(undefined, undefined);
+    check(() => assert.equal(isAdminConfigured(), false));
+    setEnv(PASSWORT, undefined);
+    check(() => assert.ok(adminConfigProblem()!.includes("ADMIN_TOKEN_SECRET")));
+    setEnv("x".repeat(MIN_PASSWORD_LENGTH - 1), GEHEIMNIS);
+    check(() => assert.ok(adminConfigProblem()!.includes("kuerzer")));
+    setEnv("x".repeat(MIN_PASSWORD_LENGTH), "y".repeat(MIN_TOKEN_SECRET_LENGTH - 1));
+    check(() => assert.ok(adminConfigProblem()!.includes("ADMIN_TOKEN_SECRET")));
+    setEnv(GEHEIMNIS, GEHEIMNIS);
+    check(() => assert.ok(adminConfigProblem()!.includes("nicht dasselbe")));
+    setEnv(PASSWORT, GEHEIMNIS);
+    check(() => assert.equal(adminConfigProblem(), null));
+
+    // Der Normalweg.
+    check(() => assert.equal(checkPassword(PASSWORT), true));
+    check(() => assert.equal(checkPassword(PASSWORT + "x"), false));
+    check(() => assert.equal(checkPassword(undefined), false));
+    const token = issueToken(jetzt);
+    check(() => assert.equal(verifyToken(token, jetzt), true));
+
+    // Ablaufzeit laesst sich ohne Geheimnis nicht verlaengern.
+    const [payload, signature] = [token.slice(0, token.lastIndexOf(".")), token.slice(token.lastIndexOf(".") + 1)];
+    check(() => assert.equal(verifyToken(`${Number(payload) + 86400}.${signature}`, jetzt), false));
+    check(() => assert.equal(verifyToken(token, new Date((Number(payload) + 1) * 1000)), false));
+
+    // Der Angriff aus der Fragerunde: mit dem Token und dem RICHTIGEN Passwort die Signatur
+    // nachrechnen. Frueher traf das -- es war exakt die Signatur. Ohne Geheimnis darf es
+    // nicht treffen, sonst liesse sich jeder Kandidat offline pruefen.
+    check(() => {
+      const alterWeg = createHmac("sha256", PASSWORT).update(`tippki-admin-v1|${payload}`).digest("hex");
+      assert.notEqual(alterWeg, signature, "Token laesst sich mit dem Passwort allein nachrechnen");
+    });
+
+    // Neues Passwort oder neues Geheimnis entwertet alle ausgegebenen Token.
+    setEnv(PASSWORT + "-neu", GEHEIMNIS);
+    check(() => assert.equal(verifyToken(token, jetzt), false, "neues Passwort, altes Token gilt noch"));
+    setEnv(PASSWORT, GEHEIMNIS + "-neu");
+    check(() => assert.equal(verifyToken(token, jetzt), false, "neues Geheimnis, altes Token gilt noch"));
+  } finally {
+    setEnv(saved.password, saved.secret);
   }
 });
 

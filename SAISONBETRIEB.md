@@ -221,8 +221,22 @@ die GitHub-Secrets.
 
 ### Admin-Modus
 
-Ein Passwortfeld, mehr nicht. Ist `ADMIN_PASSWORD` gesetzt, erscheint unter dem Kopf ein
-unscheinbarer „Admin"-Link; nach der Anmeldung kommen die beiden Knöpfe zurück. Sie
+Ein Passwortfeld, mehr nicht. Sind `ADMIN_PASSWORD` (mindestens 20 Zeichen) und
+`ADMIN_TOKEN_SECRET` (mindestens 32 Zeichen, zufällig, nicht das Passwort) gesetzt,
+erscheint unter dem Kopf ein unscheinbarer „Admin"-Link; nach der Anmeldung kommen die
+beiden Knöpfe zurück.
+
+Fehlt eines davon, verschwindet der Link **ohne Meldung in der Oberfläche** — Besucher
+sollen keinen Grund lesen. Der Grund steht dann im Server-Log („Admin-Modus nicht
+verfuegbar: …"). Das Geheimnis signiert die Anmelde-Cookies; bis zum 16.09.2026 tat das
+das Passwort selbst, und aus einem einzigen Cookie ließen sich Passwörter offline
+durchprobieren. Erzeugen:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Ein neues Passwort oder ein neues Geheimnis meldet alle Sitzungen ab. Sie
 schreiben dann nicht selbst, sondern stoßen den passenden Workflow an — derselbe Weg wie
 bei der Automatik, nur von Hand ausgelöst. Dafür braucht die Instanz zusätzlich
 `GITHUB_DISPATCH_TOKEN` (fein granuliert, nur dieses Repository, „Actions: Read and
@@ -234,7 +248,7 @@ Idempotenzsperre. Genau dafür ist er da: wenn der planmäßige Lauf ausgefallen
 90-Minuten-Grenze vor Anpfiff bleibt trotzdem stehen, und nach Anpfiff läuft gar nichts
 mehr.
 
-Ohne gesetztes `ADMIN_PASSWORD` gibt es keinen Login, keine Knöpfe und keine Anmeldemaske —
+Ohne vollständige Admin-Konfiguration gibt es keinen Login, keine Knöpfe und keine Anmeldemaske —
 die Instanz ist dann rein zum Anschauen. Die Sperre sitzt in den Routen selbst, nicht in
 der Oberfläche: wer das Flag im Browser umbiegt, sieht Knöpfe, die 403 liefern.
 
