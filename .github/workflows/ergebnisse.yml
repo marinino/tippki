@@ -30,6 +30,12 @@ concurrency:
   group: tippki-daten
   cancel-in-progress: false
 
+# bash mit pipefail, damit `npm run refresh | tee` einen Abbruch nicht gruen faerbt und
+# halbe Daten nicht committet werden (Begruendung in nachbereitung.yml).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   ergebnisse:
     runs-on: ubuntu-latest

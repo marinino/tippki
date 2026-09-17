@@ -50,6 +50,12 @@ concurrency:
   group: tippki-daten
   cancel-in-progress: false
 
+# bash mit pipefail: sonst endet ein abgestuerztes `research-due | tee` gruen, ohne Ausgaben,
+# und der Spieltag faellt stumm durch (Begruendung in nachbereitung.yml).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   recherche:
     runs-on: ubuntu-latest

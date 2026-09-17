@@ -32,7 +32,9 @@ console.log(
 // Spieltag ist das der Normalfall und kein Fehler -- refreshSeasonData behandelt die
 // Quoten bewusst als nicht-fatal, weil sie Massstab sind und nicht Betriebsgrundlage.
 console.log(
-  summary.oddsCount === null
-    ? "Buchmacher-Schlussquoten: noch keine (football-data fuehrt die Saison nicht)."
-    : `Buchmacher-Schlussquoten: ${summary.oddsCount} Spiele.`
+  summary.oddsUnreachable
+    ? "Buchmacher-Schlussquoten: football-data nicht erreichbar, nicht aktualisiert."
+    : summary.oddsCount === null
+      ? "Buchmacher-Schlussquoten: noch keine (football-data fuehrt die Saison nicht)."
+      : `Buchmacher-Schlussquoten: ${summary.oddsCount} Spiele.`
 );

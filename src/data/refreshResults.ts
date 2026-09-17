@@ -187,6 +187,9 @@ export interface RefreshSummary {
   // Spiele der laufenden Saison, die nach dem Abruf eine Buchmacher-Schlussquote tragen.
   // null = football-data fuehrt die Saison noch nicht oder war nicht erreichbar.
   oddsCount: number | null;
+  // true = football-data hat nicht geantwortet; oddsCount ist dann null, ohne dass die
+  // Saison fehlen muss.
+  oddsUnreachable: boolean;
 }
 
 export async function refreshSeasonData(season: string): Promise<RefreshSummary> {
@@ -196,8 +199,10 @@ export async function refreshSeasonData(season: string): Promise<RefreshSummary>
   // Betriebsgrundlage. Faellt football-data aus, laeuft die App vollstaendig weiter, nur der
   // Vergleich mit dem Buchmacher fehlt fuer die betroffenen Spieltage.
   let oddsCount: number | null = null;
+  let oddsUnreachable = false;
   try {
     const market = await refreshMarketOdds(season);
+    oddsUnreachable = !market.reachable;
     if (market.published) {
       oddsCount = Math.max(market.withPinnacleClose, market.withAverageClose);
     }
@@ -205,5 +210,5 @@ export async function refreshSeasonData(season: string): Promise<RefreshSummary>
     oddsCount = null;
   }
 
-  return { season, resultsCount, xgCount, oddsCount };
+  return { season, resultsCount, xgCount, oddsCount, oddsUnreachable };
 }

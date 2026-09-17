@@ -19,9 +19,23 @@ const season = flag("season") ?? deriveSeasonFromDate(new Date());
 
 const summary = await refreshMarketOdds(season);
 
+// Nicht erreichbar ist eine Stoerung, aber keine, fuer die der Lauf rot werden soll: sonst
+// bleiben Spielplan und Ergebnisse uncommittet und die Pruefungen dahinter laufen nicht. Die
+// ::warning::-Zeile macht sie in GitHub Actions trotzdem als Annotation am Lauf sichtbar.
+if (!summary.reachable) {
+  console.log(
+    `football-data.co.uk nicht erreichbar (${summary.error}). Nichts geaendert --\n` +
+      `der naechste Lauf holt die Schlussquoten nach.`
+  );
+  if (process.env.GITHUB_ACTIONS) {
+    console.log(`::warning::football-data.co.uk nicht erreichbar (${summary.error}), Schlussquoten nicht aktualisiert.`);
+  }
+  process.exit(0);
+}
+
 if (!summary.published) {
   console.log(
-    `football-data fuehrt die Saison ${season} noch nicht (oder war nicht erreichbar).\n` +
+    `football-data fuehrt die Saison ${season} noch nicht.\n` +
       `Vor dem ersten Spieltag ist das der Normalfall. Nichts geaendert.`
   );
   process.exit(0);
