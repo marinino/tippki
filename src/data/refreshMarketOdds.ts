@@ -31,9 +31,16 @@ function sourceUrl(season: string): string {
 
 export interface MarketRefreshSummary {
   season: string;
+  // false = football-data hat nicht geantwortet (Netzfehler, 5xx, Zeitueberschreitung).
+  // Getrennt von `published`, weil die beiden Faelle verschieden zu lesen sind: "noch nicht
+  // veroeffentlicht" ist vor dem ersten Spieltag normal, "nicht erreichbar" ist eine Stoerung.
+  // Im September 2026 leitete die Seite jede Anfrage auf http://127.0.0.1 um.
+  reachable: boolean;
   // false = football-data fuehrt die Saison noch nicht. Vor dem ersten Spieltag der
   // Normalzustand und kein Fehler.
   published: boolean;
+  // Bei reachable=false die Ursache, fuer die Ausgabe.
+  error?: string;
   fetchedRows: number;
   updatedRows: number;
   addedRows: number;
@@ -121,6 +128,7 @@ export function mergeMarketRows(
 export async function refreshMarketOdds(season: string): Promise<MarketRefreshSummary> {
   const empty: MarketRefreshSummary = {
     season,
+    reachable: true,
     published: false,
     fetchedRows: 0,
     updatedRows: 0,
@@ -129,10 +137,24 @@ export async function refreshMarketOdds(season: string): Promise<MarketRefreshSu
     withAverageClose: 0,
   };
 
-  const res = await fetch(sourceUrl(season));
-  if (!res.ok) return empty;
+  // Eine Stoerung bei football-data wirft hier nicht mehr. Frueher riss ein Netzfehler den
+  // ganzen Nachbereitungslauf vor dem Commit ab -- Spielplan und Ergebnisse blieben liegen,
+  // und Abrechnung und Zeitplan-Test liefen gar nicht. Fuer einen Massstab ist das der
+  // falsche Preis; die Quoten holt der naechste Lauf nach, der Abruf ist idempotent.
+  let text: string;
+  try {
+    const res = await fetch(sourceUrl(season), { signal: AbortSignal.timeout(30_000) });
+    if (res.status >= 500) {
+      return { ...empty, reachable: false, error: `HTTP ${res.status}` };
+    }
+    if (!res.ok) return empty;
+    text = await res.text();
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+    const detail = cause?.code ?? cause?.message ?? (err as Error).message;
+    return { ...empty, reachable: false, error: detail };
+  }
 
-  const text = await res.text();
   const fetched: Record<string, string>[] = parse(text, {
     columns: true,
     skip_empty_lines: true,
@@ -150,6 +172,7 @@ export async function refreshMarketOdds(season: string): Promise<MarketRefreshSu
 
   return {
     season,
+    reachable: true,
     published: true,
     fetchedRows: usable.length,
     updatedRows: merged.updatedRows,

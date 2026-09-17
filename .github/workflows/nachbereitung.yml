@@ -33,6 +33,13 @@ concurrency:
   group: tippki-daten
   cancel-in-progress: false
 
+# Ausdruecklich bash statt der Voreinstellung: ohne `shell:` startet GitHub `bash -e` OHNE
+# pipefail, und `npm run ... | tee datei` meldet dann den Exit-Code von tee. Ein
+# abgebrochenes Skript liesse den Schritt gruen.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   nachbereitung:
     runs-on: ubuntu-latest
