@@ -33,6 +33,24 @@ gepaart. Ergebnis hierher, Umstellung frühestens zur Saison 2027/28.
 **Achtung beim Umstellen:** `formMode` steht nicht in `PipelineConfig`. Ohne Punkt 8
 bemerkt der Hash den Wechsel nicht.
 
+**Nachtrag 17.09., dritter Kandidat „gegen Erwartung“** (Idee aus der Fragerunde): auch
+`residual` bereinigt nicht um den **Gegner** und Heim/Auswärts, sondern nur um das eigene
+Niveau der letzten 17 Spiele. Direkter wäre: je Spiel tatsächliche xG-Differenz minus die
+Differenz, die das Modell für genau diese Paarung erwartet hat (`λ_eigen − λ_gegner` aus
+`baseLambdas`), und davon das Mittel. Nachgerechnet für Spieltag 4, Stärken aus dem Fit vor
+Saisonbeginn:
+
+| | roh (produktiv) | gegen Erwartung |
+|---|---|---|
+| Bayern (Stuttgart 2,83 / erw. 1,85; Schalke 1,80 / 2,13; Elversberg 2,03 / 2,13) | +2,22 → ×1,56 | +0,18 → ×1,04 |
+| Union (Frankfurt 0,16 / −0,08; Leverkusen −3,14 / −1,32; Schalke −1,30 / 0,62) | −1,43 → ×0,75 | −1,17 → ×0,79 |
+
+Bayerns „Form“ ist fast vollständig „Bayern ist Bayern“, Unions Einbruch ist echt. Offene
+Frage beim Messen: xG-Differenz gegen eine Erwartung aus einem **Tore**-Fit zu stellen
+mischt zwei Skalen. Die Variante braucht außerdem das Modell zum Zeitpunkt jedes Formspiels
+(im Walk-forward vorhanden, produktiv ein Fit mehr). In den Vergleich aus dem nächsten Schritt
+als dritten `formMode` aufnehmen.
+
 ### 2. Ein hängender xG-Feed zieht Vorsaison-Spiele ins Formfenster
 
 `src/model/xgForm.ts:131-146`
@@ -92,7 +110,17 @@ Etikett stimmt also für die Zahlen. Das eigentliche Problem ist, welche Zahlen 
 - `MAX_SEARCHES = 14` — bestimmt, wie viel die Recherche überhaupt findet, und taucht im
   Abdruck nirgends auf. `searchErrors` protokolliert bereits, wenn das Limit greift.
 
-Beide gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehmen ändert
+- **Nachtrag 18.09.:** `llmMappingFingerprint` (`src/model/pipelineConfig.ts:127`) sieht
+  nur einen Teil der Abbildung. Er rechnet jede Kombination aus Rolle, Wichtigkeit,
+  Sicherheit, Richtung und Seite, aber immer mit `category: FACT_CATEGORIES[0]`
+  (`absence`) und immer mit **zwei gleichen** Fakten. Damit bleiben unsichtbar:
+  `CATEGORY_SCALE` für `return`, `congestion`, `manager`, `motivation` (vier von fünf
+  Werten), und jede Änderung daran, wie **verschiedene** Fakten gruppiert und gedämpft
+  werden (siehe Punkt 19). Am Code abgelesen, nicht per Änderung ausprobiert. Fix: alle
+  Kategorien durchlaufen und ein paar gemischte Paare (verschiedene Rolle, verschiedene
+  Richtung) mit aufnehmen.
+
+Die beiden Konstanten gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehmen ändert
 den Hash und spaltet das Log. Also entweder jetzt mit bewusstem Schnitt, oder zur
 nächsten Saison zusammen mit Punkt 1.
 
@@ -162,6 +190,13 @@ Ein externer Zeitplan, der `workflow_dispatch` auslöst, würde das Fenster zuve
 treffen. Der Weg existiert schon (`dispatchWorkflow`). Erst angehen, wenn die nächsten
 Spieltage zeigen, dass das Fenster trotz allem verfehlt wird — `llm: null` in den Zeilen
 eines Spieltags ist das Signal.
+
+**Billiger Zwischenschritt (18.09., ungeprüft):** GitHub nennt „the start of every hour“
+ausdrücklich als Spitzenlast, bei der geplante Läufe verzögert und bei genug Last
+verworfen werden (Doku „Events that trigger workflows“, Abschnitt `schedule`). Der Zeitplan
+`*/15` liegt genau auf :00, :15, :30, :45, also dort, wo alle anderen auch planen. Ungerade
+Minuten (`7,22,37,52 8-18 * * *`) kosten nichts. Ob sie wirklich mehr Läufe durchbringen,
+zeigt nur die Actions-API über ein paar Spieltage.
 
 ### 12. Vergangene Spieltage zeigen weder die echte noch eine ehrliche Vorhersage
 
@@ -292,6 +327,37 @@ ist als Ursache aber **nicht gemessen**.
 Ligaschnitt) auf das eigene λ, Abwehrform (xGA gegen Ligaschnitt) auf das λ des Gegners.
 Zielgröße O/U-LogLoss und 1X2-LogLoss. Zusammen mit Punkt 1 und 6, Umstellung frühestens
 zur Saison 2027/28.
+
+**Nachtrag 18.09.:** der Befund war schon bekannt. `src/llm/factMapping.ts:143-144` sagt
+über die Abwehr des Gegners: „letzteres fehlt der bestehenden xG-Formkurve komplett, siehe
+npm run form“. Der LLM-Layer macht die vorgeschlagene Aufteilung bereits (Abwehr des
+Gegners wirkt auf das eigene λ), die Formkurve nicht.
+
+### 19. Der Grenzertrag dämpft über Angriff und Abwehr hinweg, und die Reihenfolge des LLM entscheidet [eingefroren]
+
+`src/llm/factMapping.ts:106-133`
+
+Begründet ist der abnehmende Grenzertrag mit „vier fehlende Innenverteidiger machen die
+Abwehr nicht viermal schlechter“, also **je Mannschaftsteil**. Gruppiert wird aber nach
+`team|direction`. Fallen beim Heimteam Stammstürmer **und** Stammtorwart aus, landen sie in
+einer Gruppe, und der zweite zählt nur halb, obwohl sie verschiedene Dinge schwächen.
+
+Beide haben dasselbe Gewicht (0,1), die Sortierung ist ein Gleichstand, und JavaScript
+sortiert stabil. **Welcher halbiert wird, hängt davon ab, in welcher Reihenfolge das LLM
+sie aufgezählt hat.** Nachgerechnet:
+
+| Reihenfolge der Fakten | homeAttack | homeDefense | Exponent Heim / Gast |
+|---|---|---|---|
+| Stürmer, dann Torwart | −0,100 | +0,050 | −0,100 / +0,050 |
+| Torwart, dann Stürmer | −0,050 | +0,100 | −0,050 / +0,100 |
+
+Dieselben Fakten ergeben also zwei verschiedene Vorhersagen.
+
+**Fix (Vorschlag):** getrennt nach Angriff und Abwehr dämpfen, also je `team` und Dimension
+(`attack`/`defense`) auf die Beträge, statt je `team|direction` auf ganze Fakten. Dann
+gibt es auch keinen Gleichstand zwischen verschiedenen Dimensionen mehr. Ändert die
+Abbildung, also zur nächsten Saison, und erst nachdem der Fingerabdruck gemischte Paare
+sieht (Nachtrag bei Punkt 4), sonst bemerkt der Hash die Änderung nicht.
 
 ---
 
