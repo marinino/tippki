@@ -13,8 +13,9 @@
 //
 // Faire Quote heisst: OHNE Marge. Ein Buchmacher legt auf 1/p noch seinen Aufschlag,
 // sodass die Kehrwerte seiner angebotenen Quoten auf mehr als 1 summieren. Die Zahlen
-// hier summieren je Markt exakt auf 1. Das ist der Punkt -- verglichen werden soll die
-// Schaetzung, nicht die Marge.
+// hier summieren je Markt exakt auf 1 (bei Torsumme und Handicap je Linie). Das ist der
+// Punkt -- verglichen werden soll die Schaetzung, nicht die Marge. Einzige Ausnahme ist die
+// Doppelte Chance: 1X, 12 und X2 enthalten jeden Ausgang zweimal, dort ist die Summe 2.
 
 import {
   goalDifferenceMarginal,

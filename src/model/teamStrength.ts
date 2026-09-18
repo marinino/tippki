@@ -37,10 +37,13 @@ export interface FitOptions {
   // "blend" mischt beides mit xgBlendWeight als Anteil der ECHTEN Tore.
   target?: FitTarget;
   xgBlendWeight?: number;
-  // Ridge/Shrinkage in "Pseudo-Spielen": das Team hat zusaetzlich k Spiele bestritten, in
-  // denen es exakt im Ligadurchschnitt getroffen und kassiert hat. Formal ein
-  // Gamma-Prior auf exp(attack). Wirkt vor allem bei den Ein-Saison-Fits (34 Spiele je
-  // Team) und bei Aufsteigern mit duenner Historie. k = 0 ist die reine ML-Schaetzung.
+  // Ridge/Shrinkage. Formal ein Gamma-Prior auf exp(attack) und exp(defense): fitPoissonModel
+  // addiert k auf die Tore UND auf die Erwartung, zieht also Richtung exp(...) = 1, den
+  // Ligadurchschnitt. Die Einheit sind Tore, nicht Spiele -- ein echtes Durchschnittsspiel
+  // traegt rund 1,5 bei ((avgHomeGoals + avgAwayGoals) / 2), k = 8 entspricht also etwa
+  // 5 Spielen. Der Name ridgePseudoMatches bleibt, weil er in PipelineConfig steht. Wirkt
+  // vor allem bei den Ein-Saison-Fits (34 Spiele je Team) und bei Aufsteigern mit duenner
+  // Historie. k = 0 ist die reine ML-Schaetzung.
   ridgePseudoMatches?: number;
   trace?: boolean;
 }
@@ -128,9 +131,11 @@ export function fitPoissonModel(
   // im Ligadurchschnitt") -- und, schlimmer, seine Staerke haette sich jedes Mal still
   // verschoben, wenn eine weitere historische Saison in data/ dazukommt.
   //
-  // exponentialTimeWeights eicht das juengste Spiel auf 1. "k Pseudospiele zum heutigen
-  // Gewicht" ist damit genau k. Ohne Zeitgewichtung sind alle Gewichte 1, das frueher
-  // berechnete Mittel war ebenfalls 1 -- das bisherige Verhalten bleibt also unveraendert.
+  // exponentialTimeWeights eicht das juengste Spiel auf 1. Der Prior wiegt damit k Tore zum
+  // heutigen Gewicht, unabhaengig davon, wie viele alte Saisons in data/ liegen (in Spielen
+  // gerechnet rund k / 1,5, siehe ridgePseudoMatches). Ohne Zeitgewichtung sind alle
+  // Gewichte 1, das frueher berechnete Mittel war ebenfalls 1 -- das bisherige Verhalten
+  // bleibt also unveraendert.
   const referenceWeight = 1;
 
   const expAttack = new Float64Array(n).fill(1);

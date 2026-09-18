@@ -129,7 +129,7 @@ Workflows an, statt selbst zu schreiben.
 
 | Workflow | Wann | Was |
 |---|---|---|
-| `spielkontext.yml` | alle 15 min, 08–18 UTC, täglich | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
+| `spielkontext.yml` | alle 15 min zu :07/:22/:37/:52, 08–18 UTC, täglich (neben der Spitzenlast zur vollen Stunde) | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
 | `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG; danach `forward-log-check` (Alarm) |
 | `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, Vorschau aufs nächste Fenster |
 

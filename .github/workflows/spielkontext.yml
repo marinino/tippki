@@ -21,9 +21,14 @@
 
 name: Spielkontext
 
+# Minuten 7, 22, 37, 52 statt */15 (seit 18.09.2026): GitHub nennt den Beginn jeder Stunde
+# ausdruecklich als Spitzenlast, in der geplante Laeufe verzoegert und bei genug Last
+# verworfen werden (Doku "Events that trigger workflows", Abschnitt schedule). */15 lag genau
+# auf :00, :15, :30, :45, wo alle anderen auch planen. Ob das mehr Laeufe durchbringt, ist
+# ungeprueft -- nachsehen ueber die Actions-API (VERBESSERUNGEN.md, Punkt 14).
 on:
   schedule:
-    - cron: "*/15 8-18 * * *"
+    - cron: "7,22,37,52 8-18 * * *"
   workflow_dispatch:
     inputs:
       spieltag:
