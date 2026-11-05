@@ -596,7 +596,7 @@
   {
     "homeTeam": "Bayern Munich",
     "awayTeam": "Paderborn",
-    "date": "2026-12-05T15:30:00",
+    "date": "2026-12-04T20:30:00",
     "matchday": 12
   },
   {
@@ -618,12 +618,6 @@
     "matchday": 12
   },
   {
-    "homeTeam": "Ein Frankfurt",
-    "awayTeam": "Werder Bremen",
-    "date": "2026-12-05T15:30:00",
-    "matchday": 12
-  },
-  {
     "homeTeam": "Augsburg",
     "awayTeam": "FC Koln",
     "date": "2026-12-05T15:30:00",
@@ -636,16 +630,28 @@
     "matchday": 12
   },
   {
+    "homeTeam": "Ein Frankfurt",
+    "awayTeam": "Werder Bremen",
+    "date": "2026-12-05T18:30:00",
+    "matchday": 12
+  },
+  {
     "homeTeam": "Schalke 04",
     "awayTeam": "Dortmund",
-    "date": "2026-12-05T15:30:00",
+    "date": "2026-12-06T15:30:00",
     "matchday": 12
   },
   {
     "homeTeam": "Elversberg",
     "awayTeam": "Stuttgart",
-    "date": "2026-12-05T15:30:00",
+    "date": "2026-12-06T17:30:00",
     "matchday": 12
+  },
+  {
+    "homeTeam": "Hamburg",
+    "awayTeam": "Schalke 04",
+    "date": "2026-12-11T20:30:00",
+    "matchday": 13
   },
   {
     "homeTeam": "Dortmund",
@@ -660,38 +666,8 @@
     "matchday": 13
   },
   {
-    "homeTeam": "Hoffenheim",
-    "awayTeam": "Bayern Munich",
-    "date": "2026-12-12T15:30:00",
-    "matchday": 13
-  },
-  {
-    "homeTeam": "Mainz",
-    "awayTeam": "Freiburg",
-    "date": "2026-12-12T15:30:00",
-    "matchday": 13
-  },
-  {
-    "homeTeam": "M'gladbach",
-    "awayTeam": "Ein Frankfurt",
-    "date": "2026-12-12T15:30:00",
-    "matchday": 13
-  },
-  {
-    "homeTeam": "Hamburg",
-    "awayTeam": "Schalke 04",
-    "date": "2026-12-12T15:30:00",
-    "matchday": 13
-  },
-  {
     "homeTeam": "FC Koln",
     "awayTeam": "RB Leipzig",
-    "date": "2026-12-12T15:30:00",
-    "matchday": 13
-  },
-  {
-    "homeTeam": "Werder Bremen",
-    "awayTeam": "Leverkusen",
     "date": "2026-12-12T15:30:00",
     "matchday": 13
   },
@@ -702,26 +678,38 @@
     "matchday": 13
   },
   {
-    "homeTeam": "Bayern Munich",
-    "awayTeam": "Werder Bremen",
-    "date": "2026-12-19T15:30:00",
-    "matchday": 14
+    "homeTeam": "M'gladbach",
+    "awayTeam": "Ein Frankfurt",
+    "date": "2026-12-12T18:30:00",
+    "matchday": 13
   },
   {
-    "homeTeam": "RB Leipzig",
-    "awayTeam": "Dortmund",
-    "date": "2026-12-19T15:30:00",
+    "homeTeam": "Mainz",
+    "awayTeam": "Freiburg",
+    "date": "2026-12-13T15:30:00",
+    "matchday": 13
+  },
+  {
+    "homeTeam": "Hoffenheim",
+    "awayTeam": "Bayern Munich",
+    "date": "2026-12-13T17:30:00",
+    "matchday": 13
+  },
+  {
+    "homeTeam": "Werder Bremen",
+    "awayTeam": "Leverkusen",
+    "date": "2026-12-13T19:30:00",
+    "matchday": 13
+  },
+  {
+    "homeTeam": "Bayern Munich",
+    "awayTeam": "Werder Bremen",
+    "date": "2026-12-18T20:30:00",
     "matchday": 14
   },
   {
     "homeTeam": "Leverkusen",
     "awayTeam": "Ein Frankfurt",
-    "date": "2026-12-19T15:30:00",
-    "matchday": 14
-  },
-  {
-    "homeTeam": "Freiburg",
-    "awayTeam": "Stuttgart",
     "date": "2026-12-19T15:30:00",
     "matchday": 14
   },
@@ -738,27 +726,39 @@
     "matchday": 14
   },
   {
-    "homeTeam": "Union Berlin",
-    "awayTeam": "Hoffenheim",
-    "date": "2026-12-19T15:30:00",
-    "matchday": 14
-  },
-  {
-    "homeTeam": "Schalke 04",
-    "awayTeam": "M'gladbach",
-    "date": "2026-12-19T15:30:00",
-    "matchday": 14
-  },
-  {
     "homeTeam": "Elversberg",
     "awayTeam": "Hamburg",
     "date": "2026-12-19T15:30:00",
     "matchday": 14
   },
   {
+    "homeTeam": "RB Leipzig",
+    "awayTeam": "Dortmund",
+    "date": "2026-12-19T18:30:00",
+    "matchday": 14
+  },
+  {
+    "homeTeam": "Freiburg",
+    "awayTeam": "Stuttgart",
+    "date": "2026-12-20T15:30:00",
+    "matchday": 14
+  },
+  {
+    "homeTeam": "Union Berlin",
+    "awayTeam": "Hoffenheim",
+    "date": "2026-12-20T17:30:00",
+    "matchday": 14
+  },
+  {
+    "homeTeam": "Schalke 04",
+    "awayTeam": "M'gladbach",
+    "date": "2026-12-20T19:30:00",
+    "matchday": 14
+  },
+  {
     "homeTeam": "Dortmund",
     "awayTeam": "Mainz",
-    "date": "2027-01-09T15:30:00",
+    "date": "2027-01-08T20:30:00",
     "matchday": 15
   },
   {
@@ -780,26 +780,8 @@
     "matchday": 15
   },
   {
-    "homeTeam": "M'gladbach",
-    "awayTeam": "Bayern Munich",
-    "date": "2027-01-09T15:30:00",
-    "matchday": 15
-  },
-  {
-    "homeTeam": "Hamburg",
-    "awayTeam": "Leverkusen",
-    "date": "2027-01-09T15:30:00",
-    "matchday": 15
-  },
-  {
     "homeTeam": "FC Koln",
     "awayTeam": "Freiburg",
-    "date": "2027-01-09T15:30:00",
-    "matchday": 15
-  },
-  {
-    "homeTeam": "Werder Bremen",
-    "awayTeam": "Union Berlin",
     "date": "2027-01-09T15:30:00",
     "matchday": 15
   },
@@ -810,21 +792,27 @@
     "matchday": 15
   },
   {
-    "homeTeam": "Bayern Munich",
+    "homeTeam": "M'gladbach",
+    "awayTeam": "Bayern Munich",
+    "date": "2027-01-09T18:30:00",
+    "matchday": 15
+  },
+  {
+    "homeTeam": "Werder Bremen",
+    "awayTeam": "Union Berlin",
+    "date": "2027-01-10T15:30:00",
+    "matchday": 15
+  },
+  {
+    "homeTeam": "Hamburg",
     "awayTeam": "Leverkusen",
-    "date": "2027-01-12T20:30:00",
-    "matchday": 16
+    "date": "2027-01-10T17:30:00",
+    "matchday": 15
   },
   {
     "homeTeam": "RB Leipzig",
     "awayTeam": "Stuttgart",
-    "date": "2027-01-12T20:30:00",
-    "matchday": 16
-  },
-  {
-    "homeTeam": "Freiburg",
-    "awayTeam": "Hamburg",
-    "date": "2027-01-12T20:30:00",
+    "date": "2027-01-12T18:30:00",
     "matchday": 16
   },
   {
@@ -840,28 +828,46 @@
     "matchday": 16
   },
   {
-    "homeTeam": "Union Berlin",
-    "awayTeam": "Paderborn",
-    "date": "2027-01-12T20:30:00",
-    "matchday": 16
-  },
-  {
     "homeTeam": "FC Koln",
     "awayTeam": "Dortmund",
     "date": "2027-01-12T20:30:00",
     "matchday": 16
   },
   {
-    "homeTeam": "Schalke 04",
-    "awayTeam": "Werder Bremen",
-    "date": "2027-01-12T20:30:00",
+    "homeTeam": "Elversberg",
+    "awayTeam": "Ein Frankfurt",
+    "date": "2027-01-13T18:30:00",
     "matchday": 16
   },
   {
-    "homeTeam": "Elversberg",
-    "awayTeam": "Ein Frankfurt",
-    "date": "2027-01-12T20:30:00",
+    "homeTeam": "Bayern Munich",
+    "awayTeam": "Leverkusen",
+    "date": "2027-01-13T20:30:00",
     "matchday": 16
+  },
+  {
+    "homeTeam": "Freiburg",
+    "awayTeam": "Hamburg",
+    "date": "2027-01-13T20:30:00",
+    "matchday": 16
+  },
+  {
+    "homeTeam": "Union Berlin",
+    "awayTeam": "Paderborn",
+    "date": "2027-01-13T20:30:00",
+    "matchday": 16
+  },
+  {
+    "homeTeam": "Schalke 04",
+    "awayTeam": "Werder Bremen",
+    "date": "2027-01-13T20:30:00",
+    "matchday": 16
+  },
+  {
+    "homeTeam": "Stuttgart",
+    "awayTeam": "Mainz",
+    "date": "2027-01-15T20:30:00",
+    "matchday": 17
   },
   {
     "homeTeam": "Dortmund",
@@ -870,26 +876,8 @@
     "matchday": 17
   },
   {
-    "homeTeam": "Stuttgart",
-    "awayTeam": "Mainz",
-    "date": "2027-01-16T15:30:00",
-    "matchday": 17
-  },
-  {
     "homeTeam": "Hoffenheim",
     "awayTeam": "RB Leipzig",
-    "date": "2027-01-16T15:30:00",
-    "matchday": 17
-  },
-  {
-    "homeTeam": "Leverkusen",
-    "awayTeam": "Schalke 04",
-    "date": "2027-01-16T15:30:00",
-    "matchday": 17
-  },
-  {
-    "homeTeam": "Ein Frankfurt",
-    "awayTeam": "Bayern Munich",
     "date": "2027-01-16T15:30:00",
     "matchday": 17
   },
@@ -906,16 +894,34 @@
     "matchday": 17
   },
   {
-    "homeTeam": "Werder Bremen",
-    "awayTeam": "Elversberg",
-    "date": "2027-01-16T15:30:00",
-    "matchday": 17
-  },
-  {
     "homeTeam": "Paderborn",
     "awayTeam": "FC Koln",
     "date": "2027-01-16T15:30:00",
     "matchday": 17
+  },
+  {
+    "homeTeam": "Ein Frankfurt",
+    "awayTeam": "Bayern Munich",
+    "date": "2027-01-16T18:30:00",
+    "matchday": 17
+  },
+  {
+    "homeTeam": "Werder Bremen",
+    "awayTeam": "Elversberg",
+    "date": "2027-01-17T15:30:00",
+    "matchday": 17
+  },
+  {
+    "homeTeam": "Leverkusen",
+    "awayTeam": "Schalke 04",
+    "date": "2027-01-17T17:30:00",
+    "matchday": 17
+  },
+  {
+    "homeTeam": "Werder Bremen",
+    "awayTeam": "Freiburg",
+    "date": "2027-01-22T20:30:00",
+    "matchday": 18
   },
   {
     "homeTeam": "Stuttgart",
@@ -924,38 +930,8 @@
     "matchday": 18
   },
   {
-    "homeTeam": "Hoffenheim",
-    "awayTeam": "FC Koln",
-    "date": "2027-01-23T15:30:00",
-    "matchday": 18
-  },
-  {
-    "homeTeam": "Leverkusen",
-    "awayTeam": "Elversberg",
-    "date": "2027-01-23T15:30:00",
-    "matchday": 18
-  },
-  {
-    "homeTeam": "Ein Frankfurt",
-    "awayTeam": "Union Berlin",
-    "date": "2027-01-23T15:30:00",
-    "matchday": 18
-  },
-  {
     "homeTeam": "M'gladbach",
     "awayTeam": "RB Leipzig",
-    "date": "2027-01-23T15:30:00",
-    "matchday": 18
-  },
-  {
-    "homeTeam": "Hamburg",
-    "awayTeam": "Dortmund",
-    "date": "2027-01-23T15:30:00",
-    "matchday": 18
-  },
-  {
-    "homeTeam": "Werder Bremen",
-    "awayTeam": "Freiburg",
     "date": "2027-01-23T15:30:00",
     "matchday": 18
   },
@@ -969,6 +945,30 @@
     "homeTeam": "Paderborn",
     "awayTeam": "Mainz",
     "date": "2027-01-23T15:30:00",
+    "matchday": 18
+  },
+  {
+    "homeTeam": "Hamburg",
+    "awayTeam": "Dortmund",
+    "date": "2027-01-23T18:30:00",
+    "matchday": 18
+  },
+  {
+    "homeTeam": "Ein Frankfurt",
+    "awayTeam": "Union Berlin",
+    "date": "2027-01-24T15:30:00",
+    "matchday": 18
+  },
+  {
+    "homeTeam": "Leverkusen",
+    "awayTeam": "Elversberg",
+    "date": "2027-01-24T17:30:00",
+    "matchday": 18
+  },
+  {
+    "homeTeam": "Hoffenheim",
+    "awayTeam": "FC Koln",
+    "date": "2027-01-24T19:30:00",
     "matchday": 18
   },
   {
