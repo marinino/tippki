@@ -134,7 +134,7 @@ Workflows an, statt selbst zu schreiben.
 
 | Workflow | Wann | Was |
 |---|---|---|
-| `spielkontext.yml` | **vom externen Taktgeber** alle 15 min, 08–18 UTC (siehe „Taktgeber“); dazu GitHubs eigener Zeitplan zu :07/:22/:37/:52 als unzuverlässige zweite Chance | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
+| `spielkontext.yml` | **vom externen Taktgeber** alle 15 min, 08–18 UTC (siehe „Taktgeber“); dazu GitHubs eigener Zeitplan zu :07/:22/:37/:52 als unzuverlässige zweite Chance | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log`; bei jedem Tick `kickoff-snapshot` |
 | `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG; danach `forward-log-check` (Alarm) |
 | `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, Vorschau aufs nächste Fenster |
 
@@ -152,6 +152,38 @@ das nicht auf: das Basismodell wird schon 48 Stunden vorher protokolliert, also 
 immer Zeilen im Log, und die Recherche fehlte an Spieltag 5 bis 9 ohne einen einzigen
 roten Lauf. Spieltage, die sich nicht mehr nachholen lassen, stehen mit Grund in
 `KNOWN_RESEARCH_GAPS`, derzeit 5 bis 9.
+
+Seit dem 19.11.2026 meldet er außerdem jede angepfiffene Partie ohne Anpfiff-Schnappschuss
+(nächster Abschnitt).
+
+### Anpfiff einfrieren
+
+**Was bei Anpfiff auf der Seite steht, wird nie wieder verändert.** Zwischen 60 und 15
+Minuten vor jedem Anpfiff hält `npm run kickoff-snapshot` genau das fest, was die Seite in
+diesem Moment zeigt: 1X2, Torerwartung, das ganze Preisblatt, die Ergebnisverteilung und
+den Spielkontext. Die Zeile kommt nach `data/kickoff_snapshots.jsonl`. Ab dann zeigt die
+Seite für diese Partie nur noch den Schnappschuss, schon in den letzten Minuten vor
+Anpfiff. Dadurch *ist* er der Stand bei Anpfiff und nicht bloß eine Annäherung daran.
+
+- **Append-only.** Je Partie und Anstoßzeit eine Zeile, nie umgeschrieben. selfCheck prüft,
+  dass keine Zeile doppelt ist und jede im Fenster geschrieben wurde. Eine von Hand
+  nachgeschobene Zeile fällt also auf.
+- **Nichts wird nachgeholt.** Verpasst der Taktgeber das Fenster, gibt es für die Partie
+  keinen Schnappschuss. Die Seite zeigt dann die letzte Zeile aus dem Vorwärts-Log,
+  gekennzeichnet als „Vorwärts-Log vom …“ und ohne Matrix. Gibt es auch die nicht, steht
+  „keine Vorhersage festgehalten“ da. Nach Anpfiff wird **nie** live gerechnet.
+- **Warum 15 Minuten Abstand:** der Commit muss vor Anpfiff noch deployt sein. Ein späterer
+  Schnappschuss stünde erst nach Anpfiff online, und in den Minuten dazwischen zeigte die
+  Seite etwas anderes als danach.
+- **Taktgeber-Stunden:** 08–18 UTC reichen. Für den spätesten Anpfiff (20:30 Uhr im
+  Winter, 19:30 UTC) liegen die Ticks 18:30 und 18:45 im Fenster. selfCheck rechnet für
+  jede Partie des Spielplans nach, dass mindestens zwei Ticks hineinfallen. Die Stunden des
+  Taktgebers deshalb nicht über 18 Uhr hinaus kürzen.
+- Die Spieltage 1 bis 9 lagen vor der Regel. Sie zeigen das Vorwärts-Log, Spieltag 3
+  nichts. Was dort bei Anpfiff auf der Seite stand, lässt sich nicht mehr herstellen.
+
+Für den Freeze ist das neutral: kein `configHash`, keine Modelländerung. Der Schnappschuss
+rechnet mit derselben Funktion wie die Seite (`src/data/displayPredictions.ts`).
 
 ### Taktgeber
 

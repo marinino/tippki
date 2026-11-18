@@ -160,6 +160,19 @@ jobs:
         if: steps.pruefung.outputs.due == 'true' || steps.pruefung.outputs.log_due == 'true'
         run: npm run forward-log
 
+      # Bei jedem Tick: Partien, deren Anpfiff 60 bis 15 Minuten entfernt ist, werden
+      # eingefroren (data/kickoff_snapshots.jsonl, append-only). Ab dann zeigt die Seite fuer
+      # sie nur noch diesen Stand, fuer immer (VERBESSERUNGEN.md, Punkt 12). Nach der
+      # Recherche, damit der Spielkontext drin ist; vor dem Commit, damit der Stand vor
+      # Anpfiff online ist. Kostet ohne faellige Partie keinen Fit.
+      #
+      # continue-on-error wie bei der Recherche: ein Fehler hier darf den Commit der
+      # uebrigen Daten nicht verhindern. Rot wird der Lauf trotzdem, siehe letzter Schritt.
+      - name: Anpfiff einfrieren
+        id: schnappschuss
+        continue-on-error: true
+        run: npm run kickoff-snapshot | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Laeuft immer, nicht nur bei faelliger Recherche: hat sich oben eine Anstosszeit
       # verschoben, gehoert das sofort ins Repository und damit in die Anzeige. Sonst
       # stuende die Verschiebung bis zum naechsten Nachbereitungslauf nur im Runner.
@@ -185,6 +198,8 @@ jobs:
             git commit -m "Spielkontext Spieltag ${SPIELTAG} (${GRUND})"
           elif ! git diff --cached --quiet -- data/forward_log.jsonl; then
             git commit -m "Basismodell Spieltag ${SPIELTAG} protokolliert (vor der Recherche)"
+          elif ! git diff --cached --quiet -- data/kickoff_snapshots.jsonl; then
+            git commit -m "Vorhersage bei Anpfiff eingefroren (${GRUND})"
           else
             git commit -m "Spielplan aufgefrischt"
           fi
@@ -195,6 +210,20 @@ jobs:
 
       # Ganz am Ende, damit alles davor -- protokollieren, committen, pushen -- vorher
       # durchgelaufen ist. Erst dann darf der Lauf rot werden.
+      - name: Einfrierfehler melden
+        if: steps.schnappschuss.outcome == 'failure'
+        run: |
+          {
+            echo ""
+            echo "### Einfrieren fehlgeschlagen"
+            echo ""
+            echo "npm run kickoff-snapshot ist abgebrochen, Log des Schritts oben ansehen."
+            echo "Der naechste Tick versucht es erneut, solange der Anpfiff mindestens 15"
+            echo "Minuten entfernt ist. Danach gibt es fuer die Partie keinen Schnappschuss,"
+            echo "und die Seite zeigt die Zeile aus dem Vorwaerts-Log."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
       - name: Recherchefehler melden
         if: steps.recherche.outcome == 'failure'
         run: |

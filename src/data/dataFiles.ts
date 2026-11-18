@@ -45,6 +45,11 @@ export const DATA_FILES: readonly DataFile[] = [
     beschreibung: "Vorwaerts-Log: die Vorhersagen vor Anpfiff. Append-only.",
     gepflegt: true,
   },
+  {
+    name: "kickoff_snapshots.jsonl",
+    beschreibung: "Was die Seite bei Anpfiff zeigte, eingefroren. Append-only, nie umgeschrieben.",
+    gepflegt: true,
+  },
 ];
 
 // Die historischen Saisons kommen dazu, wenn jemand alles herunterlaedt -- angezeigt

@@ -24,6 +24,7 @@ import {
   missingAfterKickoff,
   missingResearchAfterKickoff,
 } from "../eval/forwardLogRules";
+import { missingSnapshotsAfterKickoff, readKickoffSnapshots } from "../data/kickoffSnapshots";
 
 const DATA_DIR = join(process.cwd(), "data");
 const LOG_PATH = join(DATA_DIR, "forward_log.jsonl");
@@ -45,6 +46,9 @@ const entries = existsSync(LOG_PATH)
 const now = new Date();
 const missing = missingAfterKickoff(fixtures, entries, FORWARD_SEASON, now, parseKickoff);
 const unresearched = missingResearchAfterKickoff(fixtures, entries, FORWARD_SEASON, now, parseKickoff);
+// Seit dem 19.11.2026: jede angepfiffene Partie soll einen Anpfiff-Schnappschuss haben
+// (src/data/kickoffSnapshots.ts). Fehlt er, zeigt die Seite fuer immer nur die Logzeile.
+const unfrozen = missingSnapshotsAfterKickoff(fixtures, readKickoffSnapshots(), FORWARD_SEASON, now, parseKickoff);
 
 const gaps = KNOWN_GAPS.filter((g) => g.season === FORWARD_SEASON);
 if (gaps.length > 0) {
@@ -88,4 +92,19 @@ if (unresearched.length === 0) {
   );
 }
 
-process.exit(missing.length > 0 || unresearched.length > 0 ? 1 : 0);
+if (unfrozen.length === 0) {
+  console.log("Jede angepfiffene Partie (ab 19.11.2026) ist bei Anpfiff eingefroren.");
+} else {
+  console.log(`\n${unfrozen.length} angepfiffene Partie(n) ohne Anpfiff-Schnappschuss:\n`);
+  for (const m of unfrozen) {
+    console.log(`  Spieltag ${m.matchday}: ${m.homeTeam} vs ${m.awayTeam} (Anpfiff ${m.kickoff})`);
+  }
+  console.log(
+    `\nNachholen geht nicht -- ein spaeterer Schnappschuss waere nicht der Stand bei Anpfiff.\n` +
+      `Die Seite zeigt fuer diese Partien die Zeile aus dem Vorwaerts-Log. Ursache pruefen:\n` +
+      `kam zwischen 60 und 15 Minuten vor Anpfiff ein Tick des Taktgebers an\n` +
+      `(SAISONBETRIEB.md, "Taktgeber")? Ist der Schritt "Anpfiff einfrieren" rot?`
+  );
+}
+
+process.exit(missing.length > 0 || unresearched.length > 0 || unfrozen.length > 0 ? 1 : 0);

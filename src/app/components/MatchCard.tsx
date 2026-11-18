@@ -1,5 +1,5 @@
-import type { Prediction } from "../types";
-import { describeProvenance, formatMatchDayTime, num, odds } from "../lib/format";
+import { hasNumbers, type PricedPrediction, type Prediction } from "../types";
+import { describeProvenance, describeSource, formatMatchDayTime, num, odds } from "../lib/format";
 import { ProbabilityBar } from "./ProbabilityBar";
 import { TeamName } from "./TeamName";
 import { MatchDetails } from "./MatchDetails";
@@ -9,7 +9,9 @@ import styles from "./MatchCard.module.css";
 // wahrscheinlichsten Ausgangs -- das ist die Zahl, die ein Buchmacher aushaengen wuerde
 // und an der sich dieses Modell messen lassen muss.
 export function MatchCard({ prediction: p }: { prediction: Prediction }) {
+  if (!hasNumbers(p)) return <MissingCard prediction={p} />;
   const favourite = pickFavourite(p);
+  const source = describeSource(p.source);
 
   return (
     <article className={styles.card}>
@@ -17,6 +19,7 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
         <span className={styles.kickoff}>{formatMatchDayTime(p.date)}</span>
         <span className={styles.provenance}>
           {describeProvenance(p.llmStatus)}
+          {source && <span className={styles.frozen}> · {source}</span>}
         </span>
       </header>
 
@@ -52,7 +55,26 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
   );
 }
 
-function pickFavourite(p: Prediction): { label: string; fairOdds: number } {
+// Angepfiffen, ohne Schnappschuss und ohne Logzeile. Keine Zahlen statt nachgerechneter:
+// eine Vorhersage, die erst nach Anpfiff entsteht, ist keine.
+function MissingCard({ prediction: p }: { prediction: Prediction }) {
+  return (
+    <article className={styles.card}>
+      <header className={styles.head}>
+        <span className={styles.kickoff}>{formatMatchDayTime(p.date)}</span>
+        <span className={styles.provenance}>keine Vorhersage festgehalten</span>
+      </header>
+      <div className={styles.body}>
+        <div className={styles.teams}>
+          <TeamName name={p.homeTeam} logo={p.homeLogo} isEstimated={false} />
+          <TeamName name={p.awayTeam} logo={p.awayLogo} isEstimated={false} muted />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function pickFavourite(p: PricedPrediction): { label: string; fairOdds: number } {
   const options = [
     { label: `Sieg ${p.homeTeam}`, prob: p.homeWinProb, fairOdds: p.prices.outcome.home.fairOdds },
     { label: "Unentschieden", prob: p.drawProb, fairOdds: p.prices.outcome.draw.fairOdds },

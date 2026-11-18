@@ -17,6 +17,7 @@
     "forward-log": "tsx src/scripts/forwardLog.ts",
     "forward-eval": "tsx src/scripts/forwardEval.ts",
     "forward-log-check": "tsx src/scripts/forwardLogCheck.ts",
+    "kickoff-snapshot": "tsx src/scripts/kickoffSnapshot.ts",
     "walk-forward": "tsx src/scripts/walkForward.ts",
     "predict": "tsx src/scripts/predict.ts",
     "refresh-llm": "tsx src/scripts/refreshLlm.ts",

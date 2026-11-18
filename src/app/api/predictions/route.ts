@@ -1,18 +1,34 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { isAdminRequest } from "../../../data/adminAuth";
 import { isReadOnlyDeployment } from "../../../data/deployment";
 import { nextMatchdayOf, parseKickoff } from "../../../data/kickoff";
 import { loadAllMatches } from "../../../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../../../model/teamStrength";
-import { predictPipeline } from "../../../model/predictPipeline";
-import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
-import { computeXgForm } from "../../../model/xgForm";
-import { cacheKey, llmStatusOf, readLlmCache } from "../../../llm/llmCache";
-import { describeFactors } from "../../../llm/llmAdjustment";
+import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel, type LeagueModel } from "../../../model/teamStrength";
+import { readLlmCache } from "../../../llm/llmCache";
+import { FORWARD_SEASON } from "../../../eval/splits";
+import {
+  displayNumbersFromLog,
+  liveDisplayNumbers,
+  type LoggedRow,
+} from "../../../data/displayPredictions";
+import { chooseDisplaySource, readKickoffSnapshots } from "../../../data/kickoffSnapshots";
+import type { Prediction } from "../../types";
 
-// 0 bis 5 Tore je Seite. Darueber traegt die Matrix zusammen weit unter einem Prozent.
-const DISPLAY_MAX_GOALS = 5;
+function readForwardLog(): LoggedRow[] {
+  const path = join(process.cwd(), "data", "forward_log.jsonl");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf-8")
+    .split("\n")
+    .filter((line) => line.trim())
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as LoggedRow];
+      } catch {
+        return [];
+      }
+    });
+}
 
 interface Fixture {
   homeTeam: string;
@@ -45,65 +61,49 @@ export async function GET(request: Request) {
 
   const fixtures = allFixtures.filter((f) => f.matchday === selectedMatchday);
 
-  const matches = loadAllMatches();
-  const model = buildLeagueModel(matches, PRODUCTION_MODEL_OPTIONS);
-
   // Kein Live-Abruf hier -- nur lesen, was zuletzt ueber den manuellen Knopf geholt wurde.
   // Ein Kontext aus einem anderen Spieltag waere schlimmer als keiner.
   const llmCache = readLlmCache();
   const cacheForMatchday =
     llmCache && llmCache.matchday === selectedMatchday ? llmCache : null;
-  const llmByFixture = cacheForMatchday ? cacheForMatchday.contexts : {};
 
-  const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
-    const matchDate = parseKickoff(date);
-    const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
+  // Was bei Anpfiff dastand, wird nie wieder veraendert (src/data/kickoffSnapshots.ts).
+  // Eingefrorene Partien kommen aus dem Schnappschuss, angepfiffene ohne Schnappschuss aus
+  // dem Vorwaerts-Log, und nur die uebrigen werden live gerechnet. Der Fit faellt damit fuer
+  // jeden vergangenen Spieltag ganz weg.
+  const now = new Date();
+  const snapshots = readKickoffSnapshots();
+  const logRows = readForwardLog();
+  let model: LeagueModel | null = null;
+  const liveModel = () => (model ??= buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS));
 
-    const out = predictPipeline({
-      model,
-      homeTeam,
-      awayTeam,
-      homeForm: computeXgForm(homeTeam, matchDate),
-      awayForm: computeXgForm(awayTeam, matchDate),
-      llmContext: cachedLlm?.context ?? null,
-    });
-
-    return {
+  const predictions = fixtures.map((fixture): Prediction => {
+    const { homeTeam, awayTeam, date } = fixture;
+    const head = {
       homeTeam,
       awayTeam,
       homeLogo: logosByTeam[homeTeam] ?? null,
       awayLogo: logosByTeam[awayTeam] ?? null,
       date,
-      expectedHomeGoals: out.expectedHomeGoals,
-      expectedAwayGoals: out.expectedAwayGoals,
-      scoreGrid: toScoreGrid(out.matrix, DISPLAY_MAX_GOALS),
-      homeWinProb: out.probs.homeWinProb,
-      drawProb: out.probs.drawProb,
-      awayWinProb: out.probs.awayWinProb,
-      mostLikelyScore: argmaxCell(out.matrix),
-      prices: out.prices,
-      homeIsEstimated: out.homeIsEstimated,
-      awayIsEstimated: out.awayIsEstimated,
-      llmApplied: out.llmAdjustment !== null,
-      // Vier Zustaende statt eines Ja/Nein -- siehe llmStatusOf. "reines Modell" hiess
-      // bisher sowohl "nie gefragt" als auch "gefragt, nichts gefunden".
-      llmStatus: llmStatusOf(cacheForMatchday, homeTeam, awayTeam, out.llmAdjustment !== null),
-      llmFailureReason: cacheForMatchday?.failures?.[cacheKey(homeTeam, awayTeam)] ?? null,
-      llmFetchedAt: cachedLlm?.fetchedAt ?? null,
-      // Relative Aenderung der Torerwartung je Seite, in Prozent. Seit dem Ausbau der
-      // Favoritensicherung ist das die einzige Groesse, die zwischen zwei Korrekturen noch
-      // variiert -- und damit die, an der sich beobachten laesst, ob der Layer ueberhaupt
-      // etwas tut.
-      llmHomeAdjustmentPct: out.llmAdjustment
-        ? (Math.exp(out.llmAdjustment.homeLogAdj) - 1) * 100
-        : null,
-      llmAwayAdjustmentPct: out.llmAdjustment
-        ? (Math.exp(out.llmAdjustment.awayLogAdj) - 1) * 100
-        : null,
-      llmFactors: cachedLlm ? describeFactors(cachedLlm.context) : [],
-      llmSummary: cachedLlm?.context.summary ?? null,
-      llmSources: cachedLlm?.sources ?? [],
     };
+    const source = chooseDisplaySource({
+      season: FORWARD_SEASON,
+      fixture,
+      kickoff: parseKickoff(date),
+      now,
+      snapshots,
+      logRows,
+    });
+    switch (source.kind) {
+      case "anpfiff":
+        return { ...head, ...source.snapshot.numbers, source: { kind: "anpfiff", at: source.snapshot.frozenAt } };
+      case "vorwaertslog":
+        return { ...head, ...displayNumbersFromLog(source.row), source: { kind: "vorwaertslog", at: source.row.loggedAt } };
+      case "fehlt":
+        return { ...head, source: { kind: "fehlt" } };
+      case "live":
+        return { ...head, ...liveDisplayNumbers(liveModel(), fixture, cacheForMatchday), source: { kind: "live" } };
+    }
   });
 
   return Response.json({

@@ -1,41 +1,41 @@
 // Die Formen, die die API-Routen an die UI liefern.
 
-import type { LlmStatus } from "../llm/llmCache";
 import type { PriceSheet } from "../model/priceSheet";
 import type { MetricSummary } from "../eval/metrics";
 import type { VariantName } from "../eval/backtestCore";
 import type { BenchmarkSource } from "../eval/benchmarkOdds";
+import type { DisplayNumbers } from "../data/displayPredictions";
 
-export interface Prediction {
+interface PredictionHead {
   homeTeam: string;
   awayTeam: string;
   homeLogo: string | null;
   awayLogo: string | null;
   date: string;
-  expectedHomeGoals: number;
-  expectedAwayGoals: number;
-  // Wahrscheinlichkeit je Ergebnis, grid[Heimtore][Auswaertstore], 0..5 Tore je Seite.
-  scoreGrid: number[][];
-  homeWinProb: number;
-  drawProb: number;
-  awayWinProb: number;
-  mostLikelyScore: string;
-  // Faire Quoten ueber alle Maerkte -- das eigentliche Produkt.
-  prices: PriceSheet;
-  homeIsEstimated: boolean;
-  awayIsEstimated: boolean;
-  // Recherchierter Spielkontext (Ausfaelle, Belastung, Motivation).
-  llmApplied: boolean;
-  // Ob und wie die Recherche fuer genau diese Partie gelaufen ist -- llmApplied allein
-  // konnte "nie gefragt" nicht von "gefragt, nichts gefunden" unterscheiden.
-  llmStatus: LlmStatus;
-  llmFailureReason: string | null;
-  llmFetchedAt: string | null;
-  llmHomeAdjustmentPct: number | null;
-  llmAwayAdjustmentPct: number | null;
-  llmFactors: string[];
-  llmSummary: string | null;
-  llmSources: string[];
+}
+
+// Woher die Zahlen einer Partie kommen (src/data/kickoffSnapshots.ts).
+//   live          -- noch nicht eingefroren, bei jedem Aufruf neu gerechnet
+//   anpfiff       -- kurz vor Anpfiff eingefroren (`at`), nie wieder veraendert
+//   vorwaertslog  -- angepfiffen ohne Schnappschuss: die protokollierte Vorhersage (`at`),
+//                    geschrieben vor dem ersten Anpfiff des Spieltags, ohne Matrix
+export type PredictionSource =
+  | { kind: "live" }
+  | { kind: "anpfiff"; at: string }
+  | { kind: "vorwaertslog"; at: string };
+
+// Die Felder der Zahlen (Torerwartung, 1X2, Preisblatt, Spielkontext) sind in
+// DisplayNumbers beschrieben.
+export type PricedPrediction = PredictionHead & DisplayNumbers & { source: PredictionSource };
+
+// Angepfiffen, aber weder eingefroren noch protokolliert: keine Zahlen. Nachgerechnet wird
+// nach Anpfiff nie.
+export type MissingPrediction = PredictionHead & { source: { kind: "fehlt" } };
+
+export type Prediction = PricedPrediction | MissingPrediction;
+
+export function hasNumbers(p: Prediction): p is PricedPrediction {
+  return p.source.kind !== "fehlt";
 }
 
 export interface PredictionsResponse {

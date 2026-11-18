@@ -91,28 +91,6 @@ Deshalb zur nächsten Saison.
 lokal schon auf der Platte. Im Workflow ist das harmlos (kein Commit), lokal sagt die
 Abbruchmeldung es dazu.
 
-### 3. `llmStatus` behauptet "nicht recherchiert" für jeden vergangenen Spieltag
-
-`src/app/api/predictions/route.ts:54`, `src/llm/llmCache.ts:108`
-
-`data/llm_context_cache.json` hält immer nur **einen** Spieltag; ein Refresh überschreibt
-den vorherigen. Die UI lässt aber über `availableMatchdays` frei blättern. Sobald
-Spieltag 4 recherchiert ist, zeigen alle Partien von Spieltag 3 `"nicht_recherchiert"` —
-obwohl dort recherchiert, gefunden und korrigiert wurde. `llmStatusOf` ist korrekt, der
-Aufrufer reicht ihm nur `null`.
-
-Das untergräbt genau den Zweck der vier Zustände: der stille Ausfall der Automatik soll
-sich vom unauffälligen Spieltag unterscheiden lassen. Beim Zurückblättern tut er es nicht.
-
-**Fix (Vorschlag):** fünfter Zustand `"nicht_mehr_im_cache"`, oder den Status für
-vergangene Spieltage aus `data/forward_log.jsonl` lesen — dort steht die Wahrheit, und
-die Datei ist append-only.
-
-**Nachtrag 16.09.:** zurückgestellt, geht in Punkt 12 auf. Die angezeigten Zahlen *sind*
-für vergangene Spieltage reines Modell (die Route reicht keinen Kontext durch), das
-Etikett stimmt also für die Zahlen. Das eigentliche Problem ist, welche Zahlen dort
-überhaupt stehen.
-
 ### 6. Die Formkurve ist ungeklammert und größer als der geklammerte LLM-Layer [eingefroren]
 
 `src/model/predictPipeline.ts:80`, `src/llm/llmAdjustment.ts:43`
@@ -167,38 +145,6 @@ Handzähler hält aber nur, solange jemand daran denkt.
 hashen. `computeXgForm` liest Dateien und braucht dafür erst eine injizierbare
 Datenquelle. Wird der Abdruck neu aufgenommen, gehört er verankert in den Hash wie die
 anderen Felder vom 18.11., sonst schneidet allein das Aufnehmen das Log.
-
-### 12. Vergangene Spieltage zeigen weder die echte noch eine ehrliche Vorhersage
-
-`src/app/api/predictions/route.ts:48-49`
-
-Die Route fittet für **jeden** gewählten Spieltag `buildLeagueModel(loadAllMatches())`,
-also mit allen bisherigen Ergebnissen, auch denen des angezeigten Spieltags. Wer
-zurückblättert, sieht Zahlen, die weder vor Anpfiff so geloggt wurden noch vor Anpfiff so
-hätten entstehen können. Nirgends gekennzeichnet.
-
-Gemessen an den 18 abgeschlossenen Partien mit Variante `model` (Spieltag 1 und 2):
-
-| | Abweichung Heimsieg | RPS |
-|---|---|---|
-| echte Vorhersage (Log) | — | 0,2436 |
-| ehrlich nachgerechnet (heutiger Fit, nur Spiele vor Anpfiff) | 12,0 pp zum Log | 0,2051 |
-| Anzeige heute | 2,4 pp zu „ehrlich", max. 10,6 pp | 0,1834 |
-
-Die 12 pp gehen auf die Fit-Reparatur vom 10.09. zurück, die 2,4 pp auf das
-Ergebniswissen. Größter Einzelfall durch Ergebniswissen: Elversberg–Leverkusen 3:2,
-ehrlich 11,0 % Heimsieg, angezeigt 21,5 %. Die Anzeige sieht dadurch rund 11 % besser aus,
-als ein ehrlich gerechnetes Modell wäre.
-
-Punkt 3 (Status-Etikett beim Zurückblättern) ist ein Teil davon.
-
-**Optionen (Entscheidung offen):**
-1. Vergangene Spieltage zeigen die **geloggte** Vorhersage aus `forward_log.jsonl`. Das Log
-   enthält 1X2, Torerwartung, Over 2,5, BTTS, Handicaps und die zehn wahrscheinlichsten
-   Ergebnisse — kein vollständiges Preisblatt, keine Matrix.
-2. Ehrlich nachrechnen (nur Spiele vor Anpfiff) und als „nachträglich gerechnet"
-   kennzeichnen.
-3. Für vergangene Spieltage nur Ergebnisse zeigen, keine Vorhersage.
 
 ### 15. Ein Rückkehrer gilt als bekannt und wird zum Ligadurchschnitt gezogen, nicht zum Aufsteiger [eingefroren]
 
@@ -287,6 +233,55 @@ sich, der Hash springt von `3cc0ddad` auf `c311cced`.
 ---
 
 ## Abgeschlossen
+
+### 12 (mit 3). Was bei Anpfiff dastand, bleibt für immer
+
+Die Route rechnete jede Partie bei jedem Aufruf neu, auch längst gespielte, mit allen bis
+dahin bekannten Ergebnissen. Wer zurückblätterte, sah Zahlen, die vor Anpfiff so nie
+dastanden. Gemessen am 16.09. an Spieltag 1 und 2: RPS 0,1834 angezeigt gegen 0,2436 im
+Log, die Anzeige sah also rund 11 % besser aus als ein ehrlich gerechnetes Modell.
+Punkt 3 gehörte dazu: beim Zurückblättern stand dort „nicht recherchiert“, weil der Cache
+nur einen Spieltag hält. Jetzt kommt der Status aus Schnappschuss oder Logzeile.
+
+**Entschieden (18.11.):** die Quoten, die bei Anpfiff auf der Seite stehen, dürfen sich nie
+wieder ändern. Partien ohne festgehaltenen Stand zeigen die Zeile aus dem Vorwärts-Log,
+gekennzeichnet.
+
+**Umgesetzt:**
+- `src/data/displayPredictions.ts`: die Zahlen einer Karte an genau einer Stelle gerechnet.
+  Die Route und der Schnappschuss rufen dieselbe Funktion (Rest von Punkt 16, für die
+  Anzeige). Dazu `displayNumbersFromLog`: nur geloggte Werte und exakte Umformungen davon,
+  nichts neu gerechnet.
+- `src/data/kickoffSnapshots.ts`: Fenster 60 bis 15 Minuten vor Anpfiff, append-only
+  `data/kickoff_snapshots.jsonl`, und `chooseDisplaySource` als einzige Entscheidung, was
+  eine Partie zeigt. Ein Schnappschuss gilt vor und nach Anpfiff. Angepfiffen ohne
+  Schnappschuss kommt das Log, ohne beides nichts. Nach Anpfiff wird nie live gerechnet. Eine
+  nachträglich korrigierte Anstoßzeit gibt eingefrorene Zahlen nicht frei, eine verlegte
+  Partie bekommt einen neuen Schnappschuss.
+- `npm run kickoff-snapshot` als Schritt in `spielkontext.yml` (jeder Tick), eigener
+  Commit-Text, roter Lauf bei Fehler.
+- `forward-log-check` meldet angepfiffene Partien ab dem 19.11. ohne Schnappschuss.
+- UI: die Karte sagt „eingefroren HH:MM“ oder „Vorwärts-Log vom TT.MM.“. Beim Log heißt die
+  Aufklappzeile „Protokollierte Märkte“ und trägt einen Hinweis. Ohne Zahlen gibt es eine
+  schlichte Karte.
+- selfCheck-Abschnitt „Vorhersage bei Anpfiff eingefroren“ (338 Checks): Fenstergrenzen,
+  Auswahlregel, Alarm, Schnappschuss bitgleich nach JSON, Log-Rückfall gegen echte Zeilen,
+  mindestens zwei Taktgeber-Ticks im Fenster für jede Partie des Spielplans, echter Bestand
+  ohne Duplikat und im Fenster.
+
+Durchgespielt in einer isolierten Kopie mit künstlich auf „in 30 Minuten“ gelegter Partie:
+- Der erste Lauf friert ein, der zweite und dritte schreiben nichts.
+- Die echte Route liefert für die eingefrorene Partie exakt die Zahlen der Zeile.
+- Spieltag 5 kommt aus dem Log, Spieltag 3 hat keine Vorhersage.
+
+Im Browser angesehen: Spieltag 10 live ohne Siegel, Spieltag 5 mit Log-Hinweis und
+reduziertem Preisblatt, Spieltag 3 mit leeren Karten.
+
+**Grenze:** Für die Spieltage 1 bis 9 lässt sich nicht mehr herstellen, was bei Anpfiff auf
+der Seite stand, weil nie etwas gespeichert wurde. Das Log ist das Nächstbeste, aber älter
+(vor dem ersten Anpfiff des Spieltags) und ohne Matrix.
+
+`configHash` unverändert, kein Eingriff ins Modell.
 
 ### 2 (laute Hälfte). Wächter für den xG-Feed
 

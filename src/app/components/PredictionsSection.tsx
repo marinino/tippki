@@ -1,4 +1,5 @@
 import type { usePredictions } from "../hooks/usePredictions";
+import { hasNumbers } from "../types";
 import { MatchCard } from "./MatchCard";
 import { FreshnessLines, MatchdayToolbar } from "./MatchdayToolbar";
 import { SkeletonCards } from "./Skeleton";
@@ -47,7 +48,7 @@ export function PredictionsSection({
         </div>
       )}
 
-      {data && data.predictions.some((p) => p.homeIsEstimated || p.awayIsEstimated) && (
+      {data && data.predictions.some((p) => hasNumbers(p) && (p.homeIsEstimated || p.awayIsEstimated)) && (
         <p className="footnote">* geschätzt — keine oder wenig Bundesliga-Historie</p>
       )}
     </section>
