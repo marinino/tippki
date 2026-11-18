@@ -33,6 +33,24 @@ gepaart. Ergebnis hierher, Umstellung frühestens zur Saison 2027/28.
 **Achtung beim Umstellen:** `formMode` steht nicht in `PipelineConfig`. Ohne Punkt 8
 bemerkt der Hash den Wechsel nicht.
 
+**Nachtrag 17.09., dritter Kandidat „gegen Erwartung“** (Idee aus der Fragerunde): auch
+`residual` bereinigt nicht um den **Gegner** und Heim/Auswärts, sondern nur um das eigene
+Niveau der letzten 17 Spiele. Direkter wäre: je Spiel tatsächliche xG-Differenz minus die
+Differenz, die das Modell für genau diese Paarung erwartet hat (`λ_eigen − λ_gegner` aus
+`baseLambdas`), und davon das Mittel. Nachgerechnet für Spieltag 4, Stärken aus dem Fit vor
+Saisonbeginn:
+
+| | roh (produktiv) | gegen Erwartung |
+|---|---|---|
+| Bayern (Stuttgart 2,83 / erw. 1,85; Schalke 1,80 / 2,13; Elversberg 2,03 / 2,13) | +2,22 → ×1,56 | +0,18 → ×1,04 |
+| Union (Frankfurt 0,16 / −0,08; Leverkusen −3,14 / −1,32; Schalke −1,30 / 0,62) | −1,43 → ×0,75 | −1,17 → ×0,79 |
+
+Bayerns „Form“ ist fast vollständig „Bayern ist Bayern“, Unions Einbruch ist echt. Offene
+Frage beim Messen: xG-Differenz gegen eine Erwartung aus einem **Tore**-Fit zu stellen
+mischt zwei Skalen. Die Variante braucht außerdem das Modell zum Zeitpunkt jedes Formspiels
+(im Walk-forward vorhanden, produktiv ein Fit mehr). In den Vergleich aus dem nächsten Schritt
+als dritten `formMode` aufnehmen.
+
 ### 2. Ein hängender xG-Feed zieht Vorsaison-Spiele ins Formfenster
 
 `src/model/xgForm.ts:131-146`
@@ -92,7 +110,17 @@ Etikett stimmt also für die Zahlen. Das eigentliche Problem ist, welche Zahlen 
 - `MAX_SEARCHES = 14` — bestimmt, wie viel die Recherche überhaupt findet, und taucht im
   Abdruck nirgends auf. `searchErrors` protokolliert bereits, wenn das Limit greift.
 
-Beide gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehmen ändert
+- **Nachtrag 18.09.:** `llmMappingFingerprint` (`src/model/pipelineConfig.ts:127`) sieht
+  nur einen Teil der Abbildung. Er rechnet jede Kombination aus Rolle, Wichtigkeit,
+  Sicherheit, Richtung und Seite, aber immer mit `category: FACT_CATEGORIES[0]`
+  (`absence`) und immer mit **zwei gleichen** Fakten. Damit bleiben unsichtbar:
+  `CATEGORY_SCALE` für `return`, `congestion`, `manager`, `motivation` (vier von fünf
+  Werten), und jede Änderung daran, wie **verschiedene** Fakten gruppiert und gedämpft
+  werden (siehe Punkt 19). Am Code abgelesen, nicht per Änderung ausprobiert. Fix: alle
+  Kategorien durchlaufen und ein paar gemischte Paare (verschiedene Rolle, verschiedene
+  Richtung) mit aufnehmen.
+
+Die beiden Konstanten gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehmen ändert
 den Hash und spaltet das Log. Also entweder jetzt mit bewusstem Schnitt, oder zur
 nächsten Saison zusammen mit Punkt 1.
 
@@ -118,6 +146,11 @@ residual 28,1 %**. Auch die Residual-Variante braucht also eine Grenze.
 
 **Nächster Schritt:** im Walk-forward eine geklammerte Form messen (z. B. ±0,15 oder
 ±0,25), zusammen mit Punkt 1. Umstellung zur nächsten Saison.
+
+**Nachtrag 16.09., live am Spieltag 4:** Bayern–Union, `npm run predict`. Form Bayern +2,22
+(Faktor ×1,56), Union −1,43 (×0,75). Torerwartung 3,32 : 0,80 ohne Form, 5,17 : 0,60 mit
+Form (vor Temperatur). Heimsieg 78,3 % → **93,7 %**. Genau der Bereich über 90 %, den die
+Temperatur zurückholen sollte und in dem der Buchmacher praktisch nie eine Quote stellt.
 
 ### 8. Der `configHash` sieht keine Logikänderung auf der Modellseite
 
@@ -158,6 +191,13 @@ treffen. Der Weg existiert schon (`dispatchWorkflow`). Erst angehen, wenn die n�
 Spieltage zeigen, dass das Fenster trotz allem verfehlt wird — `llm: null` in den Zeilen
 eines Spieltags ist das Signal.
 
+**Billiger Zwischenschritt (18.09., ungeprüft):** GitHub nennt „the start of every hour“
+ausdrücklich als Spitzenlast, bei der geplante Läufe verzögert und bei genug Last
+verworfen werden (Doku „Events that trigger workflows“, Abschnitt `schedule`). Der Zeitplan
+`*/15` liegt genau auf :00, :15, :30, :45, also dort, wo alle anderen auch planen. Ungerade
+Minuten (`7,22,37,52 8-18 * * *`) kosten nichts. Ob sie wirklich mehr Läufe durchbringen,
+zeigt nur die Actions-API über ein paar Spieltage.
+
 ### 12. Vergangene Spieltage zeigen weder die echte noch eine ehrliche Vorhersage
 
 `src/app/api/predictions/route.ts:48-49`
@@ -189,6 +229,135 @@ Punkt 3 (Status-Etikett beim Zurückblättern) ist ein Teil davon.
 2. Ehrlich nachrechnen (nur Spiele vor Anpfiff) und als „nachträglich gerechnet"
    kennzeichnen.
 3. Für vergangene Spieltage nur Ergebnisse zeigen, keine Vorhersage.
+
+### 15. Ein Rückkehrer gilt als bekannt und wird zum Ligadurchschnitt gezogen, nicht zum Aufsteiger [eingefroren]
+
+`src/model/predictMatch.ts:31-34`, `src/model/teamStrength.ts:344`, `PRODUCTION_MODEL_OPTIONS`
+
+`promotedTeamDefault` (Mittel der acht schwächsten Teams) greift nur, wenn ein Team **gar
+nicht** in den Daten seit 2014/15 vorkommt. Ein Aufsteiger, der vor Jahren schon einmal oben
+war, ist dagegen „bekannt“. Seine alten Spiele wiegen bei 500 Tagen Halbwertszeit fast
+nichts, und die 8 Ridge-Pseudospiele ziehen ihn zum **Ligadurchschnitt**, nicht zum Niveau
+eines Aufsteigers.
+
+Nachgerechnet am echten Bestand, Fit nur mit Spielen vor Saison 2026 (Stand Spieltag 1):
+
+| | Qualität (attack − defense) |
+|---|---|
+| Paderborn (zuletzt 2019/20: Letzter, 20 Punkte) | −0,085 |
+| `promotedTeamDefault` | −0,309 |
+| Elversberg (unbekannt → Default) | −0,309 |
+| zum Vergleich: Werder / Union | −0,063 / −0,056 |
+
+Paderborns Saison 2019/20 zählt heute rund 1 Spiel (34 × 2^(−6,5 J / 500 d) ≈ 1,3) gegen den
+Ridge im Durchschnitt (`k = 8`, das entspricht etwa 5 Spielen, siehe Punkt 17). Das Modell hielt einen Aufsteiger damit vor Spieltag 1 für
+ein Mittelfeldteam. Nach drei Spielen (1 Punkt, 0:4 Tore) ist er mit −0,280 ganz unten,
+der Fehler betrifft also vor allem die ersten Spieltage.
+
+**Nächster Schritt:** messen, ob ein Rückkehrer ohne Vorsaison besser zum Default statt zu 0
+gezogen wird (Ridge-Ziel = `promotedTeamDefault` für Teams, die in der Vorsaison fehlten).
+Betrifft jede Saison zwei bis drei Teams. Logikänderung, siehe Punkt 8. Umstellung
+frühestens zur Saison 2027/28.
+
+### 16. `npm run predict` geht einen eigenen Weg neben der Route
+
+`src/scripts/predict.ts:43,63`, `src/app/api/predictions/route.ts:36,65`
+
+Skript und Route machen dasselbe (Spielplan lesen → Modell fitten → `predictPipeline` je
+Partie), jeweils als eigene Kopie. Sie sind bereits auseinandergelaufen: die Route nimmt
+`parseKickoff` und `nextMatchdayOf`, das Skript `new Date(f.date)` und eine eigene
+Suche nach dem nächsten Spieltag. `fixtures.json` hat keine Zeitzone
+(`"2026-08-28T20:30:00"`), auf einem Rechner in UTC läge jeder Anpfiff zwei Stunden daneben.
+
+Heute harmlos, weil `predict` nur lokal in deutscher Zeit läuft und kein Workflow es
+aufruft. **Fix (klein):** im Skript `parseKickoff` und `nextMatchdayOf` verwenden. Später
+eventuell eine gemeinsame Funktion „Vorhersagen für Spieltag X“, die beide aufrufen.
+
+### 17. Fünf Kommentare beschreiben den Code anders, als er läuft
+
+Reine Doku, bewegt nichts. Gefunden in Runde „predictPipeline“.
+
+- `src/model/predictPipeline.ts:15-19`: die „feste Reihenfolge“ hat vier Schritte und
+  kennt die Kalibrierungstemperatur nicht. Zeile 99 nennt die Temperatur „Schritt 4“, im
+  Kopf ist Schritt 4 das Preisblatt.
+- `src/llm/llmAdjustment.ts:61,85`: „Schritt 1-3: zusammenfassen, daempfen, klammern“
+  und direkt darunter „Schritt 3: anwenden“. Der Kopf der Datei (Zeile 5) zählt
+  dämpfen, klammern, anwenden.
+- `src/model/scoreMatrix.ts:248-250`: „Nach der Dixon-Coles-Korrektur sind das nicht mehr
+  exakt die eingesetzten Lambdas -- tau und der Draw-Boost verschieben Masse.“ Für tau
+  stimmt das nicht: die Korrektur lässt die Randverteilungen exakt unverändert (die
+  Änderungen in Zeile h = 0 heben sich auf, −λμρ·p₀₀ + λρ·p₀₁ = 0, ebenso in den übrigen).
+  Der Draw-Boost steht auf 1,0. Nachgerechnet: λ 2,8/0,7 → mit tau 2,799/0,700, erst die
+  Temperatur macht 2,663/0,758 daraus. Die Funktion ist trotzdem richtig, nur die
+  Begründung nicht mehr.
+
+- `src/model/priceSheet.ts:16`: „Die Zahlen hier summieren je Markt exakt auf 1.“ Für
+  die Doppelte Chance stimmt das nicht und kann es nicht: 1X, 12 und X2 enthalten jeden
+  Ausgang zweimal, die Summe ist 2 (nachgerechnet: 2,000). Die übrigen Märkte summieren
+  je Linie auf 1. Gefunden in Runde „Preisblatt“.
+- `src/model/teamStrength.ts:40-43`: der Ridge seien „k zusaetzliche Spiele, in denen es
+  exakt im Ligadurchschnitt getroffen und kassiert hat“. Zeile 159 addiert aber `k` auf
+  Tore **und** Erwartung, ein echtes Durchschnittsspiel trüge dort rund 1,53 bei
+  ((1,703 + 1,349) / 2). `k = 8` entspricht also etwa **5,2 Spielen**, nicht 8. An den
+  Zahlen ändert das nichts, der Wert 8 ist gemessen gewählt. Nur die Einheit stimmt nicht: in den
+  Kommentaren Zeile 40 und 131 und im Namen `ridgePseudoMatches` selbst. Umbenennen würde
+  den Feldnamen in `PipelineConfig` berühren, also nur den Kommentar korrigieren.
+  Nachgerechnet: `(3 + 8) / (1,5 + 8) = 1,1579`, mit 8 echten Durchschnittsspielen 1,1094,
+  mit 5,24 wieder 1,1579. Gefunden in Runde „teamStrength“.
+
+**Fix:** die fünf Kommentare an den Code angleichen.
+
+### 18. Die Formkurve wirft das Torniveau weg [eingefroren]
+
+`src/model/predictPipeline.ts:80-81`, `src/model/xgForm.ts:127`
+
+Die Form ist `mean(xG − xGA)` und wirkt nur auf die **eigene** Torerwartung. Zwei Folgen:
+
+- Eine starke **Abwehrform** (wenig xGA) erhöht die eigenen Tore, senkt aber nicht die des
+  Gegners.
+- Ein Team mit xG 1,0 / xGA 0,5 und eines mit xG 2,5 / xGA 2,0 bekommen denselben Faktor
+  (+0,5 → ×1,105). Dass in den Spielen des zweiten viel mehr passiert, geht verloren. Trifft
+  ein formstarkes auf ein formschwaches Team, gleichen sich die beiden Faktoren in der
+  Torsumme weitgehend aus.
+
+Das passt zur bekannten Schwäche beim Over/Under (Modell schlechter als die Grundrate),
+ist als Ursache aber **nicht gemessen**.
+
+**Nächster Schritt:** auf Validation eine geteilte Form messen: Angriffsform (xG gegen
+Ligaschnitt) auf das eigene λ, Abwehrform (xGA gegen Ligaschnitt) auf das λ des Gegners.
+Zielgröße O/U-LogLoss und 1X2-LogLoss. Zusammen mit Punkt 1 und 6, Umstellung frühestens
+zur Saison 2027/28.
+
+**Nachtrag 18.09.:** der Befund war schon bekannt. `src/llm/factMapping.ts:143-144` sagt
+über die Abwehr des Gegners: „letzteres fehlt der bestehenden xG-Formkurve komplett, siehe
+npm run form“. Der LLM-Layer macht die vorgeschlagene Aufteilung bereits (Abwehr des
+Gegners wirkt auf das eigene λ), die Formkurve nicht.
+
+### 19. Der Grenzertrag dämpft über Angriff und Abwehr hinweg, und die Reihenfolge des LLM entscheidet [eingefroren]
+
+`src/llm/factMapping.ts:106-133`
+
+Begründet ist der abnehmende Grenzertrag mit „vier fehlende Innenverteidiger machen die
+Abwehr nicht viermal schlechter“, also **je Mannschaftsteil**. Gruppiert wird aber nach
+`team|direction`. Fallen beim Heimteam Stammstürmer **und** Stammtorwart aus, landen sie in
+einer Gruppe, und der zweite zählt nur halb, obwohl sie verschiedene Dinge schwächen.
+
+Beide haben dasselbe Gewicht (0,1), die Sortierung ist ein Gleichstand, und JavaScript
+sortiert stabil. **Welcher halbiert wird, hängt davon ab, in welcher Reihenfolge das LLM
+sie aufgezählt hat.** Nachgerechnet:
+
+| Reihenfolge der Fakten | homeAttack | homeDefense | Exponent Heim / Gast |
+|---|---|---|---|
+| Stürmer, dann Torwart | −0,100 | +0,050 | −0,100 / +0,050 |
+| Torwart, dann Stürmer | −0,050 | +0,100 | −0,050 / +0,100 |
+
+Dieselben Fakten ergeben also zwei verschiedene Vorhersagen.
+
+**Fix (Vorschlag):** getrennt nach Angriff und Abwehr dämpfen, also je `team` und Dimension
+(`attack`/`defense`) auf die Beträge, statt je `team|direction` auf ganze Fakten. Dann
+gibt es auch keinen Gleichstand zwischen verschiedenen Dimensionen mehr. Ändert die
+Abbildung, also zur nächsten Saison, und erst nachdem der Fingerabdruck gemischte Paare
+sieht (Nachtrag bei Punkt 4), sonst bemerkt der Hash die Änderung nicht.
 
 ---
 
