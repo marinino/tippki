@@ -52,9 +52,16 @@ mischt zwei Skalen. Die Variante braucht außerdem das Modell zum Zeitpunkt jede
 (im Walk-forward vorhanden, produktiv ein Fit mehr). In den Vergleich aus dem nächsten Schritt
 als dritten `formMode` aufnehmen.
 
-### 2. Ein hängender xG-Feed zieht Vorsaison-Spiele ins Formfenster
+### 2. Ein hängender xG-Feed zieht Vorsaison-Spiele ins Formfenster [Rest eingefroren]
 
 `src/model/xgForm.ts:131-146`
+
+**Stand 18.11.:** die laute Hälfte ist umgesetzt (siehe Abgeschlossen, „Wächter für den
+xG-Feed“), der Zustand kommt nicht mehr ins Repo. Offen ist nur noch das Abschneiden
+des Fensters am Saisonanfang in `computeXgForm` und `computeXgFormResidual`. Das ist eine
+Änderung an der eingefrorenen Formkurve und gehört mit `MODEL_LOGIC_VERSION` + 1 zur
+Saison 2027/28. Bis dahin ist es nur noch eine zweite Sicherung, die nach dem Wächter
+eigentlich nie greifen dürfte.
 
 `n` kommt aus `gamesPlayedThisSeason(...)`, also aus der Ergebnis-CSV. Die Summe läuft
 dann über die Understat-Liste, und die ist **nicht** auf die Saison beschränkt:
@@ -78,11 +85,11 @@ laut sein, nicht still.
 **Achtung:** dieser Fix ist eine Logikänderung und bewegt den `configHash` nicht von selbst.
 Seit dem 18.11. gibt es dafür `MODEL_LOGIC_VERSION` (Punkt 8): im selben Commit hochzählen.
 Das ist dann ein echter Schnitt im Log, also eine bewusste Entscheidung mitten in der Saison.
-Freeze-verträglich ist jetzt nur die laute Hälfte: ein Alarm, wenn der xG-Feed für ein
-Team weniger Spiele dieser Saison führt als die Ergebnis-CSV. Der lässt den Zustand gar
-nicht erst ins Log und bewegt nichts. Stand 18.11. weiter offen: die FotMob-Reserve
-(`7028f69`) fängt den Ausfall von Understat ab, aber `refreshResults.ts:231` holt beide
-Quellen weiter mit `Promise.all`, und ein Feed, der nur hinterherhängt, fällt nicht auf.
+Deshalb zur nächsten Saison.
+
+`Promise.all` in `refreshResults.ts` ist geblieben. Scheitert der xG-Teil, liegt die neue CSV
+lokal schon auf der Platte. Im Workflow ist das harmlos (kein Commit), lokal sagt die
+Abbruchmeldung es dazu.
 
 ### 3. `llmStatus` behauptet "nicht recherchiert" für jeden vergangenen Spieltag
 
@@ -280,6 +287,41 @@ sich, der Hash springt von `3cc0ddad` auf `c311cced`.
 ---
 
 ## Abgeschlossen
+
+### 2 (laute Hälfte). Wächter für den xG-Feed
+
+Fehlte einem Team ein Spiel der laufenden Saison im xG-Feed, zog die Formkurve ein Spiel der
+Vorsaison ins Fenster. Möglich war das auf zwei Wegen: Understat antwortet, führt das
+Spiel kurz nach Abpfiff aber noch nicht, und der Ergebnis-Job committet trotzdem. Oder
+jemand committet einen halben Stand von Hand. Die Formkurve selbst ist eingefroren, deshalb
+wird an der Quelle repariert, nicht im Modell.
+
+**Umgesetzt** in `src/data/xgCoverage.ts` (pure Funktionen) und `refreshResults.ts`:
+- `xgCoverageGaps` vergleicht je Team die Spiele dieser Saison in Ergebnis-CSV und xG-Feed.
+  Nur „weniger xG als Ergebnisse“ zählt, ein Feed vor der CSV ist harmlos.
+- `xgDuplicatePairings` findet eine Paarung, die zweimal in einer Saison steht. Das wäre ein
+  FotMob-Lückenfüller mit abweichender Anstoßzeit, der im Fenster doppelt zählte.
+- `refreshSeasonData`: hängt Understat nur hinterher, füllt FotMob genau diese Spiele auf,
+  nach denselben Regeln wie beim Ausfall (Ausgabe „kamen aus FotMob“, Feld `xgLagFilled`).
+  Bleibt eine Lücke oder entsteht ein Duplikat, bricht der Lauf ab. Der Workflow committet
+  dann nichts (`pipefail`).
+- `forward-log` warnt laut, falls trotzdem ein halber Stand im Repo steht. Es blockiert
+  nicht: ein nicht protokollierter Spieltag ist für immer verloren, ein verschobener
+  Formfaktor trifft beide Varianten gleich.
+- selfCheck-Abschnitt „xG-Feed deckt die Ergebnis-CSV“ (11 Checks), unter anderem am echten
+  Stand mit einem herausgenommenen Bayern-Spiel.
+
+In einer isolierten Kopie des Repos durchgespielt, mit echten Abrufen:
+- Am aktuellen Stand laufen 81 Ergebnisse und 81 xG-Spiele durch.
+- Ein entferntes Bayern-Spiel wird aus FotMob wieder aufgefüllt.
+- Ein erfundenes Spiel in der CSV, das keine Quelle kennt, führt zum Abbruch mit Exit 1 und
+  der Meldung „Bayern Munich: 10 Ergebnisse, 9 mit xG; Elversberg: 10 Ergebnisse, 9 mit xG“.
+
+Nicht durchgespielt ist der Weg „Understat antwortet, hängt aber hinterher“, weil Understat
+derzeit im Wartungsmodus ist. Er nutzt denselben Lückenfüller wie der getestete Weg.
+
+`configHash` unverändert, die Formkurve unverändert. Offen bleibt nur der eingefrorene Rest
+von Punkt 2.
 
 ### 4 und 8 (Stufe 1). Hash-Anker: der Hash sieht mehr, ohne dass das Log geschnitten wird
 

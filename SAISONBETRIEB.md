@@ -114,7 +114,12 @@ npm run forward-eval
 ```
 
 `refresh` holt Ergebnisse (OpenLigaDB) und xG (Understat), `refresh-market` die
-Buchmacher-Schlussquoten von football-data. Die kommen ein bis drei Tage nach dem Spieltag —
+Buchmacher-Schlussquoten von football-data. Fehlt Understat ein Spiel, das schon in den
+Ergebnissen steht, kommt es aus FotMob (Ausgabezeile „kamen aus FotMob“). Kennt auch
+FotMob es nicht, **bricht `refresh` ab**, und die Meldung nennt die Teams. Das ist Absicht:
+die eingefrorene Formkurve zöge sonst Spiele der Vorsaison ins Fenster (VERBESSERUNGEN.md,
+Punkt 2). Im Workflow wird dann nichts committet. Lokal liegt danach ein halber Stand in
+`data/`, den nicht committen, sondern den Lauf später wiederholen. Die kommen ein bis drei Tage nach dem Spieltag —
 zu früh abgerufen fehlen sie noch. `forward-eval` rechnet ab: Spielkontext gegen Basismodell,
 beide gegen den Buchmacher.
 

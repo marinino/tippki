@@ -37,6 +37,15 @@ if (summary.xgSource === "fotmob") {
   );
 }
 
+// Understat hat geantwortet, aber noch nicht jedes Spiel gefuehrt. Kein Fehler, aber
+// sichtbar: die Form dieser Teams rechnet bis zum naechsten Lauf mit FotMob-Werten.
+if (summary.xgLagFilled > 0) {
+  console.log(
+    `xG: ${summary.xgLagFilled} Spiel(e) fehlten bei Understat noch und kamen aus FotMob; ` +
+      "der naechste vollstaendige Understat-Abruf ersetzt sie."
+  );
+}
+
 // oddsCount ist null, wenn football-data die Saison noch nicht fuehrt. Vor dem ersten
 // Spieltag ist das der Normalfall und kein Fehler -- refreshSeasonData behandelt die
 // Quoten bewusst als nicht-fatal, weil sie Massstab sind und nicht Betriebsgrundlage.
