@@ -91,6 +91,63 @@ export function missingAfterKickoff(
     .map((f) => ({ matchday: f.matchday, homeTeam: f.homeTeam, awayTeam: f.awayTeam, kickoff: f.date }));
 }
 
+// Spieltage, an denen bekanntermassen nicht recherchiert wurde. Wie KNOWN_GAPS: ein
+// Eingestaendnis mit Grund, kein Schalter. Spieltage aus KNOWN_GAPS gelten hier ebenfalls
+// als entschuldigt -- ohne Logzeile gibt es auch keine Recherche.
+const GITHUB_SCHEDULE_GRUND =
+  "GitHub startete den Spielkontext-Zeitplan nur 2-3 Mal am Tag statt alle 15 Minuten, " +
+  "keiner der Laeufe lag im Recherchefenster. Das Basismodell wurde protokolliert, die " +
+  "Recherche fehlt. Aufgefallen am 18.11.2026, Anlass fuer den externen Taktgeber und " +
+  "diesen Alarm.";
+
+export const KNOWN_RESEARCH_GAPS: readonly { season: string; matchday: number; grund: string }[] = [
+  { season: "2026", matchday: 5, grund: `${GITHUB_SCHEDULE_GRUND} Freitag 09.10.: Laeufe 15:06 und 20:07 UTC, Fenster 15:10-17:00.` },
+  { season: "2026", matchday: 6, grund: `${GITHUB_SCHEDULE_GRUND} Freitag 16.10.: Laeufe 13:05, 17:25 und 20:01 UTC, Fenster 15:10-17:00.` },
+  { season: "2026", matchday: 7, grund: `${GITHUB_SCHEDULE_GRUND} Freitag 23.10.: Laeufe 13:13, 17:53 und 21:11 UTC, Fenster 15:10-17:00.` },
+  { season: "2026", matchday: 8, grund: `${GITHUB_SCHEDULE_GRUND} Freitag 30.10.: Laeufe 14:55 und 19:52 UTC, Fenster 16:10-18:00.` },
+  { season: "2026", matchday: 9, grund: `${GITHUB_SCHEDULE_GRUND} Freitag 06.11.: Laeufe 15:47 und 21:22 UTC, Fenster 16:10-18:00.` },
+];
+
+export interface MissingResearch {
+  matchday: number;
+  firstKickoff: string;
+}
+
+// Spieltage, deren erste Partie angepfiffen ist und fuer die keine einzige Logzeile einen
+// Spielkontext traegt.
+//
+// Anlass (18.11.2026): missingAfterKickoff fragt nur, ob ueberhaupt eine Zeile existiert.
+// Seit das Basismodell vorab protokolliert wird, existiert sie praktisch immer -- und die
+// Recherche fiel fuenf Spieltage in Folge aus, ohne dass ein Alarm anschlug. Eine
+// gescheiterte Recherche (llm: null) zaehlt hier ebenfalls als fehlend: fuer den gepaarten
+// Test ist das Ergebnis dasselbe.
+export function missingResearchAfterKickoff(
+  fixtures: readonly { date: string; matchday: number }[],
+  entries: readonly { season: string; matchday: number; llm?: { fetchedAt?: string } | null }[],
+  season: string,
+  now: Date,
+  kickoffOf: (date: string) => Date,
+  gaps: readonly { season: string; matchday: number }[] = [...KNOWN_GAPS, ...KNOWN_RESEARCH_GAPS]
+): MissingResearch[] {
+  const researched = new Set(
+    entries.filter((e) => e.season === season && e.llm?.fetchedAt).map((e) => e.matchday)
+  );
+  const excused = new Set(gaps.filter((g) => g.season === season).map((g) => g.matchday));
+
+  const firstKickoff = new Map<number, { time: number; date: string }>();
+  for (const f of fixtures) {
+    const time = kickoffOf(f.date).getTime();
+    const current = firstKickoff.get(f.matchday);
+    if (!current || time < current.time) firstKickoff.set(f.matchday, { time, date: f.date });
+  }
+
+  return [...firstKickoff.entries()]
+    .filter(([, k]) => k.time <= now.getTime())
+    .filter(([matchday]) => !excused.has(matchday) && !researched.has(matchday))
+    .sort(([a], [b]) => a - b)
+    .map(([matchday, k]) => ({ matchday, firstKickoff: k.date }));
+}
+
 // Lag die Recherche naeher am Anpfiff DIESER Partie als die Untergrenze erlaubt?
 //
 // Die Untergrenze schuetzt davor, dass ein Befund die Aufstellung schon kennt. Bis zum

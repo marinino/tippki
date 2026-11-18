@@ -129,7 +129,7 @@ Workflows an, statt selbst zu schreiben.
 
 | Workflow | Wann | Was |
 |---|---|---|
-| `spielkontext.yml` | alle 15 min zu :07/:22/:37/:52, 08–18 UTC, täglich (neben der Spitzenlast zur vollen Stunde) | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
+| `spielkontext.yml` | **vom externen Taktgeber** alle 15 min, 08–18 UTC (siehe „Taktgeber“); dazu GitHubs eigener Zeitplan zu :07/:22/:37/:52 als unzuverlässige zweite Chance | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log` |
 | `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG; danach `forward-log-check` (Alarm) |
 | `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, Vorschau aufs nächste Fenster |
 
@@ -140,6 +140,63 @@ Spielabend läuft sie in `ergebnisse.yml`: fällt der Freitag aus, meldet es sic
 Freitag, und Samstag und Sonntag sind über „Spielkontext" von Hand zu retten. Eine Lücke,
 die sich nicht mehr beheben lässt, wird mit Grund in `KNOWN_GAPS`
 (`src/eval/forwardLogRules.ts`) eingetragen — derzeit Spieltag 3.
+
+Seit dem 18.11.2026 prüft derselbe Alarm auch, ob ein angepfiffener Spieltag **überhaupt
+recherchiert** wurde, also ob mindestens eine Zeile einen Spielkontext trägt. Vorher fiel
+das nicht auf: das Basismodell wird schon 48 Stunden vorher protokolliert, also standen
+immer Zeilen im Log, und die Recherche fehlte an Spieltag 5 bis 9 ohne einen einzigen
+roten Lauf. Spieltage, die sich nicht mehr nachholen lassen, stehen mit Grund in
+`KNOWN_RESEARCH_GAPS`, derzeit 5 bis 9.
+
+### Taktgeber
+
+GitHub startet geplante Läufe nicht zuverlässig. Nachgesehen über die Actions-API: von
+Oktober bis Mitte November kamen statt gut 40 viertelstündlichen Läufen am Tag **2 bis 3**
+an, oft Stunden zu spät. Keiner lag in einem Recherchefenster von Spieltag 5 bis 9.
+Läufe über `workflow_dispatch` startet GitHub dagegen sofort. Deshalb gibt seit dem
+18.11.2026 ein externer Dienst den Takt vor: er ruft alle 15 Minuten die GitHub-API auf und
+startet `spielkontext.yml`. Ob recherchiert wird, entscheidet weiter allein
+`research-due`; Fenster, Untergrenze und Idempotenz bleiben unverändert.
+
+**1. Token anlegen** (GitHub → Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → *Generate new token*):
+
+- Name: `tippki-taktgeber`
+- Ablauf: bis Saisonende (fein eingeschränkte Tokens laufen höchstens ein Jahr). Einen
+  Kalendereintrag eine Woche vorher setzen — ein abgelaufenes Token heißt: keine Recherche.
+- Repository access: *Only select repositories* → `marinino/tippki`
+- Permissions → Repository permissions → **Actions: Read and write**. Sonst nichts.
+
+Das Token kann damit nur Workflows dieses Repositorys starten und ansehen, nicht pushen
+und nichts an Secrets oder Einstellungen ändern.
+
+**2. Job bei [cron-job.org](https://cron-job.org) anlegen** (kostenlos, minutengenau):
+
+- URL: `https://api.github.com/repos/marinino/tippki/actions/workflows/spielkontext.yml/dispatches`
+- Zeitplan: benutzerdefiniert, Minuten `7,22,37,52`, Stunden `8–18`, jeden Tag,
+  **Zeitzone UTC**. Dieselben Stunden wie der `cron` im Workflow, denn genau diesen
+  Bereich prüft der selfCheck-Abschnitt „Recherchefenster“ gegen alle 34 Spieltage.
+- Erweitert → Methode **POST**
+- Header:
+  - `Authorization: Bearer <das Token aus Schritt 1>`
+  - `Accept: application/vnd.github+json`
+  - `X-GitHub-Api-Version: 2022-11-28`
+  - `Content-Type: application/json`
+- Request-Body: `{"ref":"main","inputs":{"grund":"taktgeber"}}`
+- Benachrichtigung bei Fehlschlag einschalten. GitHub antwortet auf einen angenommenen
+  Aufruf mit **204**; 401 heißt Token falsch oder abgelaufen, 404 meist fehlende
+  Berechtigung oder ein Tippfehler im Pfad.
+
+**3. Prüfen.** In cron-job.org einmal *Test run* außerhalb eines Recherchefensters
+auslösen: erwartet ist 204 und unter Actions → Spielkontext ein neuer Lauf mit „Noch zu
+früh“ o. ä. **Nicht** im Fenster testen — ein Lauf dort recherchiert wirklich und schreibt
+dauerhaft ins Vorwärts-Log. Commits aus dem Taktgeber tragen „(taktgeber)“ in der
+Nachricht, so ist im Log sichtbar, woher eine Recherche kam.
+
+**Kosten.** 44 zusätzliche Läufe am Tag, je etwa eine Minute (überwiegend `npm ci`). Für
+ein öffentliches Repository kostenlos. Wäre das Repository privat, fräße das rund 1300 der
+2000 Freiminuten im Monat; dann die Stunden des Taktgebers auf 10–18 UTC verkürzen (das
+früheste Fenster dieser Saison beginnt um 10:10) und den GitHub-Zeitplan entfernen.
 
 ### Der Spielplan wächst mit
 
@@ -215,7 +272,8 @@ Auftakt um 13:00 würde dort auffliegen, nicht erst im Oktober. Mit dem alten Be
 zeigt zusätzlich jede Woche, wann das nächste Fenster liegt.
 
 **Was in GitHub hinterlegt sein muss:** ein einziges Secret, `ANTHROPIC_API_KEY`. Sonst
-nichts — den Rest erledigt der mitgelieferte `GITHUB_TOKEN`.
+nichts — den Rest erledigt der mitgelieferte `GITHUB_TOKEN`. Außerhalb von GitHub: das
+Token des Taktgebers bei cron-job.org (siehe „Taktgeber“).
 
 **Kosten.** Rund 1150 Läufe im Monat. GitHub rechnet je Lauf mindestens eine Minute ab, für
 private Repositories sind 2000 Minuten im Monat frei — also etwa 60 % des Kontingents. Wird
