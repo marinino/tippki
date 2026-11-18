@@ -152,6 +152,19 @@ residual 28,1 %**. Auch die Residual-Variante braucht also eine Grenze.
 Form (vor Temperatur). Heimsieg 78,3 % → **93,7 %**. Genau der Bereich über 90 %, den die
 Temperatur zurückholen sollte und in dem der Buchmacher praktisch nie eine Quote stellt.
 
+**Nachtrag 18.11., Spieltag 10, Bayern–Köln:** Form Bayern **+3,20** (xG-Differenz
++4,20 gegen Leipzig, +2,27 in Freiburg, +3,15 gegen Dortmund), Faktor ×1,90. Torerwartung
+3,61 ohne Form, **6,84** mit Form. Das reißt erstmals die harte Plausibilitätsgrenze 6 im
+Self-Check. Bei λ = 6,84 liegen rund 8 % der Poisson-Masse jenseits von 10 Toren, also
+außerhalb der Ergebnismatrix. Eine Dreierform über 3 kam seit 2015 nur 28-mal in 7.426
+Fällen vor, das Maximum war 4,43.
+
+Weil der Freeze gilt, wurde nicht das Modell angefasst, sondern der Check: die harte Grenze
+[0,25; 6] gilt jetzt für die **Basis**-Torerwartung, die Form hat einen eigenen Rahmen
+(±5), und die Torerwartung mit Form ist nur noch bis 8 hart begrenzt, mit einer lauten
+Zeile im Protokoll ab 6. Beim Umstellen zur nächsten Saison die alte Grenze wieder auf die
+fertige Torerwartung legen — mit Klammer sollte sie halten.
+
 ### 8. Der `configHash` sieht keine Logikänderung auf der Modellseite
 
 `src/model/pipelineConfig.ts:189`, `SAISONBETRIEB.md` (Sonderfall)

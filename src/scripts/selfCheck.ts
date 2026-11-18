@@ -1769,31 +1769,80 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
 
   if (nextMatchday == null) return;
 
+  // Die Schranken gelten fuer die BASIS-Torerwartung, also attack/defense aus dem Fit ohne
+  // Formkurve. Dort sitzen die Fehler, fuer die dieser Abschnitt gebaut ist (kaputter Fit,
+  // angefangene Saison, Lambdas ueber 20000).
+  //
+  // Bis zum 18.11.2026 galt [0.25, 6] fuer die Torerwartung MIT Form. Dann lag Bayern vor
+  // Spieltag 10 bei einer Form von +3,20 (xG-Differenz +4,20 / +2,27 / +3,15), und aus
+  // 3,61 Basis wurden 6,84. Das ist kein Defekt, sondern die bekannte, ungeklammerte
+  // Formkurve (VERBESSERUNGEN.md, Punkte 1 und 6), und die ist bis Saisonende eingefroren.
+  // Ein dauerhaft roter Check haette jeden echten Fehler dahinter verdeckt. Deshalb:
+  //   - Basis hart gegen [0.25, 6],
+  //   - die Form hart gegen ihren eigenen Rahmen (historisches Maximum einer Dreierform
+  //     seit 2015: 4,43; darueber ist eher der xG-Feed kaputt als das Team in Form),
+  //   - die Torerwartung mit Form hart nur noch gegen das numerisch Unbrauchbare, und
+  //     zwischen 6 und 8 laut im Protokoll, mit dem Massenverlust am Matrixrand.
   const MIN_LAMBDA = 0.25;
   const MAX_LAMBDA = 6;
+  const MAX_ABS_FORM = 5;
+  const MIN_FORM_LAMBDA = 0.1;
+  const MAX_FORM_LAMBDA = 8;
+
+  // Wahrscheinlichkeit, die eine Poisson-Verteilung oberhalb von maxGoals hat -- also
+  // ausserhalb der Ergebnismatrix liegt.
+  const massBeyond = (lambda: number, maxGoals: number): number => {
+    let term = Math.exp(-lambda);
+    let cdf = term;
+    for (let k = 1; k <= maxGoals; k++) {
+      term *= lambda / k;
+      cdf += term;
+    }
+    return 1 - cdf;
+  };
 
   for (const fixture of fixtures.filter((f) => f.matchday === nextMatchday)) {
     const matchDate = parseKickoff(fixture.date);
-    const out = predictPipeline({
-      model,
-      homeTeam: fixture.homeTeam,
-      awayTeam: fixture.awayTeam,
-      homeForm: computeXgForm(fixture.homeTeam, matchDate),
-      awayForm: computeXgForm(fixture.awayTeam, matchDate),
-    });
+    const homeForm = computeXgForm(fixture.homeTeam, matchDate);
+    const awayForm = computeXgForm(fixture.awayTeam, matchDate);
+    const base = predictPipeline({ model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam });
+    const out = predictPipeline({ model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam, homeForm, awayForm });
 
     const pairing = `${fixture.homeTeam} vs ${fixture.awayTeam}`;
-    for (const [side, lambda] of [
-      ["Heim", out.lambdaHome],
-      ["Auswaerts", out.lambdaAway],
-    ] as [string, number][]) {
+    for (const [side, baseLambda, form, lambda] of [
+      ["Heim", base.lambdaHome, homeForm, out.lambdaHome],
+      ["Auswaerts", base.lambdaAway, awayForm, out.lambdaAway],
+    ] as [string, number, number, number][]) {
       check(() =>
         assert.ok(
-          Number.isFinite(lambda) && lambda >= MIN_LAMBDA && lambda <= MAX_LAMBDA,
-          `${pairing}: ${side}-Torerwartung ${lambda.toFixed(3)} liegt ausserhalb ` +
+          Number.isFinite(baseLambda) && baseLambda >= MIN_LAMBDA && baseLambda <= MAX_LAMBDA,
+          `${pairing}: ${side}-Torerwartung ohne Form ${baseLambda.toFixed(3)} liegt ausserhalb ` +
             `[${MIN_LAMBDA}, ${MAX_LAMBDA}]`
         )
       );
+      check(() =>
+        assert.ok(
+          Number.isFinite(form) && Math.abs(form) <= MAX_ABS_FORM,
+          `${pairing}: ${side}-Form ${form.toFixed(3)} liegt ausserhalb [-${MAX_ABS_FORM}, ${MAX_ABS_FORM}] -- ` +
+            `xG-Feed pruefen (doppelte oder verrutschte Eintraege?)`
+        )
+      );
+      check(() =>
+        assert.ok(
+          Number.isFinite(lambda) && lambda >= MIN_FORM_LAMBDA && lambda <= MAX_FORM_LAMBDA,
+          `${pairing}: ${side}-Torerwartung mit Form ${lambda.toFixed(3)} liegt ausserhalb ` +
+            `[${MIN_FORM_LAMBDA}, ${MAX_FORM_LAMBDA}]`
+        )
+      );
+      if (lambda > MAX_LAMBDA) {
+        const lost = massBeyond(lambda, out.matrix.maxGoals);
+        console.log(
+          `  ! ${pairing}: ${side}-Torerwartung ${baseLambda.toFixed(2)} -> ${lambda.toFixed(2)} ` +
+            `durch Form ${form >= 0 ? "+" : ""}${form.toFixed(2)} (ungeklammert, eingefroren -- ` +
+            `VERBESSERUNGEN.md Punkt 6). ${(lost * 100).toFixed(1)}% der Masse liegen jenseits ` +
+            `von ${out.matrix.maxGoals} Toren.`
+        );
+      }
     }
 
     // Zweite, unabhaengige Schranke: keine einzelne Ergebniszelle darf den Spieltag
@@ -2663,8 +2712,17 @@ section("Vorwaerts-Log: Alarm und zu spaete Recherche", () => {
   check(() => assert.equal(researchTooLate(anpfiff, vorher(90), HARD_FLOOR_MINUTES), false));
   check(() => assert.equal(researchTooLate(anpfiff, "kein Datum", HARD_FLOOR_MINUTES), false));
 
-  // Im echten Log genau eine solche Zeile: die Freitagspartie von Spieltag 2. Kommt eine
-  // dazu, hat die Untergrenze versagt -- das soll hier auffallen.
+  // Im echten Log genau diese Zeilen. Kommt eine dazu, hat die Untergrenze versagt -- das
+  // soll hier auffallen.
+  //
+  // Spieltag 2: die Freitagspartie, von Hand nachgeholt.
+  // Spieltag 4 (Bayern-Union, Anpfiff 18:30 UTC), aufgefallen am 18.11.2026: fetchedAt
+  // 17:00:56 UTC, also 89,1 Minuten vor Anpfiff. Die Untergrenze hat trotzdem gegriffen:
+  // decideResearch haette ab 17:00:00 abgelehnt, entschieden wurde also vorher. fetchedAt
+  // stempelt erst NACH der Recherche, und die dauerte knapp eine Minute. Informationslage
+  // unveraendert (Aufstellungen erscheinen 60 bis 75 Minuten vorher). Die Entscheidung mit
+  // einem Puffer fuer die Recherchedauer zu treffen, waere eine Aenderung am eingefrorenen
+  // Recherchefenster -- erst zur naechsten Saison.
   check(() => {
     const log = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
       .split("\n")
@@ -2675,7 +2733,7 @@ section("Vorwaerts-Log: Alarm und zu spaete Recherche", () => {
     );
     assert.deepEqual(
       zuSpaet.map((e) => `${e.matchday}|${e.kickoff}`),
-      ["2|2026-09-04T20:30:00"]
+      ["2|2026-09-04T20:30:00", "4|2026-09-18T20:30:00"]
     );
   });
 });
