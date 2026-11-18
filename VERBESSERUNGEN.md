@@ -266,6 +266,54 @@ gezogen wird (Ridge-Ziel = `promotedTeamDefault` für Teams, die in der Vorsaiso
 Betrifft jede Saison zwei bis drei Teams. Logikänderung, siehe Punkt 8. Umstellung
 frühestens zur Saison 2027/28.
 
+### 16. `npm run predict` geht einen eigenen Weg neben der Route
+
+`src/scripts/predict.ts:43,63`, `src/app/api/predictions/route.ts:36,65`
+
+Skript und Route machen dasselbe (Spielplan lesen → Modell fitten → `predictPipeline` je
+Partie), jeweils als eigene Kopie. Sie sind bereits auseinandergelaufen: die Route nimmt
+`parseKickoff` und `nextMatchdayOf`, das Skript `new Date(f.date)` und eine eigene
+Suche nach dem nächsten Spieltag. `fixtures.json` hat keine Zeitzone
+(`"2026-08-28T20:30:00"`), auf einem Rechner in UTC läge jeder Anpfiff zwei Stunden daneben.
+
+Heute harmlos, weil `predict` nur lokal in deutscher Zeit läuft und kein Workflow es
+aufruft. **Fix (klein):** im Skript `parseKickoff` und `nextMatchdayOf` verwenden. Später
+eventuell eine gemeinsame Funktion „Vorhersagen für Spieltag X“, die beide aufrufen.
+
+### 17. Fünf Kommentare beschreiben den Code anders, als er läuft
+
+Reine Doku, bewegt nichts. Gefunden in Runde „predictPipeline“.
+
+- `src/model/predictPipeline.ts:15-19`: die „feste Reihenfolge“ hat vier Schritte und
+  kennt die Kalibrierungstemperatur nicht. Zeile 99 nennt die Temperatur „Schritt 4“, im
+  Kopf ist Schritt 4 das Preisblatt.
+- `src/llm/llmAdjustment.ts:61,85`: „Schritt 1-3: zusammenfassen, daempfen, klammern“
+  und direkt darunter „Schritt 3: anwenden“. Der Kopf der Datei (Zeile 5) zählt
+  dämpfen, klammern, anwenden.
+- `src/model/scoreMatrix.ts:248-250`: „Nach der Dixon-Coles-Korrektur sind das nicht mehr
+  exakt die eingesetzten Lambdas -- tau und der Draw-Boost verschieben Masse.“ Für tau
+  stimmt das nicht: die Korrektur lässt die Randverteilungen exakt unverändert (die
+  Änderungen in Zeile h = 0 heben sich auf, −λμρ·p₀₀ + λρ·p₀₁ = 0, ebenso in den übrigen).
+  Der Draw-Boost steht auf 1,0. Nachgerechnet: λ 2,8/0,7 → mit tau 2,799/0,700, erst die
+  Temperatur macht 2,663/0,758 daraus. Die Funktion ist trotzdem richtig, nur die
+  Begründung nicht mehr.
+
+- `src/model/priceSheet.ts:16`: „Die Zahlen hier summieren je Markt exakt auf 1.“ Für
+  die Doppelte Chance stimmt das nicht und kann es nicht: 1X, 12 und X2 enthalten jeden
+  Ausgang zweimal, die Summe ist 2 (nachgerechnet: 2,000). Die übrigen Märkte summieren
+  je Linie auf 1. Gefunden in Runde „Preisblatt“.
+- `src/model/teamStrength.ts:40-43`: der Ridge seien „k zusaetzliche Spiele, in denen es
+  exakt im Ligadurchschnitt getroffen und kassiert hat“. Zeile 159 addiert aber `k` auf
+  Tore **und** Erwartung, ein echtes Durchschnittsspiel trüge dort rund 1,53 bei
+  ((1,703 + 1,349) / 2). `k = 8` entspricht also etwa **5,2 Spielen**, nicht 8. An den
+  Zahlen ändert das nichts, der Wert 8 ist gemessen gewählt. Nur die Einheit stimmt nicht: in den
+  Kommentaren Zeile 40 und 131 und im Namen `ridgePseudoMatches` selbst. Umbenennen würde
+  den Feldnamen in `PipelineConfig` berühren, also nur den Kommentar korrigieren.
+  Nachgerechnet: `(3 + 8) / (1,5 + 8) = 1,1579`, mit 8 echten Durchschnittsspielen 1,1094,
+  mit 5,24 wieder 1,1579. Gefunden in Runde „teamStrength“.
+
+**Fix:** die fünf Kommentare an den Code angleichen.
+
 ### 18. Die Formkurve wirft das Torniveau weg [eingefroren]
 
 `src/model/predictPipeline.ts:80-81`, `src/model/xgForm.ts:127`
