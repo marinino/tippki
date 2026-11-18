@@ -58,6 +58,11 @@ export interface LlmCacheFile {
   failures?: Record<string, string>;
   // Optional, weil Dateien aus Version 1 sie nicht haben. Neue Laeufe schreiben sie immer.
   usage?: LlmRunUsage;
+  // Mit welchen Rechercheparametern der Lauf tatsaechlich lief. Aus demselben Grund wie
+  // `model`: forwardLog.ts setzt diese Werte in den configHash ein, nicht die gerade im Code
+  // stehenden -- sonst behauptete der Hash ein Suchbudget, das nie gegolten hat. Optional,
+  // weil Dateien vor dem 2026-11-18 sie nicht haben; dann gilt der Stand im Code.
+  research?: { extractionBlockSize: number; maxSearches: number };
 }
 
 // 2 seit dem Umbau auf zwei Stufen (2026-09-01). Der Versionssprung wirft die Datei aus

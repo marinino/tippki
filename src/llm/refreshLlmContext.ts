@@ -12,6 +12,7 @@ import { join } from "path";
 import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { FORWARD_SEASON } from "../eval/splits";
 import {
+  MAX_SEARCHES,
   fetchMatchdayContext,
   isLlmConfigured,
   type MatchdayResult,
@@ -150,6 +151,7 @@ export async function refreshLlmContext(matchday?: number): Promise<RefreshLlmSu
       researchChars: result.value.researchChars,
       matching: result.value.matching,
     },
+    research: { extractionBlockSize: EXTRACTION_BLOCK_SIZE, maxSearches: MAX_SEARCHES },
   });
 
   return {

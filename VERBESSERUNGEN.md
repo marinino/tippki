@@ -30,8 +30,9 @@ Variante.
 **Nächster Schritt:** `npm run walk-forward` mit `formMode: "residual"` gegen `"diff"`,
 gepaart. Ergebnis hierher, Umstellung frühestens zur Saison 2027/28.
 
-**Achtung beim Umstellen:** `formMode` steht nicht in `PipelineConfig`. Ohne Punkt 8
-bemerkt der Hash den Wechsel nicht.
+**Achtung beim Umstellen:** `formMode` steht nicht in `PipelineConfig`. Seit dem 18.11.
+reicht es, `MODEL_LOGIC_VERSION` hochzuzählen (Punkt 8). Sauberer zur neuen Saison:
+`formMode` als eigenes Feld in die Konfiguration aufnehmen.
 
 **Nachtrag 17.09., dritter Kandidat „gegen Erwartung“** (Idee aus der Fragerunde): auch
 `residual` bereinigt nicht um den **Gegner** und Heim/Auswärts, sondern nur um das eigene
@@ -74,9 +75,14 @@ Zahlen nur in genau der Lage, die ohnehin falsch ist. Betrifft `computeXgForm` *
 `computeXgFormResidual`. Zusätzlich erwägen: `refreshSeasonData` soll bei halbem Erfolg
 laut sein, nicht still.
 
-**Achtung:** dieser Fix ist eine Logikänderung und bewegt den `configHash` **nicht**
-(siehe Punkt 8). Erst Punkt 8, dann dieser — sonst mischt das Log beide Varianten unter
-derselben Kennung.
+**Achtung:** dieser Fix ist eine Logikänderung und bewegt den `configHash` nicht von selbst.
+Seit dem 18.11. gibt es dafür `MODEL_LOGIC_VERSION` (Punkt 8): im selben Commit hochzählen.
+Das ist dann ein echter Schnitt im Log, also eine bewusste Entscheidung mitten in der Saison.
+Freeze-verträglich ist jetzt nur die laute Hälfte: ein Alarm, wenn der xG-Feed für ein
+Team weniger Spiele dieser Saison führt als die Ergebnis-CSV. Der lässt den Zustand gar
+nicht erst ins Log und bewegt nichts. Stand 18.11. weiter offen: die FotMob-Reserve
+(`7028f69`) fängt den Ausfall von Understat ab, aber `refreshResults.ts:231` holt beide
+Quellen weiter mit `Promise.all`, und ein Feed, der nur hinterherhängt, fällt nicht auf.
 
 ### 3. `llmStatus` behauptet "nicht recherchiert" für jeden vergangenen Spieltag
 
@@ -99,30 +105,6 @@ die Datei ist append-only.
 für vergangene Spieltage reines Modell (die Route reicht keinen Kontext durch), das
 Etikett stimmt also für die Zahlen. Das eigentliche Problem ist, welche Zahlen dort
 überhaupt stehen.
-
-### 4. Zwei Stellschrauben des LLM-Layers fehlen im `configHash` [eingefroren]
-
-`src/llm/matchContext.ts:254`, `src/llm/anthropicClient.ts:66`
-
-- `EXTRACTION_BLOCK_SIZE = 3` — `canonicalUserPrompt()` rendert zwei feste Fixtures und
-  sieht die Blockgröße nie. Dass diese Zahl das Ergebnis verändert, ist hier keine
-  Theorie: der Ausfall an Spieltag 1 hing genau daran.
-- `MAX_SEARCHES = 14` — bestimmt, wie viel die Recherche überhaupt findet, und taucht im
-  Abdruck nirgends auf. `searchErrors` protokolliert bereits, wenn das Limit greift.
-
-- **Nachtrag 18.09.:** `llmMappingFingerprint` (`src/model/pipelineConfig.ts:127`) sieht
-  nur einen Teil der Abbildung. Er rechnet jede Kombination aus Rolle, Wichtigkeit,
-  Sicherheit, Richtung und Seite, aber immer mit `category: FACT_CATEGORIES[0]`
-  (`absence`) und immer mit **zwei gleichen** Fakten. Damit bleiben unsichtbar:
-  `CATEGORY_SCALE` für `return`, `congestion`, `manager`, `motivation` (vier von fünf
-  Werten), und jede Änderung daran, wie **verschiedene** Fakten gruppiert und gedämpft
-  werden (siehe Punkt 19). Am Code abgelesen, nicht per Änderung ausprobiert. Fix: alle
-  Kategorien durchlaufen und ein paar gemischte Paare (verschiedene Rolle, verschiedene
-  Richtung) mit aufnehmen.
-
-Die beiden Konstanten gehören in `PipelineConfig` und in `configHash()`. **Aber:** das Aufnehmen ändert
-den Hash und spaltet das Log. Also entweder jetzt mit bewusstem Schnitt, oder zur
-nächsten Saison zusammen mit Punkt 1.
 
 ### 6. Die Formkurve ist ungeklammert und größer als der geklammerte LLM-Layer [eingefroren]
 
@@ -165,57 +147,19 @@ Weil der Freeze gilt, wurde nicht das Modell angefasst, sondern der Check: die h
 Zeile im Protokoll ab 6. Beim Umstellen zur nächsten Saison die alte Grenze wieder auf die
 fertige Torerwartung legen — mit Klammer sollte sie halten.
 
-### 8. Der `configHash` sieht keine Logikänderung auf der Modellseite
+### 8. Der `configHash` sieht die Logik der Modellseite nur per Handzähler
 
-`src/model/pipelineConfig.ts:189`, `SAISONBETRIEB.md` (Sonderfall)
+`src/model/pipelineConfig.ts`, `src/model/xgForm.ts`
 
-`configHash()` hasht 13 Werte: zehn Zahlen, zwei LLM-Fingerabdrücke, den Modellnamen.
-Keiner davon sieht Code in `xgForm.ts`, `teamStrength.ts`, `predictMatch.ts` oder
-`scoreMatrix.ts`. Eine Reparatur dort, etwa Punkt 2, lässt den Hash unverändert, und das
-Log sammelt alte und neue Logik unter derselben Kennung.
+Stufe 1 ist seit dem 18.11. erledigt (siehe Abgeschlossen, „Hash-Anker“): `MODEL_LOGIC_VERSION`
+steht verankert im Hash und wird bei jeder Logikreparatur von Hand hochgezählt. Ein
+Handzähler hält aber nur, solange jemand daran denkt.
 
-Damit trägt der Reparaturprozess in `SAISONBETRIEB.md` nicht: „Der Hash ändert sich. Das
-ist richtig so" stimmt nur für Änderungen an Zahlen. Für den LLM-Layer ist genau dieses
-Problem mit `llmMappingFingerprint` (Verhalten statt Konstanten) bereits gelöst, für die
-Modellseite nicht.
-
-**Fix (Vorschlag), zwei Stufen:**
-1. Sofort: `modelLogicVersion` als Feld in `PipelineConfig` und im Hash, bei jeder
-   Logikreparatur von Hand hochzählen. Plus eine Zeile im Sonderfall-Abschnitt.
-2. Besser: ein Verhaltensabdruck wie beim LLM-Layer. `buildDixonColesMatrix`,
-   `applyOutcomeTemperature` und `baseLambdas` lassen sich auf festen Eingaben rechnen und
-   hashen. `computeXgForm` liest Dateien und braucht dafür erst eine injizierbare
-   Datenquelle.
-
-Stufe 1 bewegt den Hash einmalig; das ist ein bewusster Schnitt und gehört vor jede
-weitere Reparatur auf der Modellseite.
-
-### 14. Ein zuverlässiger Auslöser statt GitHubs Zeitplan (optional)
-
-`.github/workflows/spielkontext.yml`, `src/data/dispatchWorkflow.ts`
-
-Rest von Punkt 13. Das breitere Fenster, das Basis-Log ab 48 Stunden und der Alarm machen
-den Betrieb robust gegen ausgelassene Ticks, aber nicht unabhängig davon. Liefert GitHub an
-einem Freitag zwischen 200 und 90 Minuten vor Anpfiff keinen einzigen Lauf, bleibt der
-Spieltag ohne Kontext (Basis ist gesichert, Alarm meldet sich nicht, weil Zeilen da sind).
-
-Ein externer Zeitplan, der `workflow_dispatch` auslöst, würde das Fenster zuverlässig
-treffen. Der Weg existiert schon (`dispatchWorkflow`). Erst angehen, wenn die nächsten
-Spieltage zeigen, dass das Fenster trotz allem verfehlt wird — `llm: null` in den Zeilen
-eines Spieltags ist das Signal.
-
-**Billiger Zwischenschritt, umgesetzt 18.09., Wirkung ungeprüft:** GitHub nennt „the start
-of every hour“ ausdrücklich als Spitzenlast, bei der geplante Läufe verzögert und bei genug
-Last verworfen werden (Doku „Events that trigger workflows“, Abschnitt `schedule`). Der
-Zeitplan `*/15` lag genau auf :00, :15, :30, :45, also dort, wo alle anderen auch planen.
-`spielkontext.yml` läuft jetzt zu `7,22,37,52 8-18 * * *`; `SAISONBETRIEB.md` nachgezogen.
-Ob das wirklich mehr Läufe durchbringt, zeigt nur die Actions-API über ein paar Spieltage:
-gestartete Läufe je Spieltags-Freitag zählen, vorher waren es 2 bis 3 von 36 bzw. 44.
-
-Nebenwirkung, bewusst in Kauf genommen: der erste Tick des Tages liegt bei 08:07 UTC, der
-letzte bei 18:52. Der selfCheck „Recherchefenster“ rechnet weiter mit vollen Stunden 8–18,
-ein Fenster, das um 08:00 beginnt oder um 18:59 endet, verliert also bis zu 7 Minuten von
-110. Für diese Saison liegt keines so knapp.
+**Offen, Stufe 2:** ein Verhaltensabdruck wie beim LLM-Layer. `buildDixonColesMatrix`,
+`applyOutcomeTemperature` und `baseLambdas` lassen sich auf festen Eingaben rechnen und
+hashen. `computeXgForm` liest Dateien und braucht dafür erst eine injizierbare
+Datenquelle. Wird der Abdruck neu aufgenommen, gehört er verankert in den Hash wie die
+anderen Felder vom 18.11., sonst schneidet allein das Aufnehmen das Log.
 
 ### 12. Vergangene Spieltage zeigen weder die echte noch eine ehrliche Vorhersage
 
@@ -279,54 +223,6 @@ gezogen wird (Ridge-Ziel = `promotedTeamDefault` für Teams, die in der Vorsaiso
 Betrifft jede Saison zwei bis drei Teams. Logikänderung, siehe Punkt 8. Umstellung
 frühestens zur Saison 2027/28.
 
-### 16. `npm run predict` geht einen eigenen Weg neben der Route
-
-`src/scripts/predict.ts:43,63`, `src/app/api/predictions/route.ts:36,65`
-
-Skript und Route machen dasselbe (Spielplan lesen → Modell fitten → `predictPipeline` je
-Partie), jeweils als eigene Kopie. Sie sind bereits auseinandergelaufen: die Route nimmt
-`parseKickoff` und `nextMatchdayOf`, das Skript `new Date(f.date)` und eine eigene
-Suche nach dem nächsten Spieltag. `fixtures.json` hat keine Zeitzone
-(`"2026-08-28T20:30:00"`), auf einem Rechner in UTC läge jeder Anpfiff zwei Stunden daneben.
-
-Heute harmlos, weil `predict` nur lokal in deutscher Zeit läuft und kein Workflow es
-aufruft. **Fix (klein):** im Skript `parseKickoff` und `nextMatchdayOf` verwenden. Später
-eventuell eine gemeinsame Funktion „Vorhersagen für Spieltag X“, die beide aufrufen.
-
-### 17. Fünf Kommentare beschreiben den Code anders, als er läuft
-
-Reine Doku, bewegt nichts. Gefunden in Runde „predictPipeline“.
-
-- `src/model/predictPipeline.ts:15-19`: die „feste Reihenfolge“ hat vier Schritte und
-  kennt die Kalibrierungstemperatur nicht. Zeile 99 nennt die Temperatur „Schritt 4“, im
-  Kopf ist Schritt 4 das Preisblatt.
-- `src/llm/llmAdjustment.ts:61,85`: „Schritt 1-3: zusammenfassen, daempfen, klammern“
-  und direkt darunter „Schritt 3: anwenden“. Der Kopf der Datei (Zeile 5) zählt
-  dämpfen, klammern, anwenden.
-- `src/model/scoreMatrix.ts:248-250`: „Nach der Dixon-Coles-Korrektur sind das nicht mehr
-  exakt die eingesetzten Lambdas -- tau und der Draw-Boost verschieben Masse.“ Für tau
-  stimmt das nicht: die Korrektur lässt die Randverteilungen exakt unverändert (die
-  Änderungen in Zeile h = 0 heben sich auf, −λμρ·p₀₀ + λρ·p₀₁ = 0, ebenso in den übrigen).
-  Der Draw-Boost steht auf 1,0. Nachgerechnet: λ 2,8/0,7 → mit tau 2,799/0,700, erst die
-  Temperatur macht 2,663/0,758 daraus. Die Funktion ist trotzdem richtig, nur die
-  Begründung nicht mehr.
-
-- `src/model/priceSheet.ts:16`: „Die Zahlen hier summieren je Markt exakt auf 1.“ Für
-  die Doppelte Chance stimmt das nicht und kann es nicht: 1X, 12 und X2 enthalten jeden
-  Ausgang zweimal, die Summe ist 2 (nachgerechnet: 2,000). Die übrigen Märkte summieren
-  je Linie auf 1. Gefunden in Runde „Preisblatt“.
-- `src/model/teamStrength.ts:40-43`: der Ridge seien „k zusaetzliche Spiele, in denen es
-  exakt im Ligadurchschnitt getroffen und kassiert hat“. Zeile 159 addiert aber `k` auf
-  Tore **und** Erwartung, ein echtes Durchschnittsspiel trüge dort rund 1,53 bei
-  ((1,703 + 1,349) / 2). `k = 8` entspricht also etwa **5,2 Spielen**, nicht 8. An den
-  Zahlen ändert das nichts, der Wert 8 ist gemessen gewählt. Nur die Einheit stimmt nicht: in den
-  Kommentaren Zeile 40 und 131 und im Namen `ridgePseudoMatches` selbst. Umbenennen würde
-  den Feldnamen in `PipelineConfig` berühren, also nur den Kommentar korrigieren.
-  Nachgerechnet: `(3 + 8) / (1,5 + 8) = 1,1579`, mit 8 echten Durchschnittsspielen 1,1094,
-  mit 5,24 wieder 1,1579. Gefunden in Runde „teamStrength“.
-
-**Fix:** die fünf Kommentare an den Code angleichen.
-
 ### 18. Die Formkurve wirft das Torniveau weg [eingefroren]
 
 `src/model/predictPipeline.ts:80-81`, `src/model/xgForm.ts:127`
@@ -376,12 +272,64 @@ Dieselben Fakten ergeben also zwei verschiedene Vorhersagen.
 **Fix (Vorschlag):** getrennt nach Angriff und Abwehr dämpfen, also je `team` und Dimension
 (`attack`/`defense`) auf die Beträge, statt je `team|direction` auf ganze Fakten. Dann
 gibt es auch keinen Gleichstand zwischen verschiedenen Dimensionen mehr. Ändert die
-Abbildung, also zur nächsten Saison, und erst nachdem der Fingerabdruck gemischte Paare
-sieht (Nachtrag bei Punkt 4), sonst bemerkt der Hash die Änderung nicht.
+Abbildung, also zur nächsten Saison. Seit dem 18.11. bemerkt der Hash das: der breite
+Abdruck sampelt geordnete Paare verschiedener Fakten. Nachgestellt mit umgedrehter
+Auflösung von Gleichständen: der alte Abdruck bleibt bei `0c522175`, der breite bewegt
+sich, der Hash springt von `3cc0ddad` auf `c311cced`.
 
 ---
 
 ## Abgeschlossen
+
+### 4 und 8 (Stufe 1). Hash-Anker: der Hash sieht mehr, ohne dass das Log geschnitten wird
+
+Der Hash sah drei Dinge nicht, die die Vorhersage verändern: `EXTRACTION_BLOCK_SIZE` und
+`MAX_SEARCHES` (der Ausfall von Spieltag 1 hing an beiden) und jede Logikreparatur auf der
+Modellseite. Dazu kam ein Abdruck der Faktenzuordnung, der nur `absence` und nur Paare
+gleicher Fakten abtastete. Die Lücken einfach zu schließen hätte den Hash mitten in der
+eingefrorenen Saison bewegt, ohne dass sich eine einzige Zahl ändert.
+
+**Umgesetzt** in `src/model/pipelineConfig.ts`: vier neue Felder
+(`modelLogicVersion`, `llmExtractionBlockSize`, `llmMaxSearches`,
+`llmMappingCoverageFingerprint`). Sie gehen **nur bei Abweichung** vom `HASH_ANCHOR` in den
+Hash ein. Der Anker besteht aus Literalen, also aus dem Stand beim Einfrieren. Nachgeprüft:
+- unverändert bleibt der Hash `3cc0ddad`, die 61 Zeilen dieser Saison stehen weiter in
+  einer Gruppe;
+- jedes Feld bewegt ihn, sobald es abweicht;
+- Gegenprobe am echten Code: `CATEGORY_SCALE.return` 0,7 → 0,71 lässt den alten Abdruck bei
+  `0c522175` stehen, der breite bewegt sich (Hash `2683857f`); ebenso eine umgedrehte
+  Auflösung von Gleichständen (Punkt 19). Beides danach zurückgesetzt.
+
+Dazu:
+- **Herkunft:** der LLM-Cache schreibt `research: { extractionBlockSize, maxSearches }`, und
+  `forward-log` setzt diese Werte in den Hash ein, nicht die gerade im Code stehenden. Das
+  ist dieselbe Regel wie beim Modell. Ältere Caches haben das Feld nicht, dann gilt der Code.
+- **Freeze mechanisch:** `FROZEN_CONFIG_HASH = "3cc0ddad"`. selfCheck verlangt, dass die
+  Voreinstellung ihn trifft, `forward-log` warnt laut, sobald ein Feld abweicht.
+- `SAISONBETRIEB.md`: Freeze-Tabelle um drei Zeilen ergänzt, im Sonderfall den Schritt
+  „`MODEL_LOGIC_VERSION` hochzählen“ aufgenommen.
+
+Zur nächsten Saison, wenn ohnehin geschnitten wird, dürfen die Felder regulär in die Liste
+in `configHash` wandern, und der Anker entfällt. Offen bleibt Stufe 2 von Punkt 8.
+
+### 14. Ein zuverlässiger Auslöser statt GitHubs Zeitplan
+
+Das Signal, auf das der Punkt gewartet hat, kam: von Oktober bis Mitte November startete
+GitHub den Zeitplan nur zwei- bis dreimal am Tag, oft Stunden zu spät. Kein Lauf lag in
+den Recherchefenstern von **Spieltag 5 bis 9**, die Recherche fiel fünfmal in Folge aus.
+Ein Alarm kam nicht, weil das Basismodell immer Zeilen lieferte. Der Zwischenschritt vom
+18.09. (Zeitplan weg von :00/:15/:30/:45) hat also nicht gereicht.
+
+**Umgesetzt** in `cb5cf0f` (18.11.): ein cron-job.org-Job löst alle 15 Minuten
+`workflow_dispatch` mit `grund=taktgeber` aus, mit einem Token, das nur dieses Repo und
+nur Actions darf (`SAISONBETRIEB.md`, Abschnitt „Taktgeber“). Fenster, Untergrenze und
+Idempotenz bleiben bei `research-due`, der GitHub-Zeitplan bleibt als zweite Chance.
+`forward-log-check` meldet jetzt auch einen angepfiffenen Spieltag ohne eine einzige Zeile
+mit Kontext; 5 bis 9 stehen mit Grund in `KNOWN_RESEARCH_GAPS`.
+
+**Für den Freeze:** neun Spieltage gespielt, mit Spielkontext davon nur 1, 2 und 4
+(Spieltag 3 fehlt ganz, 5 bis 9 nur Basis). Die Evidenz kommt also noch langsamer als die
+zwei bis drei Saisons, mit denen der Freeze gerechnet hat.
 
 ### 16. `npm run predict` ging einen eigenen Weg neben der Route
 

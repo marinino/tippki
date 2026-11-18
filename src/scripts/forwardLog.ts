@@ -29,7 +29,12 @@ import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrengt
 import { predictPipeline } from "../model/predictPipeline";
 import { computeXgForm } from "../model/xgForm";
 import { argmaxCell } from "../model/scoreMatrix";
-import { DEFAULT_PIPELINE, configHash } from "../model/pipelineConfig";
+import {
+  DEFAULT_PIPELINE,
+  HASH_ANCHOR,
+  configHash,
+  hashAnchorDeviations,
+} from "../model/pipelineConfig";
 import { FORWARD_SEASON } from "../eval/splits";
 import { cacheKey, readLlmCache } from "../llm/llmCache";
 import { logDecision, logKey } from "../eval/forwardLogRules";
@@ -102,7 +107,28 @@ const llmByFixture = llmMatchesMatchday ? llmCache!.contexts : {};
 // anderes als beim Refresh, wuerde der Hash sonst ein Modell behaupten, das nie gelaufen
 // ist -- genau die stille Vermischung, gegen die er gebaut ist.
 const effectiveModel = llmMatchesMatchday ? llmCache!.model : DEFAULT_PIPELINE.llmModel;
-const hash = configHash({ ...DEFAULT_PIPELINE, llmModel: effectiveModel });
+// Dasselbe fuer Blockgroesse und Suchbudget. Caches von vor dem 2026-11-18 fuehren sie
+// nicht; dann gilt der Stand im Code, der damals derselbe war (3 und 14).
+const researchUsed = llmMatchesMatchday ? llmCache!.research : undefined;
+const effectiveConfig = {
+  ...DEFAULT_PIPELINE,
+  llmModel: effectiveModel,
+  llmExtractionBlockSize: researchUsed?.extractionBlockSize ?? DEFAULT_PIPELINE.llmExtractionBlockSize,
+  llmMaxSearches: researchUsed?.maxSearches ?? DEFAULT_PIPELINE.llmMaxSearches,
+};
+const hash = configHash(effectiveConfig);
+
+// Laut, wenn der Hash den eingefrorenen Stand verlaesst. Kein Abbruch: nach einer
+// dokumentierten Reparatur (SAISONBETRIEB.md, Sonderfall) ist genau das richtig. Aber es
+// soll niemand ueberrascht werden, dass das Log ab hier eine zweite Gruppe hat.
+const deviations = hashAnchorDeviations(effectiveConfig);
+if (deviations.length > 0) {
+  console.warn(
+    `Hinweis: Konfiguration ${hash} weicht vom eingefrorenen Stand ab:\n` +
+      deviations.map(([k, v]) => `         ${k} = ${JSON.stringify(v)} (eingefroren: ${JSON.stringify(HASH_ANCHOR[k])})`).join("\n") +
+      `\n         Das Log bekommt damit eine eigene Gruppe. Gewollt? Dann Grund in SAISONBETRIEB.md.\n`
+  );
+}
 
 if (effectiveModel !== DEFAULT_PIPELINE.llmModel) {
   console.warn(
