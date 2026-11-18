@@ -13,9 +13,11 @@
 
 import { DEFAULT_LLM_GAIN, DEFAULT_LLM_MAX_LOG_ADJUSTMENT } from "../llm/llmAdjustment";
 import { aggregateFactors, toLambdaExponents } from "../llm/factMapping";
+import { MAX_SEARCHES } from "../llm/anthropicClient";
 import {
   CERTAINTY_LEVELS,
   DIRECTIONS,
+  EXTRACTION_BLOCK_SIZE,
   EXTRACTION_SYSTEM_PROMPT,
   FACT_CATEGORIES,
   IMPORTANCE_LEVELS,
@@ -72,6 +74,27 @@ export interface PipelineConfig {
   llmPromptFingerprint: string;
   llmMappingFingerprint: string;
   llmModel: string;
+
+  // --- Seit 2026-11-18, verankert (siehe HASH_ANCHOR unten) ---------------------------
+  //
+  // Von Hand hochzuzaehlen bei jeder Logikreparatur auf der Modellseite: xgForm.ts,
+  // teamStrength.ts, predictMatch.ts, scoreMatrix.ts, predictPipeline.ts. Keines der Felder
+  // oben sieht Code -- eine Reparatur dort liesse den Hash sonst unveraendert, und das Log
+  // saehe alte und neue Logik unter derselben Kennung. Kein Verhaltensabdruck wie beim
+  // LLM-Layer, weil computeXgForm Dateien liest; bis es eine injizierbare Datenquelle gibt,
+  // ist das die ehrliche Stufe.
+  modelLogicVersion: number;
+  // Partien je Extraktionsaufruf und Suchbudget der Recherche. Beide veraendern, welche
+  // Fakten ueberhaupt ankommen -- der Ausfall von Spieltag 1 hing an genau diesen beiden --,
+  // und der Prompt-Abdruck sieht keines davon: canonicalUserPrompt rendert zwei feste
+  // Partien, das Suchbudget steht im API-Aufruf, nicht im Text.
+  llmExtractionBlockSize: number;
+  llmMaxSearches: number;
+  // Zweiter Abdruck der Faktenzuordnung, breiter als llmMappingFingerprint: alle Kategorien
+  // statt nur "absence", und Paare VERSCHIEDENER Fakten in beiden Reihenfolgen. Der alte
+  // Abdruck sah CATEGORY_SCALE fuer vier von fuenf Kategorien nicht, und auch nicht, wie
+  // verschiedene Fakten gruppiert und gedaempft werden (VERBESSERUNGEN.md, Punkt 4 und 19).
+  llmMappingCoverageFingerprint: string;
 }
 
 // Der Fingerabdruck deckt beide Haelften der Anweisung ab: den Systemprompt und die
@@ -154,6 +177,110 @@ export function llmMappingFingerprint(): string {
   return fnv1a(samples.join(","));
 }
 
+// Der breitere Abdruck. Drei Familien von Stichproben:
+//   1. jede Kombination aus Kategorie, Position, Wichtigkeit, Sicherheit, Richtung und
+//      Seite, einzeln und doppelt (die Rangdaempfung greift erst ab dem zweiten Fakt);
+//   2. geordnete Paare verschiedener Fakten ueber Position x Richtung x Seite -- in beiden
+//      Reihenfolgen, damit auch eine Aenderung daran auffaellt, welcher von zwei gleich
+//      schweren Fakten gedaempft wird (Punkt 19);
+//   3. dasselbe ueber Kategorie x Richtung x Seite, fuer die Gruppierung ueber Kategorien.
+// Rund 3.000 Aggregationen, ein paar Millisekunden beim Laden des Moduls.
+export function llmMappingCoverageFingerprint(): string {
+  const samples: string[] = [];
+  const fact = (
+    category: LlmKeyFactor["category"],
+    role: LlmKeyFactor["role"],
+    importance: LlmKeyFactor["importance"],
+    certainty: LlmKeyFactor["certainty"],
+    direction: LlmKeyFactor["direction"],
+    team: LlmKeyFactor["team"]
+  ): LlmKeyFactor => ({
+    team,
+    category,
+    subject: "X",
+    role,
+    importance,
+    direction,
+    certainty,
+    note: "",
+    source: "",
+  });
+  const sample = (factors: LlmKeyFactor[]) => {
+    const e = toLambdaExponents(aggregateFactors(factors));
+    samples.push(`${e.home.toFixed(9)}|${e.away.toFixed(9)}`);
+  };
+
+  for (const category of FACT_CATEGORIES)
+    for (const role of PLAYER_ROLES)
+      for (const importance of IMPORTANCE_LEVELS)
+        for (const certainty of CERTAINTY_LEVELS)
+          for (const direction of DIRECTIONS)
+            for (const team of TEAM_SIDES) {
+              const f = fact(category, role, importance, certainty, direction, team);
+              sample([f]);
+              sample([f, f]);
+            }
+
+  const orderedPairs = (pool: LlmKeyFactor[]) => {
+    for (let i = 0; i < pool.length; i++)
+      for (let j = 0; j < pool.length; j++) if (i !== j) sample([pool[i], pool[j]]);
+  };
+  const byRole: LlmKeyFactor[] = [];
+  for (const role of PLAYER_ROLES)
+    for (const direction of DIRECTIONS)
+      for (const team of TEAM_SIDES)
+        byRole.push(fact(FACT_CATEGORIES[0], role, "key", "confirmed", direction, team));
+  orderedPairs(byRole);
+  const byCategory: LlmKeyFactor[] = [];
+  for (const category of FACT_CATEGORIES)
+    for (const direction of DIRECTIONS)
+      for (const team of TEAM_SIDES)
+        byCategory.push(fact(category, "midfielder", "key", "confirmed", direction, team));
+  orderedPairs(byCategory);
+
+  return fnv1a(samples.join(","));
+}
+
+// Bei jeder Logikreparatur auf der Modellseite um eins erhoehen (siehe modelLogicVersion
+// oben und SAISONBETRIEB.md, "Sonderfall: ein echter Fehler"). 0 = Stand beim Einfrieren.
+export const MODEL_LOGIC_VERSION = 0;
+
+// Der Anker: die Werte der verankerten Felder beim Einfrieren, als LITERALE. Nicht aus den
+// Konstanten abgeleitet -- sonst wanderte der Anker mit jeder Aenderung mit und saehe sie
+// nie.
+//
+// Warum ueberhaupt ein Anker: diese Felder kamen am 2026-11-18 dazu, mitten in einer
+// eingefrorenen Saison. Haengt man sie einfach an den Hash, aendert er sich, obwohl keine
+// einzige Zahl der Vorhersage anders ist -- und das Log zerfiele ohne Grund in zwei
+// Populationen. Deshalb gehen sie nur in den Hash ein, wenn sie vom Anker ABWEICHEN.
+// Solange alles beim Alten ist, ist der Hash bitgleich der von vorher (3cc0ddad); sobald
+// sich eines davon bewegt, bewegt sich auch der Hash.
+//
+// Den Anker nie nachziehen, um eine Aenderung "einzupflegen": dann ist der Hash wieder der
+// alte, und genau das soll er nach einer Aenderung nicht sein. Zur naechsten Saison, wenn
+// ohnehin geschnitten wird, duerfen die Felder regulaer in die Liste in configHash wandern
+// und der Anker entfaellt.
+export const HASH_ANCHOR = {
+  modelLogicVersion: 0,
+  llmExtractionBlockSize: 3,
+  llmMaxSearches: 14,
+  llmMappingCoverageFingerprint: "436d117b",
+} as const;
+
+type AnchoredField = keyof typeof HASH_ANCHOR;
+const ANCHORED_FIELDS = Object.keys(HASH_ANCHOR) as AnchoredField[];
+
+// Der Hash, unter dem die Saison 2026/27 eingefroren ist, fuer das Standardmodell
+// (DEFAULT_MODEL). selfCheck verlangt, dass DEFAULT_PIPELINE ihn trifft -- weicht er ab,
+// hat sich etwas Eingefrorenes bewegt, gewollt oder nicht.
+export const FROZEN_CONFIG_HASH = "3cc0ddad";
+
+// Welche verankerten Felder vom Stand beim Einfrieren abweichen. Leer heisst: der Hash ist
+// derselbe wie ohne diese Felder.
+export function hashAnchorDeviations(config: PipelineConfig): [AnchoredField, number | string][] {
+  return ANCHORED_FIELDS.filter((k) => config[k] !== HASH_ANCHOR[k]).map((k) => [k, config[k]]);
+}
+
 // Exakt die aktuell produktiven Werte.
 export const DEFAULT_PIPELINE: PipelineConfig = {
   ridgePseudoMatches: PRODUCTION_MODEL_OPTIONS.ridgePseudoMatches!,
@@ -173,6 +300,10 @@ export const DEFAULT_PIPELINE: PipelineConfig = {
   // tatsaechlich geholt wurde. forwardLog.ts setzt deshalb das Modell aus dem Cache ein --
   // sonst behauptet der Hash ein Modell, das gar nicht gelaufen ist.
   llmModel: resolveModelProfile().model,
+  modelLogicVersion: MODEL_LOGIC_VERSION,
+  llmExtractionBlockSize: EXTRACTION_BLOCK_SIZE,
+  llmMaxSearches: MAX_SEARCHES,
+  llmMappingCoverageFingerprint: llmMappingCoverageFingerprint(),
 };
 
 // FNV-1a, 32 Bit. Kurz genug zum Lesen im Log, kollisionsfrei genug fuer eine Handvoll
@@ -187,6 +318,7 @@ function fnv1a(text: string): string {
 }
 
 export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
+  const deviations = hashAnchorDeviations(config);
   return fnv1a(
     JSON.stringify([
       config.ridgePseudoMatches,
@@ -202,6 +334,9 @@ export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
       config.llmPromptFingerprint,
       config.llmMappingFingerprint,
       config.llmModel,
+      // Nur bei Abweichung vom Anker, mit Feldnamen -- sonst ergaebe eine 3 bei der
+      // Blockgroesse denselben Hash wie eine 3 bei der Logikversion.
+      ...(deviations.length > 0 ? [deviations] : []),
     ])
   );
 }

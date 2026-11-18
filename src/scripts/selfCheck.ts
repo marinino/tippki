@@ -22,12 +22,19 @@ import {
 } from "../data/fotmobXg";
 import {
   DEFAULT_PIPELINE,
+  FROZEN_CONFIG_HASH,
+  HASH_ANCHOR,
+  MODEL_LOGIC_VERSION,
   canonicalUserPrompt,
   configHash,
+  hashAnchorDeviations,
+  llmMappingCoverageFingerprint,
   llmMappingFingerprint,
   llmPromptFingerprint,
   type PipelineConfig,
 } from "../model/pipelineConfig";
+import { DEFAULT_MODEL } from "../llm/modelProfile";
+import { MAX_SEARCHES } from "../llm/anthropicClient";
 import {
   loadAllMatches,
   parseMatchDate,
@@ -2562,6 +2569,10 @@ section("Konfigurations-Hash", () => {
     ["llmPromptFingerprint", { llmPromptFingerprint: "anders01" }],
     ["llmMappingFingerprint", { llmMappingFingerprint: "anders02" }],
     ["llmModel", { llmModel: "claude-opus-5" }],
+    ["modelLogicVersion", { modelLogicVersion: DEFAULT_PIPELINE.modelLogicVersion + 1 }],
+    ["llmExtractionBlockSize", { llmExtractionBlockSize: DEFAULT_PIPELINE.llmExtractionBlockSize + 1 }],
+    ["llmMaxSearches", { llmMaxSearches: DEFAULT_PIPELINE.llmMaxSearches + 1 }],
+    ["llmMappingCoverageFingerprint", { llmMappingCoverageFingerprint: "anders03" }],
   ];
 
   const base = configHash(DEFAULT_PIPELINE);
@@ -2574,6 +2585,86 @@ section("Konfigurations-Hash", () => {
       )
     );
   }
+
+  // Der Freeze, mechanisch. Bewegt sich irgendein Feld, das im Hash steht, schlaegt das hier
+  // an -- auch dann, wenn die Aenderung gewollt war. Das ist Absicht: eine gewollte Aenderung
+  // mitten in der Saison ist ein Schnitt im Vorwaerts-Log und soll eine bewusste Handlung
+  // sein (FROZEN_CONFIG_HASH nachziehen, Grund in SAISONBETRIEB.md), kein Nebeneffekt.
+  // Mit DEFAULT_MODEL statt der Umgebung, damit ein gesetztes LLM_MODEL hier nicht stoert.
+  const frozenDefaults = { ...DEFAULT_PIPELINE, llmModel: DEFAULT_MODEL };
+  check(() =>
+    assert.deepEqual(
+      hashAnchorDeviations(frozenDefaults),
+      [],
+      "ein verankertes Feld weicht vom Stand beim Einfrieren ab (HASH_ANCHOR in pipelineConfig.ts)"
+    )
+  );
+  check(() =>
+    assert.equal(
+      configHash(frozenDefaults),
+      FROZEN_CONFIG_HASH,
+      "der configHash hat den eingefrorenen Stand verlassen -- gewollt? Dann SAISONBETRIEB.md, Sonderfall"
+    )
+  );
+
+  // Die verankerten Felder muessen an den echten Konstanten haengen. Stuende hier eine
+  // abgeschriebene Zahl, bliebe der Hash beim Drehen der Konstante stehen -- genau der
+  // Fehler, den der Anker beheben soll.
+  check(() => assert.equal(DEFAULT_PIPELINE.llmExtractionBlockSize, EXTRACTION_BLOCK_SIZE));
+  check(() => assert.equal(DEFAULT_PIPELINE.llmMaxSearches, MAX_SEARCHES));
+  check(() => assert.equal(DEFAULT_PIPELINE.modelLogicVersion, MODEL_LOGIC_VERSION));
+  check(() =>
+    assert.equal(DEFAULT_PIPELINE.llmMappingCoverageFingerprint, llmMappingCoverageFingerprint())
+  );
+  // Und der Anker muss aus Literalen bestehen, nicht aus denselben Konstanten -- sonst
+  // wanderte er mit. Pruefbar daran, dass er eine Abweichung ueberhaupt sehen kann.
+  check(() =>
+    assert.equal(
+      hashAnchorDeviations({ ...frozenDefaults, llmMaxSearches: HASH_ANCHOR.llmMaxSearches + 1 }).length,
+      1,
+      "der Anker sieht eine Abweichung nicht"
+    )
+  );
+
+  // Gegenprobe fuer den breiteren Abdruck, nach dem Muster von withRole oben: die Kategorien
+  // muessen sich in der Zuordnung unterscheiden, sonst tastete die Kategorie-Schleife
+  // nichts ab. Nachgestellt am 2026-11-18: CATEGORY_SCALE.return 0,7 -> 0,71 liess
+  // llmMappingFingerprint stehen (0c522175) und bewegte den breiten Abdruck; ebenso eine
+  // umgedrehte Aufloesung von Gleichstaenden in aggregateFactors.
+  const withCategory = (category: LlmKeyFactor["category"]) =>
+    toLlmAdjustment({
+      homeTeam: "A",
+      awayTeam: "B",
+      foundAnything: true,
+      summary: "",
+      keyFactors: [
+        {
+          team: "home",
+          category,
+          subject: "X",
+          role: "forward",
+          importance: "key",
+          direction: "weakens",
+          certainty: "confirmed",
+          note: "",
+          source: "",
+        },
+      ],
+    });
+  check(() =>
+    assert.notEqual(
+      withCategory("absence").homeLogAdj,
+      withCategory("return").homeLogAdj,
+      "die Zuordnung unterscheidet Kategorien -- sonst taste der breite Abdruck nichts ab"
+    )
+  );
+  check(() =>
+    assert.notEqual(
+      llmMappingCoverageFingerprint(),
+      llmMappingFingerprint(),
+      "der breite Abdruck ist nicht bloss der alte"
+    )
+  );
 });
 
 // ---------------------------------------------------------------------------

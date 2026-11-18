@@ -406,6 +406,18 @@ sondern mechanisch geprüft — [selfCheck.ts](src/scripts/selfCheck.ts), Abschn
 | Rechercheanweisung | `matchContext.ts` | `SYSTEM_PROMPT`, `buildMatchdayPrompt` |
 | Faktengewichte | `factMapping.ts` | `ROLE_WEIGHTS`, `IMPORTANCE_SCALE`, Aggregation |
 | Sprachmodell | `modelProfile.ts` / `LLM_MODEL` | `claude-haiku-4-5` |
+| Extraktionsblock | `matchContext.ts` | `EXTRACTION_BLOCK_SIZE` = 3 |
+| Suchbudget | `anthropicClient.ts` | `MAX_SEARCHES` = 14 |
+| Modelllogik | `pipelineConfig.ts` | `MODEL_LOGIC_VERSION` = 0 |
+
+Die letzten drei Zeilen und ein breiterer Abdruck der Faktenzuordnung stehen seit dem
+18.11.2026 im Hash, und zwar **verankert**: sie gehen nur ein, wenn sie vom Stand beim
+Einfrieren abweichen (`HASH_ANCHOR` in [pipelineConfig.ts](src/model/pipelineConfig.ts)).
+Solange nichts abweicht, bleibt der Hash bitgleich `3cc0ddad`, das Log wurde dafür also
+nicht geschnitten. Vorher hätte eine Änderung an einem dieser Werte den Hash gar nicht
+bewegt. selfCheck verlangt außerdem, dass der Hash `FROZEN_CONFIG_HASH` trifft, und
+`forward-log` meldet sich laut, sobald er den eingefrorenen Stand verlässt. Den Anker nie
+nachziehen, um eine Änderung „einzupflegen“, sonst sieht der Hash sie wieder nicht.
 
 Dazu kommt seit der Automatik ein Wert, der **nicht** im `configHash` steht und trotzdem
 eingefroren ist: `LEAD_MINUTES` = 180 in [researchWindow.ts](src/data/researchWindow.ts).
@@ -518,8 +530,15 @@ Ein Fehler ist kein Tuning-Wunsch. Fällt in der Saison auf, dass etwas nachweis
 rechnet — nicht „suboptimal", sondern falsch —, wird es repariert. Dann gilt:
 
 1. Reparieren, Grund im Code dokumentieren.
-2. Der Hash ändert sich. Das ist richtig so: es *ist* eine andere Pipeline.
-3. Im Log stehen ab da zwei Gruppen. `forward-eval` wertet sie getrennt aus. Nicht `--pool`
+2. Der Hash ändert sich. Das ist richtig so: es *ist* eine andere Pipeline. **Aber nur von
+   selbst, wenn sich eine Zahl, der Prompt, das Modell oder die Faktenzuordnung bewegt.**
+   Eine Reparatur an der *Logik* der Modellseite (`xgForm.ts`, `teamStrength.ts`,
+   `predictMatch.ts`, `scoreMatrix.ts`, `predictPipeline.ts`) sieht der Hash nicht. Dann
+   `MODEL_LOGIC_VERSION` in [pipelineConfig.ts](src/model/pipelineConfig.ts) um eins
+   erhöhen, im selben Commit wie die Reparatur.
+3. `FROZEN_CONFIG_HASH` auf den neuen Hash setzen (selfCheck schlägt sonst an) und hier
+   unter „Vorgefallen“ festhalten, ab welchem Spieltag er gilt.
+4. Im Log stehen ab da zwei Gruppen. `forward-eval` wertet sie getrennt aus. Nicht `--pool`
    benutzen, um das zu übertünchen.
 
 Die Grenze ist nicht immer scharf. Der Test: lässt sich die Änderung begründen, **ohne** auf

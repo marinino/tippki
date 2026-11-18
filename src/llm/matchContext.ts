@@ -251,6 +251,9 @@ Schreibe "summary" und "note" auf Deutsch.`;
 // Drei Partien je Extraktionsaufruf. Bei drei Partien hat die Zuordnung nachweislich
 // funktioniert, bei neun nicht -- und zwischen beiden liegt die einzige Groesse, die sich
 // in der Messung geaendert hat.
+//
+// Steht im configHash (llmExtractionBlockSize in pipelineConfig.ts) und ist damit
+// eingefroren.
 export const EXTRACTION_BLOCK_SIZE = 3;
 
 // Eigene Funktion statt einer Schleife im Client, damit der Self-Check nachweisen kann,

@@ -63,7 +63,9 @@ const EXTRACTION_MAX_TOKENS = 8000;
 // Fehlschlag zu melden. Mit max_uses=1 auf neun Partien reproduzierbar nachgestellt --
 // fuenf parallel abgesetzte Suchen, eine durchgelaufen, vier max_uses_exceeded, danach
 // neunmal derselbe Nullsatz. Genau dieser Ausfall hat Spieltag 1 gekostet.
-const MAX_SEARCHES = 14;
+//
+// Steht im configHash (llmMaxSearches in pipelineConfig.ts) und ist damit eingefroren.
+export const MAX_SEARCHES = 14;
 
 // Serverseitige Tools laufen in einer eigenen Sampling-Schleife. Erreicht die ihr Limit,
 // kommt stop_reason "pause_turn" zurueck und der Aufruf muss fortgesetzt werden -- ohne
