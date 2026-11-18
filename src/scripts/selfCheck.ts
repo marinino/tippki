@@ -128,10 +128,12 @@ import {
 import { accuracyStandardError, seasonsFor } from "../eval/splits";
 import {
   KNOWN_GAPS,
+  KNOWN_RESEARCH_GAPS,
   latestPerKey,
   logDecision,
   logKey,
   missingAfterKickoff,
+  missingResearchAfterKickoff,
   researchTooLate,
 } from "../eval/forwardLogRules";
 import {
@@ -2703,6 +2705,49 @@ section("Vorwaerts-Log: Alarm und zu spaete Recherche", () => {
     assert.equal(missingAfterKickoff(echteFx, log, "2026", stichtag, parseKickoff, KNOWN_GAPS).length, 0);
   });
   check(() => assert.ok(KNOWN_GAPS.every((g) => g.grund.length > 40), "jede bekannte Luecke braucht einen Grund"));
+  check(() =>
+    assert.ok(KNOWN_RESEARCH_GAPS.every((g) => g.grund.length > 40), "jeder Spieltag ohne Recherche braucht einen Grund")
+  );
+
+  // Fehlende Recherche: eine Zeile ohne Kontext ist keine Recherche, eine mit schon.
+  const mitKontext = (matchday: number, season = "2026") => ({ season, matchday, llm: { fetchedAt: "2026-09-18T15:30:00Z" } });
+  const ohneKontext = (matchday: number) => ({ season: "2026", matchday, llm: null });
+  check(() => {
+    const miss = missingResearchAfterKickoff(fx, [ohneKontext(4), mitKontext(3)], "2026", samstagAbend, parseKickoff, []);
+    assert.deepEqual(miss, [{ matchday: 4, firstKickoff: "2026-09-18T20:30:00" }], "nur llm: null zaehlt nicht");
+  });
+  check(() =>
+    assert.equal(
+      missingResearchAfterKickoff(fx, [ohneKontext(4), mitKontext(4), mitKontext(3)], "2026", samstagAbend, parseKickoff, []).length,
+      0,
+      "eine Zeile mit Kontext genuegt fuer den Spieltag"
+    )
+  );
+  // Vor dem ersten Anpfiff kein Alarm, auch wenn noch nichts recherchiert ist.
+  check(() =>
+    assert.deepEqual(
+      missingResearchAfterKickoff(fx, [], "2026", new Date("2026-09-18T18:00:00Z"), parseKickoff, []).map((m) => m.matchday),
+      [3]
+    )
+  );
+  // Eine Recherche aus einer anderen Saison zaehlt nicht.
+  check(() =>
+    assert.equal(missingResearchAfterKickoff(fx, [mitKontext(4, "2025"), mitKontext(3)], "2026", samstagAbend, parseKickoff, []).length, 1)
+  );
+
+  // Der echte Stand am 18.11.2026: ohne Ausnahmen fehlen Spieltag 3 (gar keine Zeile) und 5
+  // bis 9 (nur Basismodell). Mit den bekannten Luecken schweigt der Alarm.
+  check(() => {
+    const echteFx = JSON.parse(readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8"));
+    const log = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const stichtag = new Date("2026-11-18T12:00:00Z");
+    const ohne = missingResearchAfterKickoff(echteFx, log, "2026", stichtag, parseKickoff, []);
+    assert.deepEqual(ohne.map((m) => m.matchday), [3, 5, 6, 7, 8, 9]);
+    assert.equal(missingResearchAfterKickoff(echteFx, log, "2026", stichtag, parseKickoff).length, 0);
+  });
 
   // Zu spaete Recherche, gemessen am Anpfiff der jeweiligen Partie.
   const anpfiff = new Date("2026-09-04T18:30:00Z");

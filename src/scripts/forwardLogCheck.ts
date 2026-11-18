@@ -18,7 +18,12 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { parseKickoff } from "../data/kickoff";
 import { FORWARD_SEASON } from "../eval/splits";
-import { KNOWN_GAPS, missingAfterKickoff } from "../eval/forwardLogRules";
+import {
+  KNOWN_GAPS,
+  KNOWN_RESEARCH_GAPS,
+  missingAfterKickoff,
+  missingResearchAfterKickoff,
+} from "../eval/forwardLogRules";
 
 const DATA_DIR = join(process.cwd(), "data");
 const LOG_PATH = join(DATA_DIR, "forward_log.jsonl");
@@ -37,26 +42,50 @@ const entries = existsSync(LOG_PATH)
       })
   : [];
 
-const missing = missingAfterKickoff(fixtures, entries, FORWARD_SEASON, new Date(), parseKickoff);
+const now = new Date();
+const missing = missingAfterKickoff(fixtures, entries, FORWARD_SEASON, now, parseKickoff);
+const unresearched = missingResearchAfterKickoff(fixtures, entries, FORWARD_SEASON, now, parseKickoff);
 
 const gaps = KNOWN_GAPS.filter((g) => g.season === FORWARD_SEASON);
 if (gaps.length > 0) {
-  console.log(`Bekannte Luecken (kein Alarm): Spieltag ${gaps.map((g) => g.matchday).join(", ")}`);
+  console.log(`Bekannte Luecken im Log (kein Alarm): Spieltag ${gaps.map((g) => g.matchday).join(", ")}`);
+}
+const researchGaps = KNOWN_RESEARCH_GAPS.filter((g) => g.season === FORWARD_SEASON);
+if (researchGaps.length > 0) {
+  console.log(
+    `Bekannte Spieltage ohne Recherche (kein Alarm): ${researchGaps.map((g) => g.matchday).join(", ")}`
+  );
 }
 
 if (missing.length === 0) {
   console.log("Jede angepfiffene Partie steht im Vorwaerts-Log.");
-  process.exit(0);
+} else {
+  console.log(`\n${missing.length} angepfiffene Partie(n) ohne eine einzige Logzeile:\n`);
+  for (const m of missing) {
+    console.log(`  Spieltag ${m.matchday}: ${m.homeTeam} vs ${m.awayTeam} (Anpfiff ${m.kickoff})`);
+  }
+  console.log(
+    `\nDiese Vorhersagen lassen sich nicht nachholen -- nach Anpfiff wird nichts mehr\n` +
+      `protokolliert. Laeuft der Spieltag noch, sofort "Spielkontext" von Hand starten, damit\n` +
+      `wenigstens die restlichen Partien ins Log kommen. Danach die Ursache klaeren und die\n` +
+      `Luecke mit Grund in KNOWN_GAPS (src/eval/forwardLogRules.ts) eintragen.`
+  );
 }
 
-console.log(`\n${missing.length} angepfiffene Partie(n) ohne eine einzige Logzeile:\n`);
-for (const m of missing) {
-  console.log(`  Spieltag ${m.matchday}: ${m.homeTeam} vs ${m.awayTeam} (Anpfiff ${m.kickoff})`);
+if (unresearched.length === 0) {
+  console.log("Jeder angepfiffene Spieltag ist recherchiert.");
+} else {
+  console.log(`\n${unresearched.length} angepfiffene(r) Spieltag(e) ohne Spielkontext:\n`);
+  for (const m of unresearched) {
+    console.log(`  Spieltag ${m.matchday} (erster Anpfiff ${m.firstKickoff})`);
+  }
+  console.log(
+    `\nDie Recherche lief nicht oder scheiterte. Nachholen geht nur fuer Partien, die noch\n` +
+      `mindestens 90 Minuten entfernt sind ("Spielkontext" von Hand starten). Ursache pruefen:\n` +
+      `laeuft der externe Taktgeber (SAISONBETRIEB.md, "Taktgeber")? Gibt es im Lauf einen\n` +
+      `Recherchefehler? Danach den Spieltag mit Grund in KNOWN_RESEARCH_GAPS\n` +
+      `(src/eval/forwardLogRules.ts) eintragen.`
+  );
 }
-console.log(
-  `\nDiese Vorhersagen lassen sich nicht nachholen -- nach Anpfiff wird nichts mehr\n` +
-    `protokolliert. Laeuft der Spieltag noch, sofort "Spielkontext" von Hand starten, damit\n` +
-    `wenigstens die restlichen Partien ins Log kommen. Danach die Ursache klaeren und die\n` +
-    `Luecke mit Grund in KNOWN_GAPS (src/eval/forwardLogRules.ts) eintragen.`
-);
-process.exit(1);
+
+process.exit(missing.length > 0 || unresearched.length > 0 ? 1 : 0);

@@ -16,19 +16,33 @@
 #
 # Die Stundenangaben sind UTC. 08:00-18:59 deckt jedes Recherchefenster dieser Saison ganz
 # ab, auch im Winter; der selfCheck-Abschnitt "Recherchefenster" rechnet das fuer alle 34
-# Spieltage nach. Ob GitHub die Ticks auch AUSFUEHRT, kann kein Test pruefen -- dafuer
-# schlaegt `forward-log-check` im Ergebnis-Workflow Alarm, wenn nach Anpfiff Zeilen fehlen.
+# Spieltage nach. Ob die Ticks auch ANKOMMEN, kann kein Test pruefen -- dafuer schlaegt
+# `forward-log-check` im Ergebnis-Workflow Alarm, wenn nach Anpfiff Zeilen oder (seit
+# 18.11.2026) die Recherche eines Spieltags fehlen.
+#
+# DER EIGENTLICHE TAKT KOMMT SEIT DEM 18.11.2026 VON AUSSEN. Nachgesehen ueber die
+# Actions-API: GitHub hat den Zeitplan von Oktober bis Mitte November nur 2-3 Mal am Tag
+# gestartet, oft Stunden verspaetet (Laeufe um 20:05 und 23:55 UTC bei einem Plan bis
+# 18:59). Kein einziger lag in den Fenstern von Spieltag 5 bis 9, die Recherche fiel fuenf
+# Spieltage in Folge aus. Ein externer Taktgeber (cron-job.org) loest deshalb alle 15
+# Minuten workflow_dispatch aus, mit grund=taktgeber; solche Laeufe startet GitHub sofort.
+# Einrichtung und Token: SAISONBETRIEB.md, Abschnitt "Taktgeber". Der Zeitplan unten bleibt
+# als zweite, unzuverlaessige Chance stehen -- ein doppelter Lauf ist harmlos, research-due
+# ist idempotent.
 
 name: Spielkontext
 
 # Minuten 7, 22, 37, 52 statt */15 (seit 18.09.2026): GitHub nennt den Beginn jeder Stunde
 # ausdruecklich als Spitzenlast, in der geplante Laeufe verzoegert und bei genug Last
 # verworfen werden (Doku "Events that trigger workflows", Abschnitt schedule). */15 lag genau
-# auf :00, :15, :30, :45, wo alle anderen auch planen. Ob das mehr Laeufe durchbringt, ist
-# ungeprueft -- nachsehen ueber die Actions-API (VERBESSERUNGEN.md, Punkt 14).
+# auf :00, :15, :30, :45, wo alle anderen auch planen. Erst am 18.11.2026 auf main
+# angekommen; ob es mehr Laeufe durchbringt, ist ungeprueft (VERBESSERUNGEN.md, Punkt 14).
 on:
   schedule:
     - cron: "7,22,37,52 8-18 * * *"
+  # Auch der Weg des externen Taktgebers. Er setzt nur grund=taktgeber; spieltag und
+  # erzwingen bleiben leer, damit allein research-due ueber Fenster und Untergrenze
+  # entscheidet.
   workflow_dispatch:
     inputs:
       spieltag:
