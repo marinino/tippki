@@ -37,10 +37,24 @@
   color: var(--text-3);
 }
 
-.legend span {
+.item,
+.label {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+/* Das Ergebnis je Ausgang: eine Stufe heller als der Anteil davor, damit es als eigene
+   Angabe lesbar ist, aber nicht lauter als die Prozentzahl. */
+.score {
+  font-weight: 500;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .swatch {
@@ -60,5 +74,22 @@
   .legend {
     gap: 12px;
     justify-content: space-between;
+  }
+
+  /* Dreimal "Heim 50% · 1:0" braucht 322 px, eine Handykarte hat 309, und der Umbruch fiel
+     mitten in die Beschriftung ("Heim" / "50%"). Hier steht das Ergebnis deshalb unter
+     seinem Anteil, eingerueckt auf den Text hinter dem Farbfeld (7 px + 5 px Abstand). */
+  .item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .score {
+    padding-left: 12px;
+  }
+
+  .sep {
+    display: none;
   }
 }

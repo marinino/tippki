@@ -64,13 +64,33 @@ console.log(`Spieltag ${matchday} -- faire Quoten, ohne Marge\n`);
 for (const { homeTeam, awayTeam, date } of fixtures) {
   const matchDate = parseKickoff(date);
   const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
+  const homeForm = computeXgForm(homeTeam, matchDate);
+  const awayForm = computeXgForm(awayTeam, matchDate);
 
   const out = predictPipeline({
     model,
     homeTeam,
     awayTeam,
-    homeForm: computeXgForm(homeTeam, matchDate),
-    awayForm: computeXgForm(awayTeam, matchDate),
+    homeForm,
+    awayForm,
+    llmContext: cachedLlm?.context ?? null,
+  });
+
+  // Dieselbe Partie ohne Formkurve, sonst alles gleich (auch der Spielkontext). Nur zum
+  // Ansehen: angezeigt, geloggt und eingefroren wird weiter die Vorhersage MIT Form.
+  //
+  // Die Form ist ungeklammert (VERBESSERUNGEN.md, Punkt 6) und erzeugt den groessten Teil
+  // der deutlichen Abweichungen vom Markt -- ueber die Validation 54 % des gesamten
+  // Rueckstands auf 8 % der Spiele (npm run form, Abschnitt 4). Mit dieser Zeile ist jede
+  // Woche zu sehen, ob eine Abweichung vom Buchmacher aus ihr kommt. Am Spieltag 10 waren
+  // es drei von vier: Bayern 6:0 statt 3:0, Union-Leipzig 0:2 statt 1:1, Leverkusen 50 %
+  // statt 59 %.
+  const noForm = predictPipeline({
+    model,
+    homeTeam,
+    awayTeam,
+    homeForm: 0,
+    awayForm: 0,
     llmContext: cachedLlm?.context ?? null,
   });
 
@@ -87,6 +107,16 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
     `  1X2       1 ${formatOdds(p.outcome.home)} (${(p.outcome.home.prob * 100).toFixed(1)}%)   ` +
       `X ${formatOdds(p.outcome.draw)} (${(p.outcome.draw.prob * 100).toFixed(1)}%)   ` +
       `2 ${formatOdds(p.outcome.away)} (${(p.outcome.away.prob * 100).toFixed(1)}%)`
+  );
+  const signed = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
+  const modeWithout = noForm.prices.correctScore[0].score;
+  const modeWith = p.correctScore[0].score;
+  console.log(
+    `  ohne Form ${noForm.expectedHomeGoals.toFixed(2)} : ${noForm.expectedAwayGoals.toFixed(2)}   ` +
+      `1X2 ${(noForm.probs.homeWinProb * 100).toFixed(1)}% / ${(noForm.probs.drawProb * 100).toFixed(1)}% / ` +
+      `${(noForm.probs.awayWinProb * 100).toFixed(1)}%   Häufigstes ${modeWithout}` +
+      `${modeWithout === modeWith ? "" : ` (mit Form ${modeWith})`}   ` +
+      `Form ${signed(homeForm)} / ${signed(awayForm)}`
   );
   console.log(
     `  Doppelt   1X ${formatOdds(p.doubleChance.homeOrDraw)}   ` +

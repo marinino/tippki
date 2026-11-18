@@ -2,7 +2,7 @@
 //
 //   npm run form
 //
-// Drei Fragen, in dieser Reihenfolge:
+// Vier Fragen, in dieser Reihenfolge:
 //
 //   1. Misst die Formkurve ueberhaupt Form -- oder misst sie Teamstaerke ein zweites Mal?
 //      computeXgForm liefert die mittlere xG-Differenz der letzten Spiele. Bayern hat die
@@ -16,14 +16,22 @@
 //
 //   3. Wirkt Form spaeter in der Saison staerker? Am ersten Spieltag ist sie
 //      konstruktionsbedingt 0 und faehrt dann hoch.
+//
+//   4. Wo bringt die Form uns vom Markt weg -- und wer hat dann recht?
 
 import { loadAllMatches, parseMatchDate } from "../data/loadMatches";
 import { computeXgForm } from "../model/xgForm";
 import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
-import { summarize, type PerMatchMetrics } from "../eval/metrics";
+import { summarize, type OutcomeProbs, type PerMatchMetrics } from "../eval/metrics";
 import { pairedBootstrap } from "../eval/significance";
 import { seasonsFor, VALIDATION_SEASONS } from "../eval/splits";
-import { buildContexts, evaluateRun, type RunSpec } from "../eval/backtestCore";
+import {
+  buildContexts,
+  buildWalkForwardContexts,
+  evaluateRun,
+  type MatchEvaluation,
+  type RunSpec,
+} from "../eval/backtestCore";
 
 const seasons = seasonsFor("validation");
 const contexts = buildContexts(seasons);
@@ -213,3 +221,78 @@ for (const bucket of buckets) {
       `   ${test.pValue.toFixed(3)}`
   );
 }
+
+// ---------------------------------------------------------------------------
+console.log("\n\n=== 4. Wo bringt die Form uns vom Markt weg -- und wer hat dann recht? ===\n");
+
+// Anlass (18.11.2026): am Spieltag 10 wichen drei der neun haeufigsten Ergebnisse von denen
+// bei Tipico ab, und alle drei nur wegen der Form (VERBESSERUNGEN.md, Punkt 6). Ein Spieltag
+// ist eine Anekdote; hier steht dieselbe Frage ueber alle Validation-Spiele.
+//
+// Bewusst NICHT auf den Kontexten oben: walk-forward, weil "mitten in der Saison" genau die
+// Lage ist, in der die Form wirkt, und Pinnacle-Schluss statt der Voreinstellung, weil er in
+// der Validation alle Spiele abdeckt (das Marktmittel fehlt 2018 ganz) und der schaerfere
+// Gegner ist. "deutlich uneinig" ist dieselbe Schwelle wie in benchmark.ts.
+//
+// Vorsicht beim Lesen: die Teilmengen sind nach der Meinung des Marktes geschnitten, und der
+// Markt liegt im Mittel naeher am Ausgang als wir. "Durch die Form uneinig" verliert deshalb
+// fast zwangslaeufig, "die Form holt uns zum Markt" gewinnt fast zwangslaeufig. Ob die Form
+// insgesamt hilft, sagt nur die erste Zeile. Die Zerlegung zeigt, WO der Rueckstand sitzt.
+const DISAGREEMENT = 0.12;
+const wfContexts = buildWalkForwardContexts(seasons, PRODUCTION_MODEL_OPTIONS, allMatches, buildLeagueModel, "pinnacleClose");
+const wfForm = evaluateRun(wfContexts, { name: "mit Form", variant: "model" });
+const wfNone = evaluateRun(wfContexts, { name: "ohne Form", variant: "model", xgFormWeight: 0 });
+const wfMarket = evaluateRun(wfContexts, { name: "Markt", variant: "benchmark" });
+if (wfForm.length !== wfMarket.length || wfNone.length !== wfMarket.length) {
+  throw new Error("Laeufe unterschiedlich lang -- gepaarter Vergleich unmoeglich");
+}
+
+function tvDistance(a: OutcomeProbs, b: OutcomeProbs): number {
+  return (
+    (Math.abs(a.homeWinProb - b.homeWinProb) +
+      Math.abs(a.drawProb - b.drawProb) +
+      Math.abs(a.awayWinProb - b.awayWinProb)) /
+    2
+  );
+}
+const favourite = (p: OutcomeProbs) => Math.max(p.homeWinProb, p.drawProb, p.awayWinProb);
+const apartWith = wfForm.map((e, i) => tvDistance(e.probs, wfMarket[i].probs) >= DISAGREEMENT);
+const apartWithout = wfNone.map((e, i) => tvDistance(e.probs, wfMarket[i].probs) >= DISAGREEMENT);
+const totalGap = wfForm.reduce((s, e, i) => s + e.metrics.rps - wfMarket[i].metrics.rps, 0);
+
+function gapRow(label: string, keep: (i: number) => boolean): void {
+  const idx = wfForm.map((_, i) => i).filter(keep);
+  if (idx.length === 0) {
+    console.log(`${label.padEnd(36)}     0`);
+    return;
+  }
+  const mean = (runs: MatchEvaluation[]) => idx.reduce((s, i) => s + runs[i].metrics.rps, 0) / idx.length;
+  const signed = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(4)}`;
+  const withForm = pairedBootstrap(idx.map((i) => wfMarket[i].metrics.rps - wfForm[i].metrics.rps), { iterations: 4000 });
+  const share = idx.reduce((s, i) => s + wfForm[i].metrics.rps - wfMarket[i].metrics.rps, 0) / totalGap;
+  const surer = idx.filter((i) => favourite(wfForm[i].probs) > favourite(wfMarket[i].probs)).length / idx.length;
+  console.log(
+    `${label.padEnd(36)} ${String(idx.length).padStart(5)}   ${mean(wfForm).toFixed(4)}   ${mean(wfNone).toFixed(4)}   ` +
+      `${mean(wfMarket).toFixed(4)}   ${signed(withForm.meanDiff)}  ${withForm.pValue.toFixed(3)}   ` +
+      `${`${(share * 100).toFixed(0)}%`.padStart(5)}   ${`${(surer * 100).toFixed(0)}%`.padStart(5)}`
+  );
+}
+
+console.log(
+  `Walk-forward, Pinnacle-Schluss, ${wfForm.length} Spiele. Abstand positiv = Modell mit Form besser.\n`
+);
+console.log("Teilmenge                                n   RPS Form  ohne Form  Markt    Abstand    p     Anteil  sicherer");
+console.log("".padEnd(110, "-"));
+gapRow("alle Spiele", () => true);
+gapRow("einig (< 12pp)", (i) => !apartWith[i]);
+gapRow("deutlich uneinig (>= 12pp)", (i) => apartWith[i]);
+gapRow("  ... ohne Form waeren wir einig", (i) => apartWith[i] && !apartWithout[i]);
+gapRow("  ... auch ohne Form uneinig", (i) => apartWith[i] && apartWithout[i]);
+gapRow("die Form holt uns zum Markt", (i) => !apartWith[i] && apartWithout[i]);
+console.log(
+  `\nAnteil = Anteil am gesamten RPS-Rueckstand auf den Markt. sicherer = das Modell traut\n` +
+    `seinem Favoriten mehr zu als der Markt. Liegt der Rueckstand in "ohne Form waeren wir\n` +
+    `einig" und ist das Modell dort meist sicherer, uebertreibt die Form. Holt sie uns\n` +
+    `gleichzeitig in "die Form holt uns zum Markt" heran, steckt in ihr auch Information --\n` +
+    `dann ist eine Begrenzung die Frage, nicht das Weglassen.`
+);
