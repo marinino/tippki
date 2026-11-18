@@ -16,7 +16,8 @@
 //   1. Modell-Lambdas aus den gefitteten Staerken, multipliziert mit dem Formexponenten
 //   2. geklammerte Korrektur aus dem recherchierten Spielkontext
 //   3. Dixon-Coles-Matrix bauen und normalisieren
-//   4. Preisblatt ueber alle Maerkte daraus ableiten
+//   4. Kalibrierungstemperatur auf die Matrix
+//   5. Preisblatt ueber alle Maerkte daraus ableiten
 
 import type { LeagueModel } from "./teamStrength";
 import type { OutcomeProbs } from "../eval/metrics";

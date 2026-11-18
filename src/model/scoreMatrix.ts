@@ -245,9 +245,13 @@ export function argmaxCell(m: ScoreMatrix): string {
   return bestScore;
 }
 
-// Erwartungswert der Tore AUS der Matrix. Nach der Dixon-Coles-Korrektur sind das nicht
-// mehr exakt die eingesetzten Lambdas -- tau und der Draw-Boost verschieben Masse. Die
-// Lambdas daneben anzuzeigen waere deshalb ein Widerspruch zur Verteilung selbst.
+// Erwartungswert der Tore AUS der Matrix. Das sind nicht mehr exakt die eingesetzten
+// Lambdas: die Kalibrierungstemperatur verschiebt Masse zwischen den Tendenzbloecken, ein
+// Draw-Boost ungleich 1 taete es ebenfalls, und das Abschneiden bei maxGoals kostet einen
+// winzigen Rest. tau dagegen nicht -- die Dixon-Coles-Korrektur laesst beide
+// Randverteilungen exakt unveraendert (in Zeile h = 0 heben sich -λμρ·p00 und +λρ·p01 auf,
+// ebenso in Spalte a = 0). Die Lambdas daneben anzuzeigen waere deshalb ein Widerspruch zur
+// Verteilung selbst.
 export function expectedGoals(m: ScoreMatrix): { home: number; away: number } {
   const size = m.maxGoals + 1;
   let home = 0;

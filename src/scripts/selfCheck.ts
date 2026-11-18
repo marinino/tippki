@@ -1755,10 +1755,10 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
   // folgenden Zahlen gleichzeitig verdirbt.
   check(() => assert.ok(model.diagnostics?.converged, "Produktiver Fit konvergiert"));
 
-  const now = new Date();
-  const upcoming = fixtures.filter((f) => new Date(f.date) >= now);
-  const nextMatchday =
-    upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
+  // Dieselbe Auswahl wie in der Produktion: der Abschnitt laeuft in der Nachbereitung auf
+  // einem Runner in UTC, und new Date() laese die zonenlosen Anstosszeiten dort zwei
+  // Stunden daneben.
+  const nextMatchday = nextMatchdayOf(fixtures);
 
   if (nextMatchday == null) return;
 
@@ -1766,7 +1766,7 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
   const MAX_LAMBDA = 6;
 
   for (const fixture of fixtures.filter((f) => f.matchday === nextMatchday)) {
-    const matchDate = new Date(fixture.date);
+    const matchDate = parseKickoff(fixture.date);
     const out = predictPipeline({
       model,
       homeTeam: fixture.homeTeam,

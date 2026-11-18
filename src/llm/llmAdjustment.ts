@@ -58,7 +58,7 @@ function clamp(value: number, limit: number): number {
   return Math.max(-limit, Math.min(limit, value));
 }
 
-// Schritt 1-3: Fakten zusammenfassen, daempfen, klammern.
+// Fakten zusammenfassen, dann Schritt 1 und 2: daempfen, klammern.
 export function toLlmAdjustment(
   context: LlmMatchContext,
   options: LlmAdjustmentOptions = {}

@@ -11,6 +11,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { loadEnvLocal } from "../data/loadEnv";
+import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { loadAllMatches } from "../data/loadMatches";
 import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
@@ -39,10 +40,11 @@ const full = process.argv.includes("--full");
 
 const allFixtures: Fixture[] = JSON.parse(readFileSync(FIXTURES_PATH, "utf-8"));
 
-const now = new Date();
-const upcoming = allFixtures.filter((f) => new Date(f.date) >= now);
-const nextMatchday = upcoming.length > 0 ? Math.min(...upcoming.map((f) => f.matchday)) : null;
-const matchday = flag("matchday") ? Number(flag("matchday")) : nextMatchday;
+// nextMatchdayOf und parseKickoff wie Route und forward-log: fixtures.json fuehrt keine
+// Zeitzone, und new Date() laese die Anstosszeiten auf einem Rechner in UTC zwei Stunden
+// daneben. nextMatchdayOf haelt ausserdem eine verlegte Partie nicht faelschlich fuer den
+// naechsten Spieltag (siehe kickoff.ts).
+const matchday = flag("matchday") ? Number(flag("matchday")) : nextMatchdayOf(allFixtures);
 
 if (matchday == null) {
   console.error("Kein kommender Spieltag gefunden.");
@@ -60,7 +62,7 @@ const llmByFixture = llmCache && llmCache.matchday === matchday ? llmCache.conte
 console.log(`Spieltag ${matchday} -- faire Quoten, ohne Marge\n`);
 
 for (const { homeTeam, awayTeam, date } of fixtures) {
-  const matchDate = new Date(date);
+  const matchDate = parseKickoff(date);
   const cachedLlm = llmByFixture[cacheKey(homeTeam, awayTeam)];
 
   const out = predictPipeline({
