@@ -45,6 +45,13 @@ export interface FitOptions {
   // vor allem bei den Ein-Saison-Fits (34 Spiele je Team) und bei Aufsteigern mit duenner
   // Historie. k = 0 ist die reine ML-Schaetzung.
   ridgePseudoMatches?: number;
+  // Abweichendes Ziel des Ridge fuer einzelne Teams, auf der Log-Skala (attack, defense).
+  // Ohne Angabe zieht der Ridge jedes Team zu 0, dem Ligadurchschnitt -- das ist und bleibt
+  // die produktive Einstellung. Eingefuehrt am 18.11.2026 NUR fuer den Messlauf zu
+  // VERBESSERUNGEN.md, Punkt 15 (Rueckkehrer zum Aufsteiger-Niveau ziehen), und ohne Angabe
+  // nachweislich bitgleich: der Faktor im Zaehler ist dann exakt 1 (MESSLAUF.md,
+  // Konsistenzpruefung 3 und 4). Produktiv setzt sie niemand, solange der Freeze gilt.
+  ridgeTargets?: ReadonlyMap<string, TeamStrength>;
   trace?: boolean;
 }
 
@@ -138,6 +145,22 @@ export function fitPoissonModel(
   // bleibt also unveraendert.
   const referenceWeight = 1;
 
+  // Ziel des Ridge je Team, auf der exp-Skala. Ohne ridgeTargets bleibt targetAttack null,
+  // und im Zaehler steht dann `prior` genau wie vorher -- nicht `prior * 1`, damit sich am
+  // produktiven Rechenweg nicht einmal die Operation aendert.
+  let targetAttack: Float64Array | null = null;
+  let targetDefense: Float64Array | null = null;
+  if (options.ridgeTargets && options.ridgeTargets.size > 0) {
+    targetAttack = new Float64Array(n).fill(1);
+    targetDefense = new Float64Array(n).fill(1);
+    for (const [team, target] of options.ridgeTargets) {
+      const i = indexOf.get(team);
+      if (i === undefined) continue;
+      targetAttack[i] = Math.exp(target.attack);
+      targetDefense[i] = Math.exp(target.defense);
+    }
+  }
+
   const expAttack = new Float64Array(n).fill(1);
   const expDefense = new Float64Array(n).fill(1);
   const scale = new Float64Array(n);
@@ -161,7 +184,7 @@ export function fitPoissonModel(
       const prior = ridge * referenceWeight;
       const denominator = scale[i] + prior;
       if (denominator <= 0) continue;
-      const next = (goalsFor[i] + prior) / denominator;
+      const next = (goalsFor[i] + (targetAttack ? prior * targetAttack[i] : prior)) / denominator;
       if (next <= 0) continue;
       maxParameterDelta = Math.max(maxParameterDelta, Math.abs(Math.log(next / expAttack[i])));
       expAttack[i] = next;
@@ -178,7 +201,7 @@ export function fitPoissonModel(
       const prior = ridge * referenceWeight;
       const denominator = scale[i] + prior;
       if (denominator <= 0) continue;
-      const next = (goalsAgainst[i] + prior) / denominator;
+      const next = (goalsAgainst[i] + (targetDefense ? prior * targetDefense[i] : prior)) / denominator;
       if (next <= 0) continue;
       maxParameterDelta = Math.max(maxParameterDelta, Math.abs(Math.log(next / expDefense[i])));
       expDefense[i] = next;
@@ -469,6 +492,11 @@ function optionsKey(options: LeagueModelOptions): string {
     options.halfLifeDays ?? null,
     options.target ?? "goals",
     options.xgBlendWeight ?? null,
+    // Nur wenn gesetzt -- sonst bliebe der Schluessel nicht derselbe wie vorher. Ohne diesen
+    // Eintrag lieferte der Cache fuer dieselbe Spielliste das Modell OHNE Ziele zurueck.
+    ...(options.ridgeTargets && options.ridgeTargets.size > 0
+      ? [[...options.ridgeTargets].sort(([a], [b]) => a.localeCompare(b))]
+      : []),
   ]);
 }
 
