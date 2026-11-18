@@ -32,6 +32,13 @@
 .provenance {
   font-size: var(--text-2xs);
   color: var(--text-3);
+  text-align: right;
+}
+
+/* Eingefroren oder aus dem Log: die Zahlen bewegen sich nicht mehr. Bewusst leise, aber
+   in der Akzentfarbe -- es ist eine Aussage ueber die Zahlen, keine Dekoration. */
+.frozen {
+  color: var(--brass-dim);
   white-space: nowrap;
 }
 

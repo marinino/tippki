@@ -13,6 +13,17 @@ import { join } from "node:path";
 import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
 import { xgCoverageGaps, xgDuplicatePairings } from "../data/xgCoverage";
+import {
+  SNAPSHOT_EARLIEST_MINUTES,
+  SNAPSHOT_LATEST_MINUTES,
+  chooseDisplaySource,
+  missingSnapshotsAfterKickoff,
+  readKickoffSnapshots,
+  snapshotDecision,
+  snapshotKey,
+  type KickoffSnapshot,
+} from "../data/kickoffSnapshots";
+import { displayNumbersFromLog, liveDisplayNumbers, type LoggedRow } from "../data/displayPredictions";
 import { mergeMarketRows } from "../data/refreshMarketOdds";
 import {
   FOTMOB_TO_UNDERSTAT,
@@ -2304,6 +2315,131 @@ section("xG-Feed deckt die Ergebnis-CSV", () => {
         "ein haengender Feed am echten Stand wird erkannt"
       )
     );
+  }
+});
+
+section("Vorhersage bei Anpfiff eingefroren", () => {
+  // VERBESSERUNGEN.md, Punkt 12: was bei Anpfiff auf der Seite steht, wird nie wieder
+  // veraendert. Geprueft wird die Kette: wann eingefroren wird, was danach angezeigt wird,
+  // dass der Schnappschuss genau die Live-Zahlen traegt, und dass der Taktgeber das Fenster
+  // ueberhaupt erreichen kann.
+  const kickoff = new Date("2026-11-21T14:30:00Z");
+  const before = (min: number) => new Date(kickoff.getTime() - min * 60000);
+  check(() => assert.equal(snapshotDecision(kickoff, before(61), false), "zu_frueh"));
+  check(() => assert.equal(snapshotDecision(kickoff, before(SNAPSHOT_EARLIEST_MINUTES), false), "faellig"));
+  check(() => assert.equal(snapshotDecision(kickoff, before(SNAPSHOT_LATEST_MINUTES), false), "faellig"));
+  check(() => assert.equal(snapshotDecision(kickoff, before(14.9), false), "zu_spaet"));
+  check(() => assert.equal(snapshotDecision(kickoff, before(-5), false), "zu_spaet", "nach Anpfiff nie"));
+  check(() => assert.equal(snapshotDecision(kickoff, before(30), true), "vorhanden", "nie eine zweite Zeile"));
+
+  // Die Auswahlregel, synthetisch.
+  const fixture = { homeTeam: "Bayern Munich", awayTeam: "FC Koln", date: "2026-11-21T15:30:00" };
+  const fakeNumbers = { homeWinProb: 0.7 } as unknown as KickoffSnapshot["numbers"];
+  const snap = (kickoffStr: string, frozenAt: string): KickoffSnapshot => ({
+    frozenAt, season: "2026", matchday: 10, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
+    kickoff: kickoffStr, configHash: "x", numbers: fakeNumbers,
+  });
+  const logRow = { season: "2026", homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam, loggedAt: "2026-11-19T10:00:00Z" } as LoggedRow;
+  const choose = (now: Date, snapshots: KickoffSnapshot[], logRows: LoggedRow[], date = fixture.date) =>
+    chooseDisplaySource({ season: "2026", fixture: { ...fixture, date }, kickoff: parseKickoff(date), now, snapshots, logRows }).kind;
+  const exact = snap(fixture.date, "2026-11-21T14:00:00Z");
+
+  check(() => assert.equal(choose(before(120), [], [logRow]), "live", "vor dem Fenster: live, auch mit Logzeile"));
+  check(() => assert.equal(choose(before(30), [exact], []), "anpfiff", "eingefroren schon vor Anpfiff"));
+  check(() => assert.equal(choose(before(-90), [exact], [logRow]), "anpfiff", "nach Anpfiff der Schnappschuss, nicht das Log"));
+  check(() => assert.equal(choose(before(-90), [], [logRow]), "vorwaertslog", "ohne Schnappschuss das Log"));
+  check(() => assert.equal(choose(before(-90), [], []), "fehlt", "ohne beides nichts -- nie live nach Anpfiff"));
+  check(() =>
+    assert.equal(
+      choose(before(-90), [snap("2026-11-21T18:30:00", "2026-11-21T17:00:00Z")], [], fixture.date),
+      "anpfiff",
+      "nachtraeglich korrigierte Anstosszeit gibt die eingefrorenen Zahlen nicht frei"
+    )
+  );
+  check(() =>
+    assert.equal(
+      choose(before(30), [snap("2026-11-14T15:30:00", "2026-11-14T14:00:00Z")], [], fixture.date),
+      "live",
+      "verlegte Partie: der alte Schnappschuss gilt nicht fuer den neuen Termin"
+    )
+  );
+  check(() =>
+    assert.equal(
+      choose(before(-90), [{ ...exact, season: "2025" }], [{ ...logRow, season: "2025" }]),
+      "fehlt",
+      "die Vorsaison zaehlt nicht"
+    )
+  );
+
+  // Der Alarm.
+  const fx = [{ ...fixture, matchday: 10 }, { homeTeam: "A", awayTeam: "B", date: "2026-11-14T15:30:00", matchday: 9 }];
+  check(() =>
+    assert.deepEqual(
+      missingSnapshotsAfterKickoff(fx, [], "2026", before(-90), parseKickoff).map((m) => m.matchday),
+      [10],
+      "fehlender Schnappschuss nach Anpfiff schlaegt an, vor SNAPSHOTS_SINCE nicht"
+    )
+  );
+  check(() => assert.deepEqual(missingSnapshotsAfterKickoff(fx, [exact], "2026", before(-90), parseKickoff), []));
+
+  // Der Schnappschuss traegt exakt die Live-Zahlen: dieselbe Funktion, und nach dem Weg
+  // durch JSON (so steht er in der Datei) bitgleich.
+  const realFixtures: { homeTeam: string; awayTeam: string; date: string; matchday: number }[] = JSON.parse(
+    readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
+  );
+  const sample = realFixtures[realFixtures.length - 1];
+  const live = liveDisplayNumbers(buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS), sample, null);
+  check(() => assert.deepEqual(JSON.parse(JSON.stringify(live)), live, "Schnappschuss uebersteht JSON bitgleich"));
+
+  // Der Rueckfall aufs Log rechnet nichts neu: 1X2 und Torerwartung sind die geloggten
+  // Werte, die Quoten exakt deren Kehrwert.
+  const realRows = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
+    .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as LoggedRow);
+  const lastOf = <T,>(xs: T[]): T | undefined => xs[xs.length - 1];
+  const withLlm = lastOf(realRows.filter((r) => r.llm != null));
+  const withoutLlm = lastOf(realRows.filter((r) => r.llm == null));
+  for (const row of [withLlm, withoutLlm]) {
+    if (!row) continue;
+    const v = row.llm ? row.variants.withLlm : row.variants.model;
+    const n = displayNumbersFromLog(row);
+    check(() => assert.equal(n.homeWinProb, v.probs.homeWinProb));
+    check(() => assert.equal(n.expectedAwayGoals, v.expectedGoals[1]));
+    check(() => assert.equal(n.prices.outcome.draw.fairOdds, 1 / v.probs.drawProb));
+    check(() => assert.equal(n.prices.totals[0].over.prob, v.over25));
+    check(() => assert.equal(n.mostLikelyScore, v.mostLikelyScore));
+    check(() => assert.equal(n.scoreGrid.length, 0, "das Log fuehrt keine Matrix"));
+    check(() => assert.equal(n.llmStatus === "nicht_recherchiert", row.llm == null));
+  }
+
+  // Erreicht der Taktgeber das Fenster? Er tickt viertelstuendlich von 8 bis 18 Uhr UTC
+  // (SAISONBETRIEB.md, "Taktgeber"). Verlangt werden zwei Ticks je Anpfiff -- einer darf
+  // ausfallen. Knapp ist es fuer 20:30 Uhr im Winter (19:30 UTC): 18:30 und 18:45.
+  for (const f of realFixtures) {
+    check(() => {
+      const k = parseKickoff(f.date).getTime();
+      let ticks = 0;
+      for (let t = Math.ceil((k - SNAPSHOT_EARLIEST_MINUTES * 60000) / 900000) * 900000; t <= k - SNAPSHOT_LATEST_MINUTES * 60000; t += 900000) {
+        const h = new Date(t).getUTCHours();
+        if (h >= 8 && h <= 18) ticks++;
+      }
+      assert.ok(ticks >= 2, `${f.homeTeam} vs ${f.awayTeam} (${f.date}): nur ${ticks} Taktgeber-Tick(s) im Einfrierfenster`);
+    });
+  }
+
+  // Der echte Bestand: je Partie und Anstosszeit hoechstens eine Zeile, und jede Zeile
+  // im Fenster geschrieben -- eine von Hand nachgeschobene Zeile faellt hier auf.
+  const realSnapshots = readKickoffSnapshots();
+  check(() =>
+    assert.equal(new Set(realSnapshots.map(snapshotKey)).size, realSnapshots.length, "doppelter Schnappschuss")
+  );
+  for (const s of realSnapshots) {
+    check(() => {
+      const minutes = (parseKickoff(s.kickoff).getTime() - new Date(s.frozenAt).getTime()) / 60000;
+      assert.ok(
+        minutes >= SNAPSHOT_LATEST_MINUTES && minutes <= SNAPSHOT_EARLIEST_MINUTES,
+        `${s.homeTeam} vs ${s.awayTeam}: eingefroren ${minutes.toFixed(1)} min vor Anpfiff, ausserhalb des Fensters`
+      );
+    });
   }
 });
 

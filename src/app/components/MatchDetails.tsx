@@ -1,4 +1,4 @@
-import type { Prediction } from "../types";
+import type { PricedPrediction } from "../types";
 import { formatTimestamp } from "../lib/format";
 import { ScoreHeatmap } from "./ScoreHeatmap";
 import { PriceSheetView } from "./PriceSheetView";
@@ -7,7 +7,8 @@ import styles from "./MatchDetails.module.css";
 // Preisblatt, Ergebnisverteilung und recherchierter Spielkontext stehen hinter einer
 // Aufklappzeile -- als <details>, damit Tastatur und Screenreader das ohne eigenen
 // Zustand koennen. Vorn auf der Karte bleibt eine Zahl, hier liegt die ganze Verteilung.
-export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
+export function MatchDetails({ prediction: p }: { prediction: PricedPrediction }) {
+  const fromLog = p.source.kind === "vorwaertslog";
   const hasFactors = p.llmFactors != null && p.llmFactors.length > 0;
   const hasGrid = p.scoreGrid != null && p.scoreGrid.length > 0;
   // Auch ein ergebnisloser oder gescheiterter Recherchelauf gehoert hierher. Vorher fiel
@@ -16,7 +17,7 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
   const hasContext = p.llmStatus !== "nicht_recherchiert";
 
   const summary = [
-    "Alle Märkte",
+    fromLog ? "Protokollierte Märkte" : "Alle Märkte",
     hasGrid ? "Ergebnisverteilung" : null,
     hasFactors ? `${p.llmFactors.length} Kontextfaktoren` : null,
   ]
@@ -31,6 +32,15 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
       </summary>
 
       <div className={styles.content}>
+        {fromLog && (
+          <p className={styles.status}>
+            Für diese Partie wurde vor Anpfiff kein Stand eingefroren. Gezeigt wird die
+            Vorhersage aus dem Vorwärts-Log
+            {p.source.kind === "vorwaertslog" && ` (${formatTimestamp(p.source.at)})`},
+            protokolliert vor dem ersten Anpfiff des Spieltags. Das Log führt nur die
+            Torsumme 2,5, die zehn wahrscheinlichsten Ergebnisse und keine Verteilung.
+          </p>
+        )}
         <PriceSheetView prices={p.prices} />
 
         {hasGrid && (
@@ -52,7 +62,7 @@ export function MatchDetails({ prediction: p }: { prediction: Prediction }) {
 // Seit dem Ausbau der Favoritensicherung wird nichts mehr gedaempft oder verworfen -- die
 // Klammerung bei +/-16 Prozent ist die einzige Grenze, und ob der Layer ueberhaupt etwas
 // bewegt, sieht man nur hier.
-function ContextFactorList({ prediction: p }: { prediction: Prediction }) {
+function ContextFactorList({ prediction: p }: { prediction: PricedPrediction }) {
   const signed = (pct: number) => `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)} %`;
 
   // Der Fehlschlag zuerst: er ist der einzige Zustand, der eine Handlung verlangt.

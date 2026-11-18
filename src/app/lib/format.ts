@@ -8,6 +8,7 @@
 // Seit die Seite oeffentlich erreichbar ist, ist das kein theoretischer Fall mehr.
 import { FIXTURE_TIMEZONE, parseKickoff } from "../../data/kickoff";
 import type { LlmStatus } from "../../llm/llmCache";
+import type { PredictionSource } from "../types";
 
 const TZ = { timeZone: FIXTURE_TIMEZONE } as const;
 
@@ -79,6 +80,18 @@ export function describeProvenance(status: LlmStatus): string {
       return "Recherche fehlgeschlagen";
     case "nicht_recherchiert":
       return "reines Modell";
+  }
+}
+
+// Ob die Zahlen einer Karte noch leben. null = live gerechnet, nichts anzuzeigen.
+export function describeSource(source: PredictionSource): string | null {
+  switch (source.kind) {
+    case "live":
+      return null;
+    case "anpfiff":
+      return `eingefroren ${parseKickoff(source.at).toLocaleTimeString("de-DE", { ...TZ, hour: "2-digit", minute: "2-digit" })}`;
+    case "vorwaertslog":
+      return `Vorwärts-Log vom ${parseKickoff(source.at).toLocaleDateString("de-DE", { ...TZ, day: "2-digit", month: "2-digit" })}`;
   }
 }
 
