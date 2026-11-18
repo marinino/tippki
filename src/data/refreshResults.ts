@@ -4,6 +4,7 @@ import { join } from "path";
 import { OPENLIGADB_TO_OUR_NAME } from "./openligaTeamNames";
 import { seasonToFilenameSuffix } from "./loadMatches";
 import { refreshMarketOdds } from "./refreshMarketOdds";
+import { fetchFotmobXgGaps, mergeFallbackXg, type XgMatch } from "./fotmobXg";
 
 const DATA_DIR = join(process.cwd(), "data");
 
@@ -137,23 +138,52 @@ function minimalLine(r: ResultRow): string {
   return [r.Div, r.Date, r.HomeTeam, r.AwayTeam, r.FTHG, r.FTAG, r.FTR].join(",");
 }
 
-interface XgMatch {
-  season: string;
-  date: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeGoals: number;
-  awayGoals: number;
-  homeXG: number;
-  awayXG: number;
-}
+export type XgSource = "understat" | "fotmob";
 
-async function refreshXgResults(season: string): Promise<number> {
+// Understat beantwortet Wartung und Sperren mit Status 200 und einer HTML-Seite. res.json()
+// meldet dann nur "Unexpected token '<'", und niemand sieht, dass die Quelle schlicht weg
+// ist. Deshalb erst als Text lesen und den Grund benennen.
+async function fetchUnderstatLeague(season: string): Promise<any> {
   const res = await fetch(`https://understat.com/getLeagueData/Bundesliga/${season}`, {
     headers: { "X-Requested-With": "XMLHttpRequest", "User-Agent": "Mozilla/5.0" },
   });
   if (!res.ok) throw new Error(`Understat-Abruf fehlgeschlagen: ${res.status}`);
-  const data: any = await res.json();
+  const body = await res.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(
+      /come back soon|maintenance/i.test(body)
+        ? "Understat ist im Wartungsmodus (HTML statt JSON)"
+        : `Understat liefert kein JSON (Content-Type ${res.headers.get("content-type") ?? "unbekannt"})`
+    );
+  }
+}
+
+function readXgFile(xgPath: string): XgMatch[] {
+  return existsSync(xgPath) ? JSON.parse(readFileSync(xgPath, "utf-8")) : [];
+}
+
+async function refreshXgResults(season: string): Promise<{ count: number; source: XgSource; understatError?: string }> {
+  const xgPath = join(DATA_DIR, "xg_bundesliga.json");
+
+  let data: any;
+  try {
+    data = await fetchUnderstatLeague(season);
+  } catch (err) {
+    // Ohne xG keinen Commit (Formfenster, VERBESSERUNGEN.md Punkt 2) -- also nicht
+    // aufgeben, sondern die Luecke aus FotMob fuellen. Scheitert auch FotMob, wirft
+    // fetchFotmobXgGaps, und der Lauf bricht ab wie bisher.
+    const understatError = err instanceof Error ? err.message : String(err);
+    const existing = readXgFile(xgPath);
+    const gaps = await fetchFotmobXgGaps(
+      season,
+      existing.filter((m) => m.season === season)
+    );
+    writeFileSync(xgPath, JSON.stringify(mergeFallbackXg(existing, gaps)));
+    const count = readXgFile(xgPath).filter((m) => m.season === season).length;
+    return { count, source: "fotmob", understatError };
+  }
 
   const newMatches: XgMatch[] = (data.dates as any[])
     .filter((m) => m.isResult)
@@ -168,8 +198,9 @@ async function refreshXgResults(season: string): Promise<number> {
       awayXG: Number(m.xG.a),
     }));
 
-  const xgPath = join(DATA_DIR, "xg_bundesliga.json");
-  const existing: XgMatch[] = existsSync(xgPath) ? JSON.parse(readFileSync(xgPath, "utf-8")) : [];
+  // Ersetzt die ganze Saison -- und raeumt damit auch FotMob-Lueckenfueller aus einem
+  // frueheren Lauf wieder ab, sobald Understat zurueck ist.
+  const existing = readXgFile(xgPath);
   const withoutThisSeason = existing.filter((m) => m.season !== season);
   const merged = [...withoutThisSeason, ...newMatches].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -177,13 +208,17 @@ async function refreshXgResults(season: string): Promise<number> {
 
   writeFileSync(xgPath, JSON.stringify(merged));
 
-  return newMatches.length;
+  return { count: newMatches.length, source: "understat" };
 }
 
 export interface RefreshSummary {
   season: string;
   resultsCount: number;
   xgCount: number;
+  // "fotmob", wenn Understat nicht antwortete und die Luecken aus FotMob kamen
+  // (src/data/fotmobXg.ts). understatError nennt dann den Grund.
+  xgSource: XgSource;
+  understatError?: string;
   // Spiele der laufenden Saison, die nach dem Abruf eine Buchmacher-Schlussquote tragen.
   // null = football-data fuehrt die Saison noch nicht oder war nicht erreichbar.
   oddsCount: number | null;
@@ -193,7 +228,8 @@ export interface RefreshSummary {
 }
 
 export async function refreshSeasonData(season: string): Promise<RefreshSummary> {
-  const [resultsCount, xgCount] = await Promise.all([refreshCsvResults(season), refreshXgResults(season)]);
+  const [resultsCount, xg] = await Promise.all([refreshCsvResults(season), refreshXgResults(season)]);
+  const { count: xgCount, source: xgSource, understatError } = xg;
 
   // Bewusst NACH den Ergebnissen und bewusst nicht-fatal: die Quoten sind Massstab, nicht
   // Betriebsgrundlage. Faellt football-data aus, laeuft die App vollstaendig weiter, nur der
@@ -210,5 +246,5 @@ export async function refreshSeasonData(season: string): Promise<RefreshSummary>
     oddsCount = null;
   }
 
-  return { season, resultsCount, xgCount, oddsCount, oddsUnreachable };
+  return { season, resultsCount, xgCount, xgSource, understatError, oddsCount, oddsUnreachable };
 }

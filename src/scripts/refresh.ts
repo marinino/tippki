@@ -28,6 +28,15 @@ console.log(
     `${summary.xgCount} davon mit xG.`
 );
 
+// Laut, nicht still: ein Lauf mit FotMob-Lueckenfuellern ist gewollt, aber kein Normalfall.
+if (summary.xgSource === "fotmob") {
+  console.log(
+    `xG-Quelle: FotMob als Ersatz (${summary.understatError ?? "Understat nicht erreichbar"}). ` +
+      "Bestehende Understat-Werte unveraendert, nur fehlende Spiele ergaenzt; " +
+      "der naechste Lauf mit erreichbarem Understat ersetzt sie wieder."
+  );
+}
+
 // oddsCount ist null, wenn football-data die Saison noch nicht fuehrt. Vor dem ersten
 // Spieltag ist das der Normalfall und kein Fehler -- refreshSeasonData behandelt die
 // Quoten bewusst als nicht-fatal, weil sie Massstab sind und nicht Betriebsgrundlage.
