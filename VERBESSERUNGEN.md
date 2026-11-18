@@ -30,6 +30,12 @@ Variante.
 **Nächster Schritt:** `npm run walk-forward` mit `formMode: "residual"` gegen `"diff"`,
 gepaart. Ergebnis hierher, Umstellung frühestens zur Saison 2027/28.
 
+**Gemessen 18.11. (MESSLAUF.md, A1 und A2), kein Nachweis.** Auf Validation (Walk-forward,
+1.224 Spiele) sind beide Ersatzformen im 1X2 tendenziell *schlechter* als die rohe Form:
+Residuum ΔRPS −0,0013 (p = 0,25), „gegen Erwartung“ −0,0014 (p = 0,19). Im exakten
+Ergebnis sind sie etwas besser (+0,013, +0,009). Die doppelte Zählung ist auf dem Papier
+richtig beschrieben, kostet aber messbar nichts. Ohne neue Evidenz kein Umbau.
+
 **Achtung beim Umstellen:** `formMode` steht nicht in `PipelineConfig`. Seit dem 18.11.
 reicht es, `MODEL_LOGIC_VERSION` hochzuzählen (Punkt 8). Sauberer zur neuen Saison:
 `formMode` als eigenes Feld in die Konfiguration aufnehmen.
@@ -114,17 +120,31 @@ residual 28,1 %**. Auch die Residual-Variante braucht also eine Grenze.
 **Nächster Schritt:** im Walk-forward eine geklammerte Form messen (z. B. ±0,15 oder
 ±0,25), zusammen mit Punkt 1. Umstellung zur nächsten Saison.
 
+**Gemessen 18.11. (MESSLAUF.md, B1 und B2):** im 1X2 neutral (+0,0001 und +0,0004, kein
+Nachweis). Auffällig, aber nur explorativ: beide verbessern die Verteilungsmärkte,
+Ü/U-LogLoss +0,0081 (±0,15, p = 0,022) und +0,0047 (±0,25, p = 0,045), exaktes Ergebnis
++0,024 und +0,017. Weil das eine von 21 Nebenkennzahlen war, ist es eine Hypothese, kein
+Ergebnis. **Festgelegt:** im Sommer 2027 einmal auf Test (2023–2025) prüfen, ±0,15,
+Zielgröße Ü/U-LogLoss, einseitig α = 0,05, 1X2 darf nicht schlechter werden. Fällt das
+positiv aus, ist die Klammer der einzige Kandidat aus diesem Lauf für 2027/28.
+
 **Nachtrag 16.09., live am Spieltag 4:** Bayern–Union, `npm run predict`. Form Bayern +2,22
 (Faktor ×1,56), Union −1,43 (×0,75). Torerwartung 3,32 : 0,80 ohne Form, 5,17 : 0,60 mit
 Form (vor Temperatur). Heimsieg 78,3 % → **93,7 %**. Genau der Bereich über 90 %, den die
 Temperatur zurückholen sollte und in dem der Buchmacher praktisch nie eine Quote stellt.
 
-**Nachtrag 18.11., Spieltag 10, Bayern–Köln:** Form Bayern **+3,20** (xG-Differenz
-+4,20 gegen Leipzig, +2,27 in Freiburg, +3,15 gegen Dortmund), Faktor ×1,90. Torerwartung
-3,61 ohne Form, **6,84** mit Form. Das reißt erstmals die harte Plausibilitätsgrenze 6 im
-Self-Check. Bei λ = 6,84 liegen rund 8 % der Poisson-Masse jenseits von 10 Toren, also
-außerhalb der Ergebnismatrix. Eine Dreierform über 3 kam seit 2015 nur 28-mal in 7.426
-Fällen vor, das Maximum war 4,43.
+**Nachtrag 18.11., Spieltag 10, Bayern–Köln** (Zahlen am selben Tag korrigiert, siehe
+unten): Form Bayern **+2,55** (xG-Differenz +2,27 in Freiburg, +3,15 gegen Dortmund, +2,24
+in Mainz), Faktor ×1,67. Torerwartung 3,61 ohne Form, **6,01** mit Form. Das reißt
+erstmals die harte Plausibilitätsgrenze 6 im Self-Check. Bei λ = 6,01 liegen 4,3 % der
+Poisson-Masse jenseits von 10 Toren, also außerhalb der Ergebnismatrix. Eine Dreierform
+über 3 kam seit 2015 nur 28-mal in 7.426 Fällen vor, das Maximum war 4,43.
+
+*Korrektur:* zuerst stand hier +3,20 (Leipzig, Freiburg, Dortmund) und λ = 6,84. Diese
+Zahlen kamen aus einem hängenden xG-Feed: Understat war seit Anfang November in Wartung,
+Mainz–Bayern vom 07.11. fehlte, und das Fenster lag ein Spiel zu weit hinten. Das ist der
+Mechanismus aus Punkt 2, nur innerhalb der Saison. Der Wächter vom 18.11. hätte es gemeldet
+(Bayern 9 Ergebnisse, 8 mit xG). Die Grenze 6 wird auch mit den richtigen Zahlen gerissen.
 
 Weil der Freeze gilt, wurde nicht das Modell angefasst, sondern der Check: die harte Grenze
 [0,25; 6] gilt jetzt für die **Basis**-Torerwartung, die Form hat einen eigenen Rahmen
@@ -176,6 +196,14 @@ gezogen wird (Ridge-Ziel = `promotedTeamDefault` für Teams, die in der Vorsaiso
 Betrifft jede Saison zwei bis drei Teams. Logikänderung, siehe Punkt 8. Umstellung
 frühestens zur Saison 2027/28.
 
+**Gemessen 18.11. (MESSLAUF.md, D1), kein Nachweis.** Dafür bekam der Fit eine Option
+`ridgeTargets` (Ridge-Ziel je Team). Ohne Angabe ist sie nachweislich bitgleich, produktiv
+setzt sie niemand. In Validation gibt es nur fünf Rückkehrer-Saisons (Köln und Paderborn
+2019, Stuttgart 2020, Schalke und Werder 2022). Über alle Spiele ΔRPS +0,0001, praktisch
+null. Auf den ersten rund zehn Wochen der Rückkehrer +0,0028 bei n = 43, p = 0,11. Die
+Richtung passt zum Befund, die Fallzahl reicht nicht. Mehr lässt sich erst mit Test und
+den kommenden Aufsteigern sagen.
+
 ### 18. Die Formkurve wirft das Torniveau weg [eingefroren]
 
 `src/model/predictPipeline.ts:80-81`, `src/model/xgForm.ts:127`
@@ -196,6 +224,13 @@ ist als Ursache aber **nicht gemessen**.
 Ligaschnitt) auf das eigene λ, Abwehrform (xGA gegen Ligaschnitt) auf das λ des Gegners.
 Zielgröße O/U-LogLoss und 1X2-LogLoss. Zusammen mit Punkt 1 und 6, Umstellung frühestens
 zur Saison 2027/28.
+
+**Gemessen 18.11. (MESSLAUF.md, C1), die Hypothese trägt nicht.** Die geteilte Form ist
+überall tendenziell schlechter, gerade im Markt, den sie verbessern sollte: Ü/U-LogLoss
+−0,0102 (p = 0,19), 1X2 −0,0005, exaktes Ergebnis −0,014. Die schwache Über/Unter-Leistung
+scheint eher an den extremen Formwerten zu liegen (siehe Klammer, Punkt 6) als an der
+fehlenden Abwehrseite. Der Punkt kann zur nächsten Saison geschlossen werden, sofern
+nichts Neues dazukommt.
 
 **Nachtrag 18.09.:** der Befund war schon bekannt. `src/llm/factMapping.ts:143-144` sagt
 über die Abwehr des Gegners: „letzteres fehlt der bestehenden xG-Formkurve komplett, siehe

@@ -2318,6 +2318,27 @@ section("xG-Feed deckt die Ergebnis-CSV", () => {
   }
 });
 
+section("Ridge-Ziele sind ohne Angabe inert", () => {
+  // ridgeTargets kam am 18.11.2026 fuer den Messlauf zu Punkt 15 in den eingefrorenen Fit
+  // (MESSLAUF.md). Produktiv setzt sie niemand. Diese Pruefung haelt fest, dass sie ohne
+  // Angabe UND mit Ziel 0 exakt denselben Fit liefert -- sonst haette der Messlauf den
+  // Freeze still gebrochen.
+  const season = loadAllMatches().filter((m) => m.season === "2022");
+  const avgH = season.reduce((s, m) => s + m.homeGoals, 0) / season.length;
+  const avgA = season.reduce((s, m) => s + m.awayGoals, 0) / season.length;
+  const team = season[0].homeTeam;
+  const fit = (ridgeTargets?: Map<string, { attack: number; defense: number }>) =>
+    fitPoissonModel(season, avgH, avgA, { ridgePseudoMatches: 8, ridgeTargets }).teams;
+  const plain = fit();
+  const zero = fit(new Map([[team, { attack: 0, defense: 0 }]]));
+  check(() => assert.deepEqual([...zero.entries()], [...plain.entries()], "Ziel 0 ist bitgleich mit ohne Ziel"));
+  check(() => assert.deepEqual([...fit(new Map()).entries()], [...plain.entries()], "leere Map ist bitgleich"));
+  // Gegenprobe: ein schwaches Ziel zieht das Team tatsaechlich dorthin.
+  const weak = fit(new Map([[team, { attack: -0.5, defense: 0.5 }]]));
+  check(() => assert.ok(weak.get(team)!.attack < plain.get(team)!.attack, "Angriff sinkt Richtung Ziel"));
+  check(() => assert.ok(weak.get(team)!.defense > plain.get(team)!.defense, "Abwehr steigt Richtung Ziel"));
+});
+
 section("Vorhersage bei Anpfiff eingefroren", () => {
   // VERBESSERUNGEN.md, Punkt 12: was bei Anpfiff auf der Seite steht, wird nie wieder
   // veraendert. Geprueft wird die Kette: wann eingefroren wird, was danach angezeigt wird,
