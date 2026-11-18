@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
+import { xgCoverageGaps, xgDuplicatePairings } from "../data/xgCoverage";
 import { mergeMarketRows } from "../data/refreshMarketOdds";
 import {
   FOTMOB_TO_UNDERSTAT,
@@ -2218,6 +2219,92 @@ section("FotMob fuellt xG-Luecken, ohne Understat anzufassen", () => {
 
   check(() => assert.equal(toUnderstatDate("2026-11-08T18:30:00Z"), "2026-11-08 18:30:00"));
   check(() => assert.equal(toUnderstatDate("2026-11-08T18:30:00.000Z"), "2026-11-08 18:30:00"));
+});
+
+section("xG-Feed deckt die Ergebnis-CSV", () => {
+  // VERBESSERUNGEN.md, Punkt 2: fehlt einem Team ein Spiel dieser Saison im xG-Feed, zieht
+  // die eingefrorene Formkurve ein Spiel der Vorsaison ins Fenster. refreshSeasonData bricht
+  // in diesem Zustand ab; hier wird geprueft, dass die Erkennung stimmt und dass der echte
+  // Datenstand sauber ist.
+  const bayern = "Bayern Munich";
+  const koeln = "FC Koln";
+  const bayernXg = OUR_NAME_TO_UNDERSTAT[bayern];
+  const koelnXg = OUR_NAME_TO_UNDERSTAT[koeln];
+  check(() => assert.ok(bayernXg && koelnXg, "Testteams haben eine Understat-Zuordnung"));
+  const row = (season: string, home: string, away: string) => ({ season, homeTeam: home, awayTeam: away });
+
+  const results = [row("2026", bayern, koeln), row("2026", koeln, bayern), row("2025", bayern, koeln)];
+  const complete = [row("2026", bayernXg, koelnXg), row("2026", koelnXg, bayernXg), row("2025", bayernXg, koelnXg)];
+
+  check(() => assert.deepEqual(xgCoverageGaps("2026", results, complete), [], "vollstaendig: keine Luecke"));
+  check(() =>
+    assert.deepEqual(
+      xgCoverageGaps("2026", results, complete.slice(1)),
+      [
+        { team: bayern, xgName: bayernXg, results: 2, xg: 1 },
+        { team: koeln, xgName: koelnXg, results: 2, xg: 1 },
+      ],
+      "ein fehlendes Spiel trifft beide Teams"
+    )
+  );
+  check(() =>
+    assert.deepEqual(
+      xgCoverageGaps("2026", results.slice(0, 1), complete),
+      [],
+      "Feed weiter als die CSV ist harmlos -- das Fenster bleibt in der Saison"
+    )
+  );
+  check(() =>
+    assert.deepEqual(
+      xgCoverageGaps("2026", results, [...complete.slice(0, 2)]),
+      [],
+      "die Vorsaison zaehlt nicht mit"
+    )
+  );
+  check(() =>
+    assert.deepEqual(
+      xgCoverageGaps("2026", [row("2026", "Phantasia 09", bayern)], [row("2026", bayernXg, "X")]),
+      [],
+      "Team ohne Zuordnung bleibt aussen vor (Form 0, nicht verschoben)"
+    )
+  );
+
+  check(() => assert.deepEqual(xgDuplicatePairings("2026", complete), [], "Hin- und Rueckspiel sind kein Duplikat"));
+  check(() =>
+    assert.deepEqual(
+      xgDuplicatePairings("2026", [...complete, row("2026", bayernXg, koelnXg), row("2025", koelnXg, bayernXg)]),
+      [`${bayernXg} - ${koelnXg}`],
+      "dieselbe Paarung zweimal in einer Saison ist ein Duplikat, die Vorsaison nicht"
+    )
+  );
+
+  // Echter Stand. Schlaegt das an, steht ein halber Datenstand im Repo.
+  const xgRows = JSON.parse(readFileSync(join(process.cwd(), "data", "xg_bundesliga.json"), "utf-8")) as XgMatch[];
+  const realResults = loadAllMatches();
+  const season = deriveSeasonFromDate(new Date());
+  check(() =>
+    assert.deepEqual(
+      xgCoverageGaps(season, realResults, xgRows),
+      [],
+      `xG-Feed fuehrt nicht alle Spiele der Saison ${season} -- npm run refresh`
+    )
+  );
+  check(() => assert.deepEqual(xgDuplicatePairings(season, xgRows), [], "doppelte Paarung im echten xG-Feed"));
+  // Gegenprobe am echten Stand: das letzte Bayern-Spiel aus dem Feed genommen, genau der
+  // Zustand aus Punkt 2 (nachgestellt am 10.09.2026). Die Erkennung muss ihn sehen.
+  let lastBayern = -1;
+  xgRows.forEach((m, i) => {
+    if (m.season === season && (m.homeTeam === bayernXg || m.awayTeam === bayernXg)) lastBayern = i;
+  });
+  if (lastBayern >= 0) {
+    const lagging = xgRows.filter((_, i) => i !== lastBayern);
+    check(() =>
+      assert.ok(
+        xgCoverageGaps(season, realResults, lagging).some((g) => g.team === bayern && g.xg === g.results - 1),
+        "ein haengender Feed am echten Stand wird erkannt"
+      )
+    );
+  }
 });
 
 section("CSV-Merge erhaelt Quotenspalten", () => {

@@ -38,6 +38,7 @@ import {
 import { FORWARD_SEASON } from "../eval/splits";
 import { cacheKey, readLlmCache } from "../llm/llmCache";
 import { logDecision, logKey } from "../eval/forwardLogRules";
+import { describeXgGaps, xgCoverageGaps } from "../data/xgCoverage";
 
 loadEnvLocal();
 
@@ -135,6 +136,23 @@ if (effectiveModel !== DEFAULT_PIPELINE.llmModel) {
     `Hinweis: der Spielkontext stammt von "${effectiveModel}", eingestellt ist derzeit\n` +
       `         "${DEFAULT_PIPELINE.llmModel}". Geloggt wird das Modell aus dem Cache.\n`
   );
+}
+
+// Steht ein halber Datenstand im Repo (xG-Feed fuehrt weniger Spiele als die CSV, etwa nach
+// einem manuellen Commit), rechnet die eingefrorene Formkurve fuer diese Teams mit Spielen
+// der Vorsaison. Kein Abbruch: ein nicht protokollierter Spieltag ist fuer immer verloren,
+// ein leicht verschobener Formfaktor trifft beide Varianten gleich und hebt sich im
+// gepaarten Vergleich weitgehend auf. Aber laut, damit es vor Anpfiff noch repariert wird.
+{
+  const xgRows = JSON.parse(readFileSync(join(DATA_DIR, "xg_bundesliga.json"), "utf-8"));
+  const gaps = xgCoverageGaps(FORWARD_SEASON, loadAllMatches(), xgRows);
+  if (gaps.length > 0) {
+    console.warn(
+      `WARNUNG: xG-Feed fuehrt nicht alle Spiele der Ergebnis-CSV (${describeXgGaps(gaps)}).\n` +
+        `         Die Form dieser Teams zieht Spiele der Vorsaison ins Fenster. Vor Anpfiff\n` +
+        `         "npm run refresh" laufen lassen (VERBESSERUNGEN.md, Punkt 2).\n`
+    );
+  }
 }
 
 if (!llmMatchesMatchday) {

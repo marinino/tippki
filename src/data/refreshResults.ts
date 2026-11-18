@@ -2,9 +2,10 @@ import { parse } from "csv-parse/sync";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { OPENLIGADB_TO_OUR_NAME } from "./openligaTeamNames";
-import { seasonToFilenameSuffix } from "./loadMatches";
+import { clearMatchCache, loadAllMatches, seasonToFilenameSuffix } from "./loadMatches";
 import { refreshMarketOdds } from "./refreshMarketOdds";
 import { fetchFotmobXgGaps, mergeFallbackXg, type XgMatch } from "./fotmobXg";
+import { describeXgGaps, xgCoverageGaps, xgDuplicatePairings } from "./xgCoverage";
 
 const DATA_DIR = join(process.cwd(), "data");
 
@@ -219,6 +220,9 @@ export interface RefreshSummary {
   // (src/data/fotmobXg.ts). understatError nennt dann den Grund.
   xgSource: XgSource;
   understatError?: string;
+  // Spiele, die Understat zwar beantwortet, aber noch nicht gefuehrt hat und die deshalb
+  // aus FotMob kamen (Understat haengt nach Abpfiff oft hinterher). 0 im Normalfall.
+  xgLagFilled: number;
   // Spiele der laufenden Saison, die nach dem Abruf eine Buchmacher-Schlussquote tragen.
   // null = football-data fuehrt die Saison noch nicht oder war nicht erreichbar.
   oddsCount: number | null;
@@ -229,7 +233,8 @@ export interface RefreshSummary {
 
 export async function refreshSeasonData(season: string): Promise<RefreshSummary> {
   const [resultsCount, xg] = await Promise.all([refreshCsvResults(season), refreshXgResults(season)]);
-  const { count: xgCount, source: xgSource, understatError } = xg;
+  const { source: xgSource, understatError } = xg;
+  const { xgCount, xgLagFilled } = await ensureXgCoverage(season, xg.count, xgSource);
 
   // Bewusst NACH den Ergebnissen und bewusst nicht-fatal: die Quoten sind Massstab, nicht
   // Betriebsgrundlage. Faellt football-data aus, laeuft die App vollstaendig weiter, nur der
@@ -246,5 +251,63 @@ export async function refreshSeasonData(season: string): Promise<RefreshSummary>
     oddsCount = null;
   }
 
-  return { season, resultsCount, xgCount, xgSource, understatError, oddsCount, oddsUnreachable };
+  return { season, resultsCount, xgCount, xgSource, understatError, xgLagFilled, oddsCount, oddsUnreachable };
+}
+
+// Nach dem Abruf: fuehrt der xG-Feed jedes Spiel, das in der Ergebnis-CSV steht?
+// (VERBESSERUNGEN.md, Punkt 2; die Begruendung steht in xgCoverage.ts.)
+//
+// Hat Understat geantwortet, aber ein Spiel noch nicht (der Normalfall kurz nach Abpfiff),
+// fuellt FotMob genau diese Spiele auf -- derselbe Lueckenfueller wie beim Ausfall von
+// Understat, mit denselben Regeln: Understat-Eintraege bleiben, FotMob-Eintraege tragen
+// source: "fotmob", der naechste vollstaendige Understat-Abruf ersetzt sie.
+//
+// Bleibt danach eine Luecke oder entsteht eine doppelte Paarung, bricht der Lauf ab. Im
+// Workflow heisst das: nichts wird committet (pipefail, siehe ergebnisse.yml), und der
+// naechste Lauf versucht es erneut. Lokal stehen CSV und xG dann in einem halben Stand auf
+// der Platte -- die Meldung sagt das.
+async function ensureXgCoverage(
+  season: string,
+  xgCount: number,
+  source: XgSource
+): Promise<{ xgCount: number; xgLagFilled: number }> {
+  const xgPath = join(DATA_DIR, "xg_bundesliga.json");
+  const gapsNow = () => {
+    // Die CSV wurde gerade neu geschrieben; ein im Prozess zwischengespeicherter Stand
+    // (Next-Server) waere der alte.
+    clearMatchCache();
+    return xgCoverageGaps(season, loadAllMatches(), readXgFile(xgPath));
+  };
+
+  let gaps = gapsNow();
+  let xgLagFilled = 0;
+  if (gaps.length > 0 && source === "understat") {
+    const existing = readXgFile(xgPath);
+    const fill = await fetchFotmobXgGaps(
+      season,
+      existing.filter((m) => m.season === season)
+    );
+    writeFileSync(xgPath, JSON.stringify(mergeFallbackXg(existing, fill)));
+    xgLagFilled = fill.length;
+    xgCount += fill.length;
+    gaps = gapsNow();
+  }
+
+  const halfState =
+    "data/ steht damit in einem halben Stand: nicht committen, den Lauf spaeter wiederholen.";
+  if (gaps.length > 0) {
+    throw new Error(
+      `xG-Feed fuehrt nicht alle Spiele der Ergebnis-CSV (${describeXgGaps(gaps)}). ` +
+        `Die Formkurve zoege dafuer Spiele der Vorsaison ins Fenster ` +
+        `(VERBESSERUNGEN.md, Punkt 2). ${halfState}`
+    );
+  }
+  const duplicates = xgDuplicatePairings(season, readXgFile(xgPath));
+  if (duplicates.length > 0) {
+    throw new Error(
+      `xG-Feed fuehrt Paarungen doppelt (${duplicates.join("; ")}), vermutlich ein ` +
+        `FotMob-Eintrag mit abweichender Anstosszeit. Sie zaehlten im Formfenster doppelt. ${halfState}`
+    );
+  }
+  return { xgCount, xgLagFilled };
 }
