@@ -74,6 +74,7 @@ export function usePredictions(initialMatchday?: number | null) {
         r.dispatched
           ? DISPATCHED
           : `${r.resultsCount} Ergebnisse, ${r.xgCount} xG-Spiele aktualisiert` +
+            (r.xgSource === "fotmob" ? " (Understat nicht erreichbar, Luecken aus FotMob)" : "") +
             (r.oddsCount === null ? "" : `, ${r.oddsCount} Spiele mit Buchmacher-Schlussquote`),
       "Fehler beim Aktualisieren"
     );

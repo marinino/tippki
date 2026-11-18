@@ -14,6 +14,13 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
 import { mergeMarketRows } from "../data/refreshMarketOdds";
 import {
+  FOTMOB_TO_UNDERSTAT,
+  mergeFallbackXg,
+  toUnderstatDate,
+  toUnderstatName,
+  type XgMatch,
+} from "../data/fotmobXg";
+import {
   DEFAULT_PIPELINE,
   canonicalUserPrompt,
   configHash,
@@ -2105,6 +2112,55 @@ section("LLM-Kontext: Mapping und Guardrails", () => {
 });
 
 // ---------------------------------------------------------------------------
+
+section("FotMob fuellt xG-Luecken, ohne Understat anzufassen", () => {
+  const understat = (date: string, home: string, away: string, hx: number, ax: number): XgMatch => ({
+    season: "2026", date, homeTeam: home, awayTeam: away, homeGoals: 1, awayGoals: 1, homeXG: hx, awayXG: ax,
+  });
+  const existing = [
+    understat("2026-11-01 14:30:00", "Bayern Munich", "Werder Bremen", 2.9, 0.7),
+    understat("2026-10-25 16:30:00", "FC Cologne", "Mainz 05", 1.4, 1.1),
+  ];
+  const fallback: XgMatch[] = [
+    // Dasselbe Spiel wie oben, andere Werte: der Understat-Eintrag muss gewinnen.
+    { ...understat("2026-11-01 14:30:00", "Bayern Munich", "Werder Bremen", 2.5, 0.6), source: "fotmob" },
+    { ...understat("2026-11-08 18:30:00", "Hoffenheim", "Schalke 04", 2.23, 2.6), source: "fotmob" },
+  ];
+  const merged = mergeFallbackXg(existing, fallback);
+
+  check(() => assert.equal(merged.length, 3, "zwei bestehende plus ein neues Spiel"));
+  check(() =>
+    assert.equal(
+      merged.find((m) => m.homeTeam === "Bayern Munich")?.homeXG,
+      2.9,
+      "bestehender Understat-Wert bleibt, FotMob ueberschreibt nichts"
+    )
+  );
+  check(() =>
+    assert.deepEqual(
+      merged.map((m) => m.date),
+      ["2026-10-25 16:30:00", "2026-11-01 14:30:00", "2026-11-08 18:30:00"],
+      "chronologisch sortiert -- buildXgIndex verlaesst sich auf die Reihenfolge"
+    )
+  );
+  check(() => assert.equal(merged[merged.length - 1]?.source, "fotmob", "Lueckenfueller sind markiert"));
+
+  check(() => assert.equal(toUnderstatName("Bayern München"), "Bayern Munich"));
+  check(() => assert.equal(toUnderstatName("1. FC Köln"), "FC Cologne"));
+  check(() => assert.equal(toUnderstatName("RB Leipzig"), "RasenBallsport Leipzig"));
+  check(() => assert.equal(toUnderstatName("Elversberg"), "Elversberg", "gleiche Schreibweise geht 1:1 durch"));
+  check(() =>
+    assert.throws(() => toUnderstatName("Phantasia 09"), /FOTMOB_TO_UNDERSTAT/, "unbekannter Name laeuft laut auf")
+  );
+  // Jede Zuordnung muss auf einen Namen zeigen, den computeXgForm auch nachschlaegt.
+  const understatNames = new Set(Object.values(OUR_NAME_TO_UNDERSTAT));
+  for (const [fotmob, mapped] of Object.entries(FOTMOB_TO_UNDERSTAT)) {
+    check(() => assert.ok(understatNames.has(mapped), `${fotmob} -> "${mapped}" ist kein Understat-Name`));
+  }
+
+  check(() => assert.equal(toUnderstatDate("2026-11-08T18:30:00Z"), "2026-11-08 18:30:00"));
+  check(() => assert.equal(toUnderstatDate("2026-11-08T18:30:00.000Z"), "2026-11-08 18:30:00"));
+});
 
 section("CSV-Merge erhaelt Quotenspalten", () => {
   // Der wichtigste Test der Datei: refreshCsvResults hat die Saisondatei komplett mit
