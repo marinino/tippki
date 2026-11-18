@@ -1,6 +1,7 @@
 import type { SimPrediction } from "../types";
 import type { SimInput } from "../hooks/useSimulation";
 import { num, odds } from "../lib/format";
+import { modeSuffix, scoresByOutcome } from "../lib/scoreByOutcome";
 import { ProbabilityBar } from "./ProbabilityBar";
 import { TeamName } from "./TeamName";
 import styles from "./SimulatorMatchRow.module.css";
@@ -18,6 +19,7 @@ export function SimulatorMatchRow({
   input: SimInput;
   onChange: (side: "home" | "away", value: string) => void;
 }) {
+  const scores = scoresByOutcome(p.prices.correctScore, p.scoreGrid);
   return (
     <article className={cardStyles.card}>
       <div className={cardStyles.body}>
@@ -51,7 +53,10 @@ export function SimulatorMatchRow({
         <div className={cardStyles.verdict}>
           <span className={cardStyles.tip}>{odds(favouriteOdds(p))}</span>
           <span className={cardStyles.meta}>faire Quote Favorit</span>
-          <span className={cardStyles.meta}>Häufigstes {p.mostLikelyScore}</span>
+          <span className={cardStyles.meta}>
+            Häufigstes {p.mostLikelyScore}
+            {modeSuffix(scores, p.mostLikelyScore)}
+          </span>
           <span className={cardStyles.meta}>
             Ø {num(p.expectedHomeGoals, 1)}:{num(p.expectedAwayGoals, 1)}
           </span>
@@ -62,6 +67,7 @@ export function SimulatorMatchRow({
         homeWinProb={p.homeWinProb}
         drawProb={p.drawProb}
         awayWinProb={p.awayWinProb}
+        scores={scores}
       />
     </article>
   );

@@ -152,6 +152,57 @@ Weil der Freeze gilt, wurde nicht das Modell angefasst, sondern der Check: die h
 Zeile im Protokoll ab 6. Beim Umstellen zur nächsten Saison die alte Grenze wieder auf die
 fertige Torerwartung legen — mit Klammer sollte sie halten.
 
+**Nachtrag 18.11., die Überstreuung beziffert** (walk-forward auf Validation 2018–2022,
+Diagnose, kein Test). Gegen den Markt, auf den 1203 Spielen mit Pinnacle-Schlussquote auf
+1X2 und Ü/U 2,5: Die Summe der Torerwartungen streut beim Modell mit SD 0,78, beim Markt
+mit 0,42. Regressiert man die echte Torsumme darauf, bringt ein vorhergesagtes Tor mehr
+beim Modell nur 0,45 echte Tore, beim Markt 1,11. Mit und ohne Form, auf allen 1530
+Spielen: SD 0,82 und Steigung 0,39 mit Form, SD 0,39 und Steigung 0,81 ohne. Die
+Überstreuung kommt also fast vollständig aus der Formkurve. Bei der Tordifferenz liegt die
+Steigung ohne Form bei 1,17 (zu zaghaft), mit Form bei 0,73 (zu weit): die Form trägt
+echte Information über die Differenz bei, schießt aber über das Ziel hinaus. Genau dafür
+ist eine Klammer da.
+
+Die Ü/U-Schwäche liegt damit nicht an einem zu starren Torniveau, sondern an einem zu
+beweglichen. In der Ergebnismatrix zeigt sich das am 2:1, das unterschätzt wird: Modell
+7,3 %, mit den Torerwartungen des Marktes in derselben Matrixform 8,2 %, eingetreten 9,2 %.
+Nicht von der Klammer zu erwarten ist dagegen eine Korrektur bei 0:0 (Modell 7,0 %, mit
+Markt-Torerwartungen 6,3 %, eingetreten 5,1 %). Das liegt zum größeren Teil an der
+Dixon-Coles-Form selbst: Innerhalb der Remis landen 26–28 % auf 0:0 (eingetreten 21 %) und
+45–47 % auf 1:1 (eingetreten 51 %). RHO kann das nicht trennen, weil es 0:0 und 1:1 in
+dieselbe Richtung schiebt. Die festgelegte Prüfung für Sommer 2027 bleibt unverändert.
+Gerechnet mit einem Einmal-Skript außerhalb des Repos, das nur `buildWalkForwardContexts`
+und `evaluateRun` benutzt.
+
+**Nachtrag 18.11., Spieltag 10 gegen Tipico, und wo der Rückstand sitzt.** Tipicos
+Ergebnis-Favoriten (niedrigste Quote je Partie) und unser „Häufigstes" stimmen in 5 von 9
+Partien überein, auf beiden Seiten mit viel 1:1. Drei der vier Abweichungen kommen allein
+aus der Form:
+
+| Partie | Tipico | wir | ohne Form | Form Heim / Gast |
+|---|---|---|---|---|
+| Bayern – Köln | 4:0 | 6:0 | 3:0, 4:0 auf Platz 2 | +2,55 / +0,38 |
+| Union – Leipzig | 1:1 | 0:2 (Leipzig 68 %) | 1:1 (Leipzig 48 %) | −1,36 / +1,95 |
+| Leverkusen – Paderborn | 2:0 | 1:1 (Leverkusen 50 %) | 1:1, 2:0 auf Platz 2 (59 %) | −1,14 / +0,29 |
+| Bremen – Hamburg | 2:1 | 1:1, 2:1 auf Platz 2 | 1:1, 2:1 auf Platz 2 | +0,62 / −0,57 |
+
+Ohne Form stünde Tipicos Ergebnis bei uns in allen neun Partien auf Platz 1 oder 2. Nur
+Bremen–Hamburg ist eine echte Frage der Matrixform (passt zum unterschätzten 2:1, siehe
+oben). Ein Spieltag bleibt eine Anekdote, und Tipicos Ergebnisquoten tragen viel ungleich
+verteilte Marge.
+
+Über die ganze Validation (`npm run form`, Abschnitt 4: walk-forward, Pinnacle-Schluss,
+1529 Spiele) ergibt sich dasselbe Bild. In den 1319 Spielen, in denen wir mit dem Markt
+einig sind (unter 12 pp), liegen wir praktisch gleichauf (RPS −0,0007, p = 0,53). 80 % des
+gesamten Rückstands stecken in den 210 deutlich uneinigen Spielen, 54 % allein in den 120,
+in denen wir ohne Form einig wären. Dort traut das Modell seinem Favoriten in 60 % der
+Fälle mehr zu als der Markt. Die Form ist aber nicht nur Rauschen: insgesamt halbiert sie
+den Rückstand (RPS 0,0052 → 0,0029), und in 173 Spielen holt sie uns erst zum Markt heran.
+Das erklärt B1/B2 (Klammer im 1X2 neutral): eine harte Klammer nimmt beides. Die Teilmengen
+sind nach der Meinung des Marktes geschnitten und damit konfundiert; sie zeigen, wo der
+Rückstand sitzt, nicht wie viel eine Änderung brächte. Woche für Woche sichtbar ist das
+seit heute in `npm run predict` (Zeile „ohne Form").
+
 ### 8. Der `configHash` sieht die Logik der Modellseite nur per Handzähler
 
 `src/model/pipelineConfig.ts`, `src/model/xgForm.ts`
@@ -264,6 +315,44 @@ Abbildung, also zur nächsten Saison. Seit dem 18.11. bemerkt der Hash das: der 
 Abdruck sampelt geordnete Paare verschiedener Fakten. Nachgestellt mit umgedrehter
 Auflösung von Gleichständen: der alte Abdruck bleibt bei `0c522175`, der breite bewegt
 sich, der Hash springt von `3cc0ddad` auf `c311cced`.
+
+### 20. Dixon-Coles wird ab einer Torerwartung von 6,67 ungültig [eingefroren]
+
+`src/model/scoreMatrix.ts:63-75` (`dixonColesTau`), `DEFAULT_RHO = -0.15`
+
+Die Korrektur für die Zelle 0:1 ist `1 + λ_heim · ρ`, die für 1:0 `1 + λ_ausw · ρ`. Mit
+ρ = −0,15 wird sie ab λ = 1/0,15 = 6,67 negativ, und mit ihr die Wahrscheinlichkeit.
+Dixon und Coles verlangen deshalb ρ ≥ −1/λ; geprüft wird das nirgends. Nachgerechnet mit
+einer Gast-Torerwartung von 0,9:
+
+| Heim-λ | P(0:1) |
+|---|---|
+| 6,01 | +9,2·10⁻⁵ |
+| 6,67 | −2,5·10⁻⁷ |
+| 7,00 | −1,9·10⁻⁵ |
+| 8,00 | −3,0·10⁻⁵ |
+
+Zahlenmäßig winzig, aber eine negative Wahrscheinlichkeit ist falsch, nicht nur
+suboptimal. Erreicht wurde die Grenze noch nie. Am nächsten dran ist Bayern–Köln vor
+Spieltag 10 mit 6,01 (Basis 3,61, Form +2,55, siehe Punkt 6), mit maximalem Spielkontext
+(+16 %) wären es 6,98. Aufgefallen ist das bisher nicht, weil der Self-Check „keine
+negativen Zellen“ nur bei 1,7 : 1,1 prüft und die Plausibilitätsprüfung mit Form bis 8
+durchlässt.
+
+**Seit dem 18.11.:** Die Plausibilitätsprüfung meldet sich laut, sobald die Torerwartung
+mit Form die Grenze mit Spielkontext erreichen könnte (ab 6,67 / 1,16 = 5,74), und
+gesondert, wenn eine Zelle tatsächlich negativ ist. Laut statt hart aus demselben Grund
+wie in Punkt 6: die Ursache ist die eingefrorene Form, und ein dauerhaft roter Lauf würde
+echte Fehler verdecken. Ein zweiter Check im Abschnitt „Score-Matrix“ nagelt die Grenze
+fest (darunter alle Zellen ≥ 0, darüber 0:1 und 1:0 negativ). Er schlägt an, sobald die
+Reparatur kommt; dann diesen Punkt schließen.
+
+**Fix (Vorschlag):** zur nächsten Saison, zusammen mit der Klammer aus Punkt 6. Die allein
+holt Bayern weit unter die Grenze (3,61 · e^0,15 = 4,19). Absichern sollte man die
+Korrektur trotzdem selbst, etwa τ nicht unter 0 oder λ vor der Matrix begrenzt. Tritt der
+Fall vorher ein, ist er ein echter Fehler im Sinne von SAISONBETRIEB.md: dann bewusst
+entscheiden, ob repariert wird (neuer Hash, geteiltes Log) oder die winzige Abweichung bis
+Saisonende getragen wird.
 
 ---
 

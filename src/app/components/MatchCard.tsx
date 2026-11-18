@@ -1,5 +1,6 @@
 import { hasNumbers, type PricedPrediction, type Prediction } from "../types";
 import { describeProvenance, describeSource, formatMatchDayTime, num, odds } from "../lib/format";
+import { modeSuffix, scoresByOutcome } from "../lib/scoreByOutcome";
 import { ProbabilityBar } from "./ProbabilityBar";
 import { TeamName } from "./TeamName";
 import { MatchDetails } from "./MatchDetails";
@@ -12,6 +13,7 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
   if (!hasNumbers(p)) return <MissingCard prediction={p} />;
   const favourite = pickFavourite(p);
   const source = describeSource(p.source);
+  const scores = scoresByOutcome(p.prices.correctScore, p.scoreGrid);
 
   return (
     <article className={styles.card}>
@@ -37,7 +39,10 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
         <div className={styles.verdict}>
           <span className={styles.tip}>{odds(favourite.fairOdds)}</span>
           <span className={styles.meta}>{favourite.label} · faire Quote</span>
-          <span className={styles.meta}>Häufigstes {p.mostLikelyScore}</span>
+          <span className={styles.meta}>
+            Häufigstes {p.mostLikelyScore}
+            {modeSuffix(scores, p.mostLikelyScore)}
+          </span>
           <span className={styles.meta}>
             Ø {num(p.expectedHomeGoals, 1)}:{num(p.expectedAwayGoals, 1)}
           </span>
@@ -48,6 +53,7 @@ export function MatchCard({ prediction: p }: { prediction: Prediction }) {
         homeWinProb={p.homeWinProb}
         drawProb={p.drawProb}
         awayWinProb={p.awayWinProb}
+        scores={scores}
       />
 
       <MatchDetails prediction={p} />

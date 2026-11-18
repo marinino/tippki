@@ -555,6 +555,19 @@ bedeutungslos, und sie sehen trotzdem unauffällig aus.
    abgeschriebene Verletztenliste *ist* keine Vereinsmeldung) oder eine zu vorsichtige
    Formulierung im Extraktionsprompt, entscheidet sich mit ein paar Spieltagen Daten — die
    `certainty` jedes Faktors steht im Vorwärts-Log. Nicht vorher am Mapping drehen.
+5. **Abweichungen vom Markt, nach Ursache** — seit dem 18.11.2026 steht in
+   `npm run predict` unter jeder Partie dieselbe Vorhersage ohne Formkurve. Wo wir deutlich
+   anders liegen als der Buchmacher, zuerst dort nachsehen. Verschwindet die Abweichung ohne
+   Form, ist sie nach der Validation meist unser Fehler: 54 % des gesamten Rückstands
+   sitzen auf den 8 % der Spiele, in denen nur die Form uns vom Markt trennt
+   (`npm run form`, Abschnitt 4; VERBESSERUNGEN.md, Punkt 6). Interessanter ist die andere
+   Sorte, die auch ohne Form bleibt. Dort weiß entweder der Markt etwas, das uns fehlt
+   (Ausfälle, Aufsteiger wie in VERBESSERUNGEN.md Punkt 15), oder wir wissen etwas, das er
+   falsch gewichtet. Nur der zweite Fall wäre ein Weg, ihn zu schlagen. Bisher traut dort
+   fast immer der Markt seinem Favoriten mehr zu als wir (89 % dieser Spiele) und liegt
+   vorn, wenn auch nicht signifikant (90 Spiele). Quoten bleiben dabei Maßstab, nie
+   Eingabe. Ergebnisquoten von Tipico sind wegen ihrer Marge nur Anschauung; gemessen wird
+   gegen die Schlussquote.
 
 Beobachtung ist keine Erlaubnis zum Nachdrehen. Wird ein Befund groß genug, wird er
 aufgeschrieben und **nach** der Saison umgesetzt.

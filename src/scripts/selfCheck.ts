@@ -112,15 +112,19 @@ import {
 } from "../llm/matchContext";
 import { SEARCH_USD_PER_REQUEST, estimateCostUsd, resolveModelProfile } from "../llm/modelProfile";
 import {
+  DEFAULT_OUTCOME_TEMPERATURE,
+  DEFAULT_RHO,
   applyOutcomeTemperature,
   argmaxCell,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
   outcomeMasses,
   scoreProb,
+  toScoreGrid,
   toScoreMap,
   totalGoalsMarginal,
 } from "../model/scoreMatrix";
+import { modeSuffix, scoresByOutcome, sideOf, type OutcomeSide } from "../app/lib/scoreByOutcome";
 import { buildPriceSheet, priceOf } from "../model/priceSheet";
 import {
   argmaxOutcome,
@@ -1155,6 +1159,21 @@ section("Score-Matrix", () => {
   check(() => closeTo(total, 1, 1e-12, "Matrix muss auf 1 summieren"));
   check(() => assert.ok([...m.cells].every((c) => c >= 0), "keine negativen Zellen"));
 
+  // Gueltigkeitsgrenze von Dixon-Coles (VERBESSERUNGEN.md, Punkt 20). Die Korrektur fuer 0:1
+  // ist 1 + λ_heim·ρ, die fuer 1:0 ist 1 + λ_ausw·ρ; ab λ = 1/|ρ| werden sie negativ. Der
+  // Check oben bei 1,7 : 1,1 sieht das nicht. Festgenagelt, weil sich die Plausibilitaets-
+  // pruefung auf genau diese Grenze verlaesst -- und damit es hier anschlaegt, sobald die
+  // Reparatur kommt. Dann die beiden letzten Checks streichen und Punkt 20 schliessen.
+  const dcLimit = 1 / Math.abs(DEFAULT_RHO);
+  check(() =>
+    assert.ok(
+      [...buildDixonColesMatrix(dcLimit - 0.01, 0.9).cells].every((c) => c >= 0),
+      "knapp unter der Dixon-Coles-Grenze darf keine Zelle negativ sein"
+    )
+  );
+  check(() => assert.ok(scoreProb(buildDixonColesMatrix(dcLimit + 0.3, 0.9), 0, 1) < 0, "bekannt: 0:1 negativ"));
+  check(() => assert.ok(scoreProb(buildDixonColesMatrix(0.9, dcLimit + 0.3), 1, 0) < 0, "bekannt: 1:0 negativ"));
+
   const masses = outcomeMasses(m);
   check(() =>
     closeTo(masses.homeWinProb + masses.drawProb + masses.awayWinProb, 1, 1e-12, "Massen")
@@ -1320,6 +1339,93 @@ section("Preisblatt", () => {
       "BTTS darf nicht die naive Unabhaengigkeitsformel sein"
     )
   );
+});
+
+// ---------------------------------------------------------------------------
+
+section("Ergebnis je Ausgang", () => {
+  // Die Karte zeigt zu Heimsieg, Remis und Auswaertssieg je das wahrscheinlichste Ergebnis
+  // (src/app/lib/scoreByOutcome.ts). Damit das eine Umformung ist und keine Behauptung,
+  // muessen drei Dinge gelten: jeder Eintrag ist das echte Maximum seines Ausgangs ueber die
+  // VOLLE Matrix, das haeufigste Ergebnis ist einer der drei, und wo die Daten nicht reichen
+  // (Logzeilen mit zehn Ergebnissen), bleibt das Feld leer, statt falsch zu sein.
+  const sides: OutcomeSide[] = ["home", "draw", "away"];
+  const rng = mulberry32(20261118);
+  let leftEmpty = 0;
+
+  for (let trial = 0; trial < 200; trial++) {
+    const lambdaHome = 0.3 + rng() * 3.7;
+    const lambdaAway = 0.3 + rng() * 3.7;
+    const label = `${lambdaHome.toFixed(3)}/${lambdaAway.toFixed(3)}`;
+    // Derselbe Weg wie in predictPipeline: Matrix, dann Temperatur, dann Preisblatt.
+    const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway);
+    applyOutcomeTemperature(matrix, DEFAULT_OUTCOME_TEMPERATURE);
+    const sheet = buildPriceSheet(matrix);
+
+    const truth: Record<OutcomeSide, { score: string; prob: number }> = {
+      home: { score: "", prob: -1 },
+      draw: { score: "", prob: -1 },
+      away: { score: "", prob: -1 },
+    };
+    for (let h = 0; h <= matrix.maxGoals; h++) {
+      for (let a = 0; a <= matrix.maxGoals; a++) {
+        const p = scoreProb(matrix, h, a);
+        const t = truth[sideOf(h, a)];
+        if (p > t.prob) {
+          t.prob = p;
+          t.score = `${h}:${a}`;
+        }
+      }
+    }
+
+    // Live, Schnappschuss und Simulator: 20 Ergebnisse plus Ausschnitt 0-5. Nie leer.
+    const live = scoresByOutcome(sheet.correctScore, toScoreGrid(matrix, 5));
+    for (const side of sides) {
+      check(() => assert.equal(live[side]?.score, truth[side].score, `${side} bei ${label}`));
+      check(() => assert.equal(live[side]?.prob, truth[side].prob, `${side}-Wahrscheinlichkeit bei ${label}`));
+    }
+    const top = sides.map((s) => live[s]!).reduce((x, y) => (y.prob > x.prob ? y : x));
+    check(() => assert.equal(top.score, argmaxCell(matrix), `Haeufigstes nicht unter den dreien bei ${label}`));
+
+    // Logzeile: zehn Ergebnisse, kein Ausschnitt. Was da ist, stimmt; was fehlt, bleibt leer.
+    const logged = scoresByOutcome(sheet.correctScore.slice(0, 10), []);
+    for (const side of sides) {
+      if (logged[side] === null) leftEmpty++;
+      else check(() => assert.equal(logged[side]!.score, truth[side].score, `Logzeile ${side} bei ${label}`));
+    }
+  }
+  // Sonst prueft der Logzeilen-Teil nur den Fall, in dem nichts fehlt.
+  check(() => assert.ok(leftEmpty > 0, "in 200 Faellen fehlte nie ein Ausgang in den Top 10 -- Test zu zahm"));
+
+  // Der Fall, fuer den es die Zeile gibt: Heimsieg ist der wahrscheinlichste Ausgang, das
+  // haeufigste Einzelergebnis trotzdem ein Remis -- und je Ausgang steht ein Sieg-Ergebnis.
+  const typical = buildDixonColesMatrix(2.1, 1.1);
+  applyOutcomeTemperature(typical, DEFAULT_OUTCOME_TEMPERATURE);
+  const masses = outcomeMasses(typical);
+  const [modeHome, modeAway] = argmaxCell(typical).split(":").map(Number);
+  const typicalScores = scoresByOutcome(buildPriceSheet(typical).correctScore, toScoreGrid(typical, 5));
+  check(() => assert.ok(masses.homeWinProb > masses.drawProb && masses.homeWinProb > masses.awayWinProb));
+  check(() => assert.equal(sideOf(modeHome, modeAway), "draw", "Haeufigstes ist hier ein Remis"));
+  check(() => assert.equal(typicalScores.home?.score, "2:1", "bester Heimsieg bei 2,1 : 1,1"));
+  check(() => assert.match(modeSuffix(typicalScores, argmaxCell(typical)), /^ · \d+%$/));
+  check(() => assert.equal(modeSuffix(typicalScores, "7:7"), "", "unbekanntes Ergebnis: keine Zahl"));
+
+  // Der echte Bestand: jede Logzeile und jeder Schnappschuss liefert das gespeicherte
+  // haeufigste Ergebnis als groesstes der drei, und ein Schnappschuss laesst keinen Ausgang leer.
+  const rows = readFileSync(join(process.cwd(), "data", "forward_log.jsonl"), "utf-8")
+    .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as LoggedRow)
+    .filter((r) => r.variants?.model?.topScores);
+  const shown = [
+    ...rows.map((r) => displayNumbersFromLog(r)),
+    ...readKickoffSnapshots().map((s) => s.numbers),
+  ];
+  for (const n of shown) {
+    const scores = scoresByOutcome(n.prices.correctScore, n.scoreGrid);
+    const present = sides.flatMap((s) => (scores[s] ? [scores[s]!] : []));
+    const largest = present.reduce((x, y) => (y.prob > x.prob ? y : x));
+    check(() => assert.equal(largest.score, n.mostLikelyScore, "gespeichertes Haeufigstes nicht das groesste"));
+    if (n.scoreGrid.length > 0) check(() => assert.equal(present.length, 3, "Schnappschuss mit leerem Ausgang"));
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1864,6 +1970,33 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
             `von ${out.matrix.maxGoals} Toren.`
         );
       }
+    }
+
+    // Gueltigkeitsgrenze von Dixon-Coles (VERBESSERUNGEN.md, Punkt 20): ab λ = 1/|ρ| = 6,67
+    // wird 0:1 bzw. 1:0 negativ. Gerechnet wird hier ohne Spielkontext, der die
+    // Torerwartung noch um bis zu e^0,15 (+16 %) heben darf -- deshalb die erste Zeile schon
+    // ab 5,74. Laut statt hart aus demselben Grund wie oben: die Ursache ist die
+    // eingefrorene Form.
+    const dcLimit = 1 / Math.abs(DEFAULT_RHO);
+    const llmHeadroom = Math.exp(DEFAULT_LLM_MAX_LOG_ADJUSTMENT);
+    for (const [side, lambda] of [
+      ["Heim", out.lambdaHome],
+      ["Auswaerts", out.lambdaAway],
+    ] as [string, number][]) {
+      if (lambda * llmHeadroom >= dcLimit) {
+        console.log(
+          `  ! ${pairing}: ${side}-Torerwartung ${lambda.toFixed(2)}, mit Spielkontext bis ` +
+            `${(lambda * llmHeadroom).toFixed(2)}. Ab ${dcLimit.toFixed(2)} wird Dixon-Coles ungueltig ` +
+            `(VERBESSERUNGEN.md Punkt 20).`
+        );
+      }
+    }
+    const negativeCells = [...out.matrix.cells].filter((c) => c < 0).length;
+    if (negativeCells > 0) {
+      console.log(
+        `  ! ${pairing}: ${negativeCells} Ergebniszelle(n) mit negativer Wahrscheinlichkeit -- ` +
+          `Dixon-Coles ungueltig, echter Fehler im Sinne von SAISONBETRIEB.md (VERBESSERUNGEN.md Punkt 20).`
+      );
     }
 
     // Zweite, unabhaengige Schranke: keine einzelne Ergebniszelle darf den Spieltag
