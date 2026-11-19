@@ -12,9 +12,9 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { loadEnvLocal } from "../data/loadEnv";
 import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
-import { loadAllMatches } from "../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
+import { livePipelineFor, liveModelFor } from "../model/livePipeline";
+import { configHash } from "../model/pipelineConfig";
 import { computeXgForm } from "../model/xgForm";
 import { formatOdds } from "../model/priceSheet";
 import { cacheKey, readLlmCache } from "../llm/llmCache";
@@ -52,14 +52,21 @@ if (matchday == null) {
 }
 
 const fixtures = allFixtures.filter((f) => f.matchday === matchday);
-const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
+// Die Pipeline, mit der die Seite diesen Spieltag rechnet (ab Spieltag 11 der Kandidat).
+const pipeline = livePipelineFor(matchday);
+const model = liveModelFor(pipeline);
 
 // Nur lesen, nie abrufen. Der LLM-Refresh kostet Geld und laeuft ausschliesslich auf
 // ausdruecklichen Knopfdruck (npm run refresh-llm).
 const llmCache = readLlmCache();
 const llmByFixture = llmCache && llmCache.matchday === matchday ? llmCache.contexts : {};
 
-console.log(`Spieltag ${matchday} -- faire Quoten, ohne Marge\n`);
+console.log(`Spieltag ${matchday} -- faire Quoten, ohne Marge`);
+console.log(
+  pipeline.variant === "kandidat-2027"
+    ? `Pipeline: Kandidat 2027/28, configHash ${configHash(pipeline.config)} (live ab Spieltag 11)\n`
+    : `Pipeline: eingefroren 2026, configHash ${configHash(pipeline.config)}\n`
+);
 
 for (const { homeTeam, awayTeam, date } of fixtures) {
   const matchDate = parseKickoff(date);
@@ -68,6 +75,7 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
   const awayForm = computeXgForm(awayTeam, matchDate);
 
   const out = predictPipeline({
+    ...pipeline.options,
     model,
     homeTeam,
     awayTeam,
@@ -86,6 +94,7 @@ for (const { homeTeam, awayTeam, date } of fixtures) {
   // es drei von vier: Bayern 6:0 statt 3:0, Union-Leipzig 0:2 statt 1:1, Leverkusen 50 %
   // statt 59 %.
   const noForm = predictPipeline({
+    ...pipeline.options,
     model,
     homeTeam,
     awayTeam,

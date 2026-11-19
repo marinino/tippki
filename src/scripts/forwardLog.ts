@@ -25,16 +25,12 @@ import { join } from "path";
 import { loadEnvLocal } from "../data/loadEnv";
 import { nextMatchdayOf, parseKickoff } from "../data/kickoff";
 import { loadAllMatches } from "../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
 import { computeXgForm } from "../model/xgForm";
 import { argmaxCell } from "../model/scoreMatrix";
-import {
-  DEFAULT_PIPELINE,
-  HASH_ANCHOR,
-  configHash,
-  hashAnchorDeviations,
-} from "../model/pipelineConfig";
+import { DEFAULT_PIPELINE, configHash, type PipelineConfig } from "../model/pipelineConfig";
+import { SWITCH_MATCHDAY, livePipelineFor, liveModelFor } from "../model/livePipeline";
+import { DEFAULT_MODEL } from "../llm/modelProfile";
 import { FORWARD_SEASON } from "../eval/splits";
 import { cacheKey, readLlmCache } from "../llm/llmCache";
 import { logDecision, logKey } from "../eval/forwardLogRules";
@@ -103,6 +99,17 @@ const llmCache = readLlmCache();
 const llmMatchesMatchday = llmCache !== null && llmCache.matchday === matchday;
 const llmByFixture = llmMatchesMatchday ? llmCache!.contexts : {};
 
+// Die Pipeline dieses Spieltags: bis Spieltag 10 die eingefrorene 2026, ab Spieltag 11 der
+// Kandidat 2027/28 (src/model/livePipeline.ts). Nach Spieltag, nicht nach Datum -- ein
+// Nachtrag fuer Spieltag 10 rechnet also auch nach der Umstellung mit 3cc0ddad.
+const pipeline = livePipelineFor(matchday);
+if (pipeline.variant === "kandidat-2027") {
+  console.log(
+    `Spieltag ${matchday} rechnet mit dem Kandidaten 2027/28 (live ab Spieltag ${SWITCH_MATCHDAY}, ` +
+      `SAISONBETRIEB.md "Umstellung ab Spieltag 11").\n`
+  );
+}
+
 // Das Modell aus dem Cache, nicht das gerade in der Umgebung eingestellte: geloggt wird,
 // womit der Spielkontext tatsaechlich geholt wurde. Steht LLM_MODEL beim Loggen auf etwas
 // anderes als beim Refresh, wuerde der Hash sonst ein Modell behaupten, das nie gelaufen
@@ -111,22 +118,26 @@ const effectiveModel = llmMatchesMatchday ? llmCache!.model : DEFAULT_PIPELINE.l
 // Dasselbe fuer Blockgroesse und Suchbudget. Caches von vor dem 2026-11-18 fuehren sie
 // nicht; dann gilt der Stand im Code, der damals derselbe war (3 und 14).
 const researchUsed = llmMatchesMatchday ? llmCache!.research : undefined;
-const effectiveConfig = {
-  ...DEFAULT_PIPELINE,
+const effectiveConfig: PipelineConfig = {
+  ...pipeline.config,
   llmModel: effectiveModel,
-  llmExtractionBlockSize: researchUsed?.extractionBlockSize ?? DEFAULT_PIPELINE.llmExtractionBlockSize,
-  llmMaxSearches: researchUsed?.maxSearches ?? DEFAULT_PIPELINE.llmMaxSearches,
+  llmExtractionBlockSize: researchUsed?.extractionBlockSize ?? pipeline.config.llmExtractionBlockSize,
+  llmMaxSearches: researchUsed?.maxSearches ?? pipeline.config.llmMaxSearches,
 };
 const hash = configHash(effectiveConfig);
 
-// Laut, wenn der Hash den eingefrorenen Stand verlaesst. Kein Abbruch: nach einer
-// dokumentierten Reparatur (SAISONBETRIEB.md, Sonderfall) ist genau das richtig. Aber es
-// soll niemand ueberrascht werden, dass das Log ab hier eine zweite Gruppe hat.
-const deviations = hashAnchorDeviations(effectiveConfig);
-if (deviations.length > 0) {
+// Laut, wenn der Hash nicht der eingefrorene Stand SEINER Pipeline ist (3cc0ddad bis
+// Spieltag 10, 59ddd123 ab Spieltag 11). Kein Abbruch: nach einer dokumentierten Reparatur
+// (SAISONBETRIEB.md, Sonderfall) ist genau das richtig. Aber es soll niemand ueberrascht
+// werden, dass das Log ab hier eine weitere Gruppe hat.
+if (hash !== pipeline.frozenHash) {
+  const frozenConfig: PipelineConfig = { ...pipeline.config, llmModel: DEFAULT_MODEL };
+  const changed = (Object.keys(frozenConfig) as (keyof PipelineConfig)[]).filter(
+    (k) => effectiveConfig[k] !== frozenConfig[k]
+  );
   console.warn(
-    `Hinweis: Konfiguration ${hash} weicht vom eingefrorenen Stand ab:\n` +
-      deviations.map(([k, v]) => `         ${k} = ${JSON.stringify(v)} (eingefroren: ${JSON.stringify(HASH_ANCHOR[k])})`).join("\n") +
+    `Hinweis: Konfiguration ${hash} ist nicht der eingefrorene Stand ${pipeline.frozenHash} (${pipeline.variant}):\n` +
+      changed.map((k) => `         ${k} = ${JSON.stringify(effectiveConfig[k])} (eingefroren: ${JSON.stringify(frozenConfig[k])})`).join("\n") +
       `\n         Das Log bekommt damit eine eigene Gruppe. Gewollt? Dann Grund in SAISONBETRIEB.md.\n`
   );
 }
@@ -163,7 +174,7 @@ if (!llmMatchesMatchday) {
   );
 }
 
-const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
+const model = liveModelFor(pipeline);
 
 let written = 0;
 let supplemented = 0;
@@ -215,6 +226,7 @@ for (const fixture of fixtures) {
   const homeForm = computeXgForm(fixture.homeTeam, kickoff);
   const awayForm = computeXgForm(fixture.awayTeam, kickoff);
   const shared = {
+    ...pipeline.options,
     model,
     homeTeam: fixture.homeTeam,
     awayTeam: fixture.awayTeam,

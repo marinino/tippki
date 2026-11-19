@@ -1,8 +1,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { loadAllMatches } from "../../../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel } from "../../../model/teamStrength";
 import { predictPipeline } from "../../../model/predictPipeline";
+import { livePipelineFor, liveModelFor } from "../../../model/livePipeline";
 import { argmaxCell, toScoreGrid } from "../../../model/scoreMatrix";
 import { computeSimulatedForm, type SimpleResult } from "../../../model/simulateForm";
 
@@ -96,11 +95,13 @@ export async function POST(request: Request) {
   const totalMatchdays = Math.max(...allFixtures.map((f) => f.matchday));
   const fixtures = allFixtures.filter((f) => f.matchday === matchday);
 
-  const matches = loadAllMatches();
-  const model = buildLeagueModel(matches, PRODUCTION_MODEL_OPTIONS);
+  // Dieselbe Pipeline wie die Tipps-Seite fuer diesen Spieltag (ab Spieltag 11 der Kandidat).
+  const pipeline = livePipelineFor(matchday);
+  const model = liveModelFor(pipeline);
 
   const predictions = fixtures.map(({ homeTeam, awayTeam, date }) => {
     const out = predictPipeline({
+      ...pipeline.options,
       model,
       homeTeam,
       awayTeam,

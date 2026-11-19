@@ -3,8 +3,8 @@ import { join } from "path";
 import { isAdminRequest } from "../../../data/adminAuth";
 import { isReadOnlyDeployment } from "../../../data/deployment";
 import { nextMatchdayOf, parseKickoff } from "../../../data/kickoff";
-import { loadAllMatches } from "../../../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel, type LeagueModel } from "../../../model/teamStrength";
+import type { LeagueModel } from "../../../model/teamStrength";
+import { livePipelineFor, liveModelFor } from "../../../model/livePipeline";
 import { readLlmCache } from "../../../llm/llmCache";
 import { FORWARD_SEASON } from "../../../eval/splits";
 import {
@@ -74,8 +74,11 @@ export async function GET(request: Request) {
   const now = new Date();
   const snapshots = readKickoffSnapshots();
   const logRows = readForwardLog();
+  // Ab Spieltag 11 rechnet der Kandidat 2027/28 (src/model/livePipeline.ts). Die Route zeigt
+  // immer genau einen Spieltag, also genau eine Pipeline.
+  const pipeline = livePipelineFor(selectedMatchday ?? 0);
   let model: LeagueModel | null = null;
-  const liveModel = () => (model ??= buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS));
+  const liveModel = () => (model ??= liveModelFor(pipeline));
 
   const predictions = fixtures.map((fixture): Prediction => {
     const { homeTeam, awayTeam, date } = fixture;
@@ -102,7 +105,11 @@ export async function GET(request: Request) {
       case "fehlt":
         return { ...head, source: { kind: "fehlt" } };
       case "live":
-        return { ...head, ...liveDisplayNumbers(liveModel(), fixture, cacheForMatchday), source: { kind: "live" } };
+        return {
+          ...head,
+          ...liveDisplayNumbers(liveModel(), fixture, cacheForMatchday, pipeline.options),
+          source: { kind: "live" },
+        };
     }
   });
 

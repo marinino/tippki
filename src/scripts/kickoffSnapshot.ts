@@ -16,9 +16,9 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { parseKickoff } from "../data/kickoff";
-import { loadAllMatches } from "../data/loadMatches";
-import { PRODUCTION_MODEL_OPTIONS, buildLeagueModel, type LeagueModel } from "../model/teamStrength";
+import type { LeagueModel } from "../model/teamStrength";
 import { configHash } from "../model/pipelineConfig";
+import { livePipelineFor, liveModelFor, type LiveVariant } from "../model/livePipeline";
 import { FORWARD_SEASON } from "../eval/splits";
 import { readLlmCache } from "../llm/llmCache";
 import { liveDisplayNumbers } from "../data/displayPredictions";
@@ -65,16 +65,17 @@ if (due.length === 0) {
 }
 
 // Erst nach der Pruefung: ein Fit kostet wenig, aber an 95 von 100 Ticks gar nichts zu
-// fitten ist noch billiger.
-const model: LeagueModel = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
+// fitten ist noch billiger. Je Partie die Pipeline ihres Spieltags (ab Spieltag 11 der
+// Kandidat, src/model/livePipeline.ts) -- dieselbe, mit der die Seite in diesem Moment
+// rechnet, und ihr Hash ohne Spielkontext-Felder, wie bisher.
+const models = new Map<LiveVariant, LeagueModel>();
 const llmCache = readLlmCache();
-// Derselbe Hash wie in der Route-Anzeige: die Voreinstellung. Der Schnappschuss haelt fest,
-// was die Seite zeigt, und die rechnet mit DEFAULT_PIPELINE.
-const hash = configHash();
 
 for (const f of due) {
+  const pipeline = livePipelineFor(f.matchday);
+  if (!models.has(pipeline.variant)) models.set(pipeline.variant, liveModelFor(pipeline));
   const cacheForMatchday = llmCache && llmCache.matchday === f.matchday ? llmCache : null;
-  const numbers = liveDisplayNumbers(model, f, cacheForMatchday);
+  const numbers = liveDisplayNumbers(models.get(pipeline.variant)!, f, cacheForMatchday, pipeline.options);
   appendKickoffSnapshot({
     frozenAt: now.toISOString(),
     season: FORWARD_SEASON,
@@ -82,7 +83,7 @@ for (const f of due) {
     homeTeam: f.homeTeam,
     awayTeam: f.awayTeam,
     kickoff: f.date,
-    configHash: hash,
+    configHash: configHash(pipeline.config),
     numbers,
   });
   const minutes = Math.round((parseKickoff(f.date).getTime() - now.getTime()) / 60000);

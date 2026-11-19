@@ -32,10 +32,14 @@ import {
   toUnderstatName,
   type XgMatch,
 } from "../data/fotmobXg";
+import { SWITCH_MATCHDAY, livePipelineFor, liveModelFor } from "../model/livePipeline";
+import { baseLambdas } from "../model/predictMatch";
 import {
   DEFAULT_PIPELINE,
   FROZEN_CONFIG_HASH,
   HASH_ANCHOR,
+  KANDIDAT_CONFIG_HASH,
+  KANDIDAT_PIPELINE,
   MODEL_LOGIC_VERSION,
   canonicalUserPrompt,
   configHash,
@@ -1903,19 +1907,22 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
   const fixtures: { homeTeam: string; awayTeam: string; date: string; matchday: number }[] =
     JSON.parse(readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8"));
 
-  const model = buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS);
-
-  // Nichtkonvergenz wirft inzwischen in fitLeagueModel; hier steht es trotzdem noch
-  // einmal ausdruecklich, weil ein halbfertiger Fit die eine Ursache ist, die alle
-  // folgenden Zahlen gleichzeitig verdirbt.
-  check(() => assert.ok(model.diagnostics?.converged, "Produktiver Fit konvergiert"));
-
   // Dieselbe Auswahl wie in der Produktion: der Abschnitt laeuft in der Nachbereitung auf
   // einem Runner in UTC, und new Date() laese die zonenlosen Anstosszeiten dort zwei
   // Stunden daneben.
   const nextMatchday = nextMatchdayOf(fixtures);
 
   if (nextMatchday == null) return;
+
+  // Gerechnet mit der Pipeline, die diesen Spieltag live rechnet (ab Spieltag 11 der
+  // Kandidat, src/model/livePipeline.ts) -- geprueft wird das Produkt, das dasteht.
+  const pipeline = livePipelineFor(nextMatchday);
+  const model = liveModelFor(pipeline);
+
+  // Nichtkonvergenz wirft inzwischen in fitLeagueModel; hier steht es trotzdem noch
+  // einmal ausdruecklich, weil ein halbfertiger Fit die eine Ursache ist, die alle
+  // folgenden Zahlen gleichzeitig verdirbt.
+  check(() => assert.ok(model.diagnostics?.converged, "Produktiver Fit konvergiert"));
 
   // Die Schranken gelten fuer die BASIS-Torerwartung, also attack/defense aus dem Fit ohne
   // Formkurve. Dort sitzen die Fehler, fuer die dieser Abschnitt gebaut ist (kaputter Fit,
@@ -1953,8 +1960,8 @@ section("Torerwartungen des naechsten Spieltags sind plausibel", () => {
     const matchDate = parseKickoff(fixture.date);
     const homeForm = computeXgForm(fixture.homeTeam, matchDate);
     const awayForm = computeXgForm(fixture.awayTeam, matchDate);
-    const base = predictPipeline({ model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam });
-    const out = predictPipeline({ model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam, homeForm, awayForm });
+    const base = predictPipeline({ ...pipeline.options, model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam });
+    const out = predictPipeline({ ...pipeline.options, model, homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam, homeForm, awayForm });
 
     const pairing = `${fixture.homeTeam} vs ${fixture.awayTeam}`;
     for (const [side, baseLambda, form, lambda] of [
@@ -2563,7 +2570,8 @@ section("Vorhersage bei Anpfiff eingefroren", () => {
     readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
   );
   const sample = realFixtures[realFixtures.length - 1];
-  const live = liveDisplayNumbers(buildLeagueModel(loadAllMatches(), PRODUCTION_MODEL_OPTIONS), sample, null);
+  const samplePipeline = livePipelineFor(sample.matchday);
+  const live = liveDisplayNumbers(liveModelFor(samplePipeline), sample, null, samplePipeline.options);
   check(() => assert.deepEqual(JSON.parse(JSON.stringify(live)), live, "Schnappschuss uebersteht JSON bitgleich"));
 
   // Der Rueckfall aufs Log rechnet nichts neu: 1X2 und Torerwartung sind die geloggten
@@ -2971,6 +2979,9 @@ section("Konfigurations-Hash", () => {
     ["llmExtractionBlockSize", { llmExtractionBlockSize: DEFAULT_PIPELINE.llmExtractionBlockSize + 1 }],
     ["llmMaxSearches", { llmMaxSearches: DEFAULT_PIPELINE.llmMaxSearches + 1 }],
     ["llmMappingCoverageFingerprint", { llmMappingCoverageFingerprint: "anders03" }],
+    ["fitGoalShare", { fitGoalShare: 0.5 }],
+    ["formApplication", { formApplication: "ratio" }],
+    ["temperatureReference", { temperatureReference: "baseRate" }],
   ];
 
   const base = configHash(DEFAULT_PIPELINE);
@@ -3002,6 +3013,27 @@ section("Konfigurations-Hash", () => {
       configHash(frozenDefaults),
       FROZEN_CONFIG_HASH,
       "der configHash hat den eingefrorenen Stand verlassen -- gewollt? Dann SAISONBETRIEB.md, Sonderfall"
+    )
+  );
+
+  // Der Kandidat ab Spieltag 11 hat seinen eigenen eingefrorenen Hash, und seine Pipeline
+  // beschreibt genau das, was candidate.ts rechnet -- sonst beschriebe der Hash eine
+  // Konfiguration, die so gar nicht laeuft.
+  const kandidatDefaults = { ...KANDIDAT_PIPELINE, llmModel: DEFAULT_MODEL };
+  check(() =>
+    assert.equal(configHash(kandidatDefaults), KANDIDAT_CONFIG_HASH, "der Kandidaten-Hash hat den eingefrorenen Stand verlassen")
+  );
+  check(() => assert.equal(KANDIDAT_PIPELINE.rho, CANDIDATE_2027.rho));
+  check(() => assert.equal(KANDIDAT_PIPELINE.outcomeTemperature, CANDIDATE_2027.outcomeTemperature));
+  check(() => assert.equal(KANDIDAT_PIPELINE.xgFormWeight, CANDIDATE_2027.formWeight));
+  check(() => assert.equal(KANDIDAT_PIPELINE.halfLifeDays, CANDIDATE_2027.halfLifeDays));
+  check(() => assert.equal(KANDIDAT_PIPELINE.ridgePseudoMatches, CANDIDATE_2027.ridgePseudoMatches));
+  check(() => assert.equal(KANDIDAT_PIPELINE.fitGoalShare, CANDIDATE_2027.xgBlendWeight));
+  check(() =>
+    assert.deepEqual(
+      hashAnchorDeviations(kandidatDefaults).map(([k]) => k).sort(),
+      ["fitGoalShare", "formApplication", "temperatureReference"],
+      "der Kandidat weicht in anderen verankerten Feldern ab als beschlossen"
     )
   );
 
@@ -3102,26 +3134,65 @@ section("Kandidat 2027/28 festgeschrieben", () => {
     );
   }
 
-  // 2. Der Kandidat ist NICHT im Vorhersageweg. Er gehoert in die Auswertung, bis der
-  //    Messplan entschieden hat. Geprueft werden die Dateien, die eine angezeigte oder
-  //    protokollierte Zahl erzeugen.
-  const productionPath = [
-    "src/model/predictPipeline.ts",
-    "src/model/predictMatch.ts",
+  // 2. Der Kandidat rechnet live genau ab Spieltag 11 (src/model/livePipeline.ts,
+  //    SAISONBETRIEB.md "Umstellung ab Spieltag 11"). Bis Spieltag 10 bleibt alles bei der
+  //    eingefrorenen Pipeline 2026 -- dort steht das Basismodell von Spieltag 10 schon im Log.
+  check(() => assert.equal(SWITCH_MATCHDAY, 11, "die Umstellung ist fuer Spieltag 11 beschlossen"));
+  for (const md of [1, 9, 10]) {
+    check(() => assert.equal(livePipelineFor(md).variant, "eingefroren-2026", `Spieltag ${md} rechnet nicht eingefroren`));
+  }
+  for (const md of [11, 12, 34]) {
+    check(() => assert.equal(livePipelineFor(md).variant, "kandidat-2027", `Spieltag ${md} rechnet nicht mit dem Kandidaten`));
+  }
+  check(() => assert.equal(livePipelineFor(10).modelOptions, PRODUCTION_MODEL_OPTIONS, "Spieltag 10 fittet nicht wie eingefroren"));
+  check(() => assert.deepEqual(livePipelineFor(10).options, {}, "Spieltag 10 bekommt Optionen ueber die Voreinstellung hinaus"));
+  check(() =>
+    assert.equal(configHash({ ...livePipelineFor(10).config, llmModel: DEFAULT_MODEL }), FROZEN_CONFIG_HASH, "Spieltag 10 nicht unter 3cc0ddad")
+  );
+  check(() =>
+    assert.equal(configHash({ ...livePipelineFor(11).config, llmModel: DEFAULT_MODEL }), KANDIDAT_CONFIG_HASH, "Spieltag 11 nicht unter dem Kandidaten-Hash")
+  );
+  check(() => assert.notEqual(KANDIDAT_CONFIG_HASH, FROZEN_CONFIG_HASH, "beide Pipelines unter einem Hash"));
+
+  // Jeder Live-Einstieg holt seine Pipeline aus livePipelineFor und baut keinen eigenen Fit
+  // daran vorbei. Sonst rechnete etwa die Seite Spieltag 11 anders, als das Log ihn aufschreibt.
+  const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  for (const file of [
     "src/scripts/forwardLog.ts",
     "src/scripts/predict.ts",
     "src/scripts/kickoffSnapshot.ts",
-    "src/data/displayPredictions.ts",
     "src/app/api/predictions/route.ts",
-  ];
-  for (const file of productionPath) {
-    const source = readFileSync(join(process.cwd(), file), "utf-8");
-    check(() =>
-      assert.ok(
-        !/from\s+["'][^"']*\/candidate["']/.test(source) && !source.includes("candidateRunSpec"),
-        `${file} benutzt den Kandidaten -- der Freeze gilt bis zur Entscheidung im Sommer 2027`
-      )
+    "src/app/api/simulate/route.ts",
+  ]) {
+    const source = withoutComments(readFileSync(join(process.cwd(), file), "utf-8"));
+    check(() => assert.ok(source.includes("livePipelineFor("), `${file} holt seine Pipeline nicht aus livePipelineFor`));
+    check(() => assert.ok(!source.includes("PRODUCTION_MODEL_OPTIONS"), `${file} baut den Fit an livePipeline vorbei`));
+  }
+
+  // Live rechnet der Kandidat Zelle fuer Zelle wie candidateMatrix -- auf echten Daten, den
+  // Partien von Spieltag 11, mit seinem Fit und der Grundrate vor der Saison.
+  {
+    const fixtures: { homeTeam: string; awayTeam: string; date: string; matchday: number }[] = JSON.parse(
+      readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
     );
+    const live = livePipelineFor(11);
+    const model = liveModelFor(live);
+    const baseRate = outcomeBaseRate(loadAllMatches().filter((m) => m.season < "2026"));
+    check(() => assert.deepEqual(live.options.temperatureReference, baseRate, "Live-Grundrate ist nicht die Grundrate vor der Saison"));
+    for (const f of fixtures.filter((x) => x.matchday === 11)) {
+      const date = parseKickoff(f.date);
+      const homeForm = computeXgForm(f.homeTeam, date);
+      const awayForm = computeXgForm(f.awayTeam, date);
+      const out = predictPipeline({ ...live.options, model, homeTeam: f.homeTeam, awayTeam: f.awayTeam, homeForm, awayForm });
+      const base = baseLambdas(model, f.homeTeam, f.awayTeam);
+      const direct = candidateMatrix(base.lambdaHome, base.lambdaAway, homeForm, awayForm, baseRate);
+      let maxDev = 0;
+      for (let i = 0; i < direct.cells.length; i++) maxDev = Math.max(maxDev, Math.abs(direct.cells[i] - out.matrix.cells[i]));
+      check(() => assert.equal(maxDev, 0, `${f.homeTeam} vs ${f.awayTeam}: live und candidateMatrix rechnen verschieden (${maxDev})`));
+      check(() =>
+        closeTo(out.formLambdaHome + out.formLambdaAway, base.lambdaHome + base.lambdaAway, 1e-12, `${f.homeTeam} vs ${f.awayTeam}: Form veraendert die Torsumme`)
+      );
+    }
   }
 
   // 3. Die Temperatur zur Bezugsverteilung.

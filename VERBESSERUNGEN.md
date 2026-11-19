@@ -368,8 +368,9 @@ Fall vorher ein, ist er ein echter Fehler im Sinne von SAISONBETRIEB.md: dann be
 entscheiden, ob repariert wird (neuer Hash, geteiltes Log) oder die winzige Abweichung bis
 Saisonende getragen wird.
 
-**Stand 19.11.:** Mit dem Kandidaten 2027/28 ist die Grenze außer Reichweite. Seine Form lässt die
-Summe der Torerwartungen stehen, keine Seite kann also über die Basis-Summe hinaus. Bayern–Köln
+**Stand 19.11.:** Mit dem Kandidaten 2027/28, der ab Spieltag 11 live rechnet, ist die Grenze
+außer Reichweite. Seine Form lässt die Summe der Torerwartungen stehen, keine Seite kann also über
+die Basis-Summe hinaus. Bayern–Köln
 bliebe unter der Summe der beiden Basis-Torerwartungen, statt von 3,61 auf 6,01 zu steigen.
 Absichern sollte man τ trotzdem, wenn ρ einmal angefasst wird (Punkt 22).
 
@@ -392,8 +393,8 @@ Fußball, und so nimmt sie dem Heimsieg im Schnitt 1,5 Prozentpunkte und gibt si
 `applyOutcomeTemperatureTowards` zieht stattdessen zur Grundrate der Trainingsspiele,
 p^(1/T) · q^(1−1/T). Mit gleichverteiltem q ist das die alte Temperatur, selfCheck prüft das.
 
-Teil des Kandidaten 2027/28 (MESSLAUF.md, Messplan 2), dort T = 1,25. Produktiv unverändert bis
-zur Entscheidung im Sommer.
+Teil des Kandidaten 2027/28 (MESSLAUF.md, Messplan 2), dort T = 1,25. Live ab Spieltag 11
+(SAISONBETRIEB.md, „Umstellung ab Spieltag 11“). Bis Spieltag 10 bleibt die alte Temperatur.
 
 ### 22. Dixon-Coles überschätzt das 0:0, und das richtige ρ hängt an der Liga [offen]
 

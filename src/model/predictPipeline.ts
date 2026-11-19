@@ -13,20 +13,28 @@
 // recherchiertem Spielkontext.
 //
 // Feste Reihenfolge:
-//   1. Modell-Lambdas aus den gefitteten Staerken, multipliziert mit dem Formexponenten
+//   1. Modell-Lambdas aus den gefitteten Staerken, mit der Formkurve verschoben -- je nach
+//      formApplication auf die eigene Torerwartung (eingefrorene Pipeline 2026) oder nur auf
+//      das Kraefteverhaeltnis bei fester Summe (Kandidat 2027/28)
 //   2. geklammerte Korrektur aus dem recherchierten Spielkontext
 //   3. Dixon-Coles-Matrix bauen und normalisieren
-//   4. Kalibrierungstemperatur auf die Matrix
+//   4. Kalibrierungstemperatur auf die Matrix, zur Gleichverteilung oder zur Grundrate
 //   5. Preisblatt ueber alle Maerkte daraus ableiten
+//
+// Welche Variante live rechnet, entscheidet livePipeline.ts je Spieltag. Ohne die Felder
+// formApplication, formWeight und temperatureReference laeuft Operation fuer Operation die
+// eingefrorene Pipeline 2026.
 
 import type { LeagueModel } from "./teamStrength";
 import type { OutcomeProbs } from "../eval/metrics";
 import { XG_FORM_WEIGHT } from "./xgForm";
 import { baseLambdas } from "./predictMatch";
+import { ratioFormLambdas } from "./candidate";
 import { buildPriceSheet, type PriceSheet, type PriceSheetOptions } from "./priceSheet";
 import {
   DEFAULT_OUTCOME_TEMPERATURE,
   applyOutcomeTemperature,
+  applyOutcomeTemperatureTowards,
   buildDixonColesMatrix,
   expectedGoals,
   outcomeMasses,
@@ -55,6 +63,13 @@ export interface PipelineInput {
   outcomeTemperature?: number;
   matrixOptions?: MatrixOptions;
   priceSheetOptions?: PriceSheetOptions;
+  // Seit 2026-11-19 fuer den Kandidaten, live ab Spieltag 11 (livePipeline.ts).
+  //   formApplication "ratio": die Form verschiebt nur log(λHeim / λGast), die Summe bleibt.
+  //   formWeight: Gewicht der Form, ohne Angabe XG_FORM_WEIGHT.
+  //   temperatureReference: Bezug der Temperatur; ohne Angabe die Gleichverteilung.
+  formApplication?: "own" | "ratio";
+  formWeight?: number;
+  temperatureReference?: OutcomeProbs | null;
 }
 
 export interface PipelineOutput {
@@ -78,8 +93,14 @@ export interface PipelineOutput {
 
 export function predictPipeline(input: PipelineInput): PipelineOutput {
   const base = baseLambdas(input.model, input.homeTeam, input.awayTeam);
-  const formLambdaHome = base.lambdaHome * Math.exp(XG_FORM_WEIGHT * (input.homeForm ?? 0));
-  const formLambdaAway = base.lambdaAway * Math.exp(XG_FORM_WEIGHT * (input.awayForm ?? 0));
+  const formWeight = input.formWeight ?? XG_FORM_WEIGHT;
+  const [formLambdaHome, formLambdaAway] =
+    input.formApplication === "ratio"
+      ? ratioFormLambdas(base.lambdaHome, base.lambdaAway, input.homeForm ?? 0, input.awayForm ?? 0, formWeight)
+      : [
+          base.lambdaHome * Math.exp(formWeight * (input.homeForm ?? 0)),
+          base.lambdaAway * Math.exp(formWeight * (input.awayForm ?? 0)),
+        ];
 
   let llmAdjustment: LlmAdjustment | null = null;
   let lambdaHome = formLambdaHome;
@@ -99,7 +120,12 @@ export function predictPipeline(input: PipelineInput): PipelineOutput {
   const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway, input.matrixOptions);
   // Schritt 4: Kalibrierungstemperatur. Auf der Matrix, damit das Preisblatt darunter
   // konsistent bleibt -- Begruendung in scoreMatrix.ts.
-  applyOutcomeTemperature(matrix, input.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE);
+  const temperature = input.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE;
+  if (input.temperatureReference) {
+    applyOutcomeTemperatureTowards(matrix, temperature, input.temperatureReference);
+  } else {
+    applyOutcomeTemperature(matrix, temperature);
+  }
   const expected = expectedGoals(matrix);
 
   return {

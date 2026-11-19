@@ -1,8 +1,10 @@
 // Der Kandidat fuer die Saison 2027/28, festgeschrieben am 2026-11-19.
 //
-// Produktiv rechnet weiter die eingefrorene Pipeline (configHash 3cc0ddad, SAISONBETRIEB.md).
-// Diese Datei beschreibt die EINE Alternative, die im Sommer 2027 gegen sie antritt: einmal,
-// auf Spielen, die beim Festschreiben noch niemand gesehen hat (MESSLAUF.md, "Messplan 2").
+// Diese Datei beschreibt die EINE Alternative zur eingefrorenen Pipeline 2026 (configHash
+// 3cc0ddad), die im Sommer 2027 gegen sie antritt: einmal, auf Spielen, die beim
+// Festschreiben noch niemand gesehen hat (MESSLAUF.md, "Messplan 2"). Seit einem Beschluss
+// vom selben Tag rechnet sie ab Spieltag 11 auch live (livePipeline.ts, configHash 59ddd123,
+// SAISONBETRIEB.md "Umstellung ab Spieltag 11"). Am Messplan aendert das nichts.
 //
 // Festschreiben heisst: an dieser Datei aendert sich nichts mehr. selfCheck haelt einen
 // Abdruck ihres Verhaltens fest (CANDIDATE_FINGERPRINT) und schlaegt bei jeder Aenderung an.

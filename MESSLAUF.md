@@ -215,7 +215,7 @@ Der Abstand zum Markt sinkt im 1X2-LogLoss von 0,0123 auf 0,0060 und bei Über/U
   lockerer.
 - **Entscheidung:**
   - Besteht K1, wird der Kandidat zur Saison 2027/28 produktiv, mit neuem configHash und neuem
-    Freeze.
+    Freeze. Seit Spieltag 11 rechnet er ohnehin live (Nachtrag unten), dann bleibt er.
   - Besteht nur B1, wird die Klammer produktiv.
   - Sonst bleibt die Produktion. Das heißt „kein Nachweis“, nicht „kein Effekt“.
 - **Berichtet, ohne Entscheidungskraft:** RPS, 1X2-LogLoss, Über/Unter, Handicap, der Abstand
@@ -230,10 +230,18 @@ Der Abstand zum Markt sinkt im 1X2-LogLoss von 0,0123 auf 0,0060 und bei Über/U
   (2020 und 2021 als Test, 2022 ab November als Vorwärts) und entscheidet nichts.
 - `npm run kandidat` und `--temperatur-scan` zeigen, wie der Kandidat auf Validation
   zustande kam.
-- Der Kandidat ist nicht im Vorhersageweg. selfCheck prüft die Dateien, die eine angezeigte
-  oder protokollierte Zahl erzeugen.
-- Die produktiven Vorhersagen von Spieltag 10 sind vor und nach der Änderung byte-gleich
-  (`npm run predict`), der configHash bleibt `3cc0ddad`.
+- Beim Festschreiben lag der Kandidat nicht im Vorhersageweg. Die Vorhersagen von Spieltag 10
+  waren vor und nach der Änderung byte-gleich (`npm run predict`), der configHash blieb
+  `3cc0ddad`.
+
+**Nachtrag 19.11.2026, später am Tag:**
+
+- Der Kandidat rechnet ab Spieltag 11 live (SAISONBETRIEB.md, „Umstellung ab Spieltag 11“,
+  `src/model/livePipeline.ts`, Hash `59ddd123`).
+- An diesem Messplan ändert das nichts: Kandidat und eingefrorene Pipeline 2026 werden beide
+  walk-forward nachgerechnet, unabhängig davon, welche live lief. Regel, Kennzahlen, Daten und
+  Sperren bleiben, wie oben festgelegt.
+- Der Kandidat selbst ist unverändert, der Abdruck bleibt `f89c6088`.
 
 ## Was nicht dazugehört
 

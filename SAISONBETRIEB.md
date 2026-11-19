@@ -447,6 +447,16 @@ sondern mechanisch geprüft — [selfCheck.ts](src/scripts/selfCheck.ts), Abschn
 | Suchbudget | `anthropicClient.ts` | `MAX_SEARCHES` = 14 |
 | Modelllogik | `pipelineConfig.ts` | `MODEL_LOGIC_VERSION` = 0 |
 
+**Ab Spieltag 11 rechnet der Kandidat 2027/28** (siehe „Umstellung ab Spieltag 11“ weiter
+unten). Für ihn gelten die Werte aus `CANDIDATE_2027` in `candidate.ts`:
+
+- Fit-Ziel halb Tore, halb xG;
+- Form nur aufs Kräfteverhältnis;
+- T = 1,25 zur Grundrate.
+
+Eingefroren ist das unter `KANDIDAT_CONFIG_HASH` = `59ddd123`. Alles andere in der Tabelle gilt
+für beide Pipelines, und beide Hashes nagelt selfCheck fest.
+
 Die letzten drei Zeilen und ein breiterer Abdruck der Faktenzuordnung stehen seit dem
 18.11.2026 im Hash, und zwar **verankert**: sie gehen nur ein, wenn sie vom Stand beim
 Einfrieren abweichen (`HASH_ANCHOR` in [pipelineConfig.ts](src/model/pipelineConfig.ts)).
@@ -770,6 +780,54 @@ besseres Modell und wäre sonst nicht zu bemerken).
 
 ---
 
+### Vorgefallen: Umstellung auf den Kandidaten ab Spieltag 11, beschlossen am 19.11.2026
+
+Kein Fehler, sondern eine bewusste Ausnahme vom Freeze, auf Wunsch des Betreibers.
+
+**Was sich ändert:**
+- Ab Spieltag 11 rechnen Seite, Vorwärts-Log, Anpfiff-Schnappschuss, `npm run predict` und die
+  Simulation mit dem Kandidaten 2027/28 (`src/model/candidate.ts`, MESSLAUF.md Messplan 2).
+- Seine Bestandteile:
+  - Fit auf 50 % Tore und 50 % xG;
+  - Form nur auf das Kräfteverhältnis, die Torsumme bleibt;
+  - Temperatur T = 1,25 zur Grundrate der Spiele vor der Saison.
+- Neuer Hash `59ddd123` (`KANDIDAT_CONFIG_HASH`). Die eingefrorene Pipeline behält `3cc0ddad`.
+- Geschaltet wird nach Spieltag, nicht nach Datum (`src/model/livePipeline.ts`). Spieltag 10
+  bleibt deshalb ganz beim alten Stand, auch Nachträge und verlegte Partien. Sein Basismodell
+  wurde am 18.11. unter `3cc0ddad` protokolliert. Wann der Code auf `main` landet, ist damit
+  gleichgültig, solange es vor dem Basis-Log für Spieltag 11 geschieht, also vor Mittwoch,
+  25.11.2026, 20:30.
+
+**Was sich nicht ändert:**
+- Der LLM-Layer bleibt eingefroren: Gain, Klammer, Prompt, Faktenzuordnung, Modell. Ab
+  Spieltag 11 legt er sich auf die Torerwartungen des Kandidaten.
+- Messplan 2 vergleicht weiter den Kandidaten mit der eingefrorenen Pipeline 2026. Beide werden
+  walk-forward nachgerechnet, egal welche live lief.
+
+**Warum das vertretbar ist:**
+- Die Begründung kommt ohne ein Ergebnis dieser Saison aus: Bundesliga-Validation und vier
+  weitere Ligen (MESSLAUF.md, „Mehrliga-Messbasis“). Dort gewinnt der Kandidat in allen fünf
+  Ligen beim exakten Ergebnis und in vier bei der Torsumme.
+- Der Preis für das Vorwärts-Log ist klein. In der Gruppe `3cc0ddad` haben nur 7 Partien
+  Spielkontext, alle von Spieltag 4, weil die Spieltage 5 bis 9 ohne Recherche blieben. Dazu
+  kommt Spieltag 10.
+- Auch die gehen nicht verloren. Das Log speichert die recherchierten Fakten je Partie, und die
+  Umrechnung in Torerwartung ist eingefroren. „Kandidat mit Spielkontext“ lässt sich deshalb für
+  jede recherchierte Partie ehrlich nachrechnen.
+
+**Geprüft vor dem Merge:**
+- `npm test` ist grün, mit dem neuen Abschnitt „Kandidat 2027/28 festgeschrieben“.
+- Live rechnet der Kandidat Zelle für Zelle wie `candidateMatrix`.
+- Eine Kopie von `main` als Referenz und eine Prüfkopie des neuen Stands, die schreiben durfte:
+  - Seite und `npm run predict` sind für Spieltag 10 identisch mit `main`.
+  - Das Vorwärts-Log schreibt für Spieltag 10 nichts (alles unter `3cc0ddad` vorhanden) und für
+    Spieltag 11 neun Zeilen unter `59ddd123`.
+  - Der Anpfiff-Schnappschuss friert eine Partie von Spieltag 10 unter `3cc0ddad` ein, eine von
+    Spieltag 11 unter `59ddd123`. Ein zweiter Lauf schreibt nichts.
+
+**Im Log stehen ab da zwei Gruppen.** `forward-eval` wertet sie getrennt aus, wie nach jedem
+Schnitt. Nicht `--pool` benutzen.
+
 ## Am Saisonende
 
 `npm run forward-eval` über die volle Saison. Erwartungshaltung: die Zahl wird das
@@ -782,7 +840,8 @@ Danach, genau einmal: `npm run kandidat -- --bestaetigung` (MESSLAUF.md, Messpla
 - Der Lauf entscheidet, ob der am 19.11.2026 festgeschriebene Kandidat oder die Klammer B1 zur
   Saison 2027/28 produktiv wird.
 - Vorher verweigert das Skript, ebenso bei verändertem Kandidaten.
-- Der Kandidat liegt bis dahin nur in der Auswertung. An der Vorhersage dieser Saison ändert er
-  nichts, und der configHash bleibt `3cc0ddad`.
+- Seit Spieltag 11 rechnet der Kandidat live (siehe „Umstellung ab Spieltag 11“). Der Lauf
+  entscheidet deshalb, ob er 2027/28 bleibt. Fällt er durch, geht die Saison 2027/28 mit der
+  Klammer B1 oder der eingefrorenen Pipeline 2026 los.
 
 Erst dann werden die eingefrorenen Parameter wieder angefasst.

@@ -9,6 +9,7 @@
 import { parseKickoff } from "./kickoff";
 import type { LeagueModel } from "../model/teamStrength";
 import { predictPipeline } from "../model/predictPipeline";
+import type { LivePipelineOptions } from "../model/livePipeline";
 import { argmaxCell, toScoreGrid } from "../model/scoreMatrix";
 import { computeXgForm } from "../model/xgForm";
 import { priceOf, type PriceSheet } from "../model/priceSheet";
@@ -51,16 +52,21 @@ export interface DisplayFixture {
 
 // Live gerechnet: aktueller Fit, Form vor Anpfiff, Spielkontext aus dem Cache. Der Cache
 // muss bereits auf den Spieltag der Partie geprueft sein (sonst null uebergeben).
+//
+// model und options kommen aus livePipelineFor(spieltag) -- ab Spieltag 11 der Kandidat.
+// Ohne options rechnet die eingefrorene Pipeline 2026.
 export function liveDisplayNumbers(
   model: LeagueModel,
   fixture: DisplayFixture,
-  cacheForMatchday: LlmCacheFile | null
+  cacheForMatchday: LlmCacheFile | null,
+  options: LivePipelineOptions = {}
 ): DisplayNumbers {
   const { homeTeam, awayTeam, date } = fixture;
   const matchDate = parseKickoff(date);
   const cachedLlm = cacheForMatchday?.contexts[cacheKey(homeTeam, awayTeam)];
 
   const out = predictPipeline({
+    ...options,
     model,
     homeTeam,
     awayTeam,

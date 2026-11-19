@@ -35,8 +35,9 @@ import {
   DEFAULT_OUTCOME_TEMPERATURE,
   DEFAULT_RHO,
 } from "./scoreMatrix";
-import { PRODUCTION_MODEL_OPTIONS } from "./teamStrength";
+import { PRODUCTION_MODEL_OPTIONS, type LeagueModelOptions } from "./teamStrength";
 import { XG_FORM_WEIGHT, XG_FORM_WINDOW } from "./xgForm";
+import { CANDIDATE_2027, candidateModelOptions } from "./candidate";
 // FNV-1a, 32 Bit -- seit dem 2026-11-19 in eigenem Modul, unveraendert (siehe fnv1a.ts).
 import { fnv1a } from "./fnv1a";
 
@@ -97,6 +98,19 @@ export interface PipelineConfig {
   // Abdruck sah CATEGORY_SCALE fuer vier von fuenf Kategorien nicht, und auch nicht, wie
   // verschiedene Fakten gruppiert und gedaempft werden (VERBESSERUNGEN.md, Punkt 4 und 19).
   llmMappingCoverageFingerprint: string;
+
+  // --- Seit 2026-11-19, verankert: worin sich der Kandidat 2027/28 unterscheidet -----------
+  //
+  // Der Kandidat (candidate.ts) rechnet ab Spieltag 11 live (livePipeline.ts). Diese drei
+  // Felder beschreiben, was er anders macht als die eingefrorene Pipeline 2026; fuer die
+  // stehen sie auf dem Anker, und deren Hash bleibt bitgleich 3cc0ddad.
+  //   fitGoalShare: Anteil echter Tore am Fit-Ziel (1 = Tore, 0,5 = halb Tore, halb xG).
+  //   formApplication: "own" = Faktor auf die eigene Torerwartung, "ratio" = nur aufs
+  //     Kraefteverhaeltnis, die Summe bleibt.
+  //   temperatureReference: wohin die Temperatur zieht, Gleichverteilung oder Grundrate.
+  fitGoalShare: number;
+  formApplication: "own" | "ratio";
+  temperatureReference: "uniform" | "baseRate";
 }
 
 // Der Fingerabdruck deckt beide Haelften der Anweisung ab: den Systemprompt und die
@@ -267,6 +281,10 @@ export const HASH_ANCHOR = {
   llmExtractionBlockSize: 3,
   llmMaxSearches: 14,
   llmMappingCoverageFingerprint: "436d117b",
+  // Seit 2026-11-19: die Felder des Kandidaten, auf dem Stand der eingefrorenen Pipeline.
+  fitGoalShare: 1,
+  formApplication: "own",
+  temperatureReference: "uniform",
 } as const;
 
 type AnchoredField = keyof typeof HASH_ANCHOR;
@@ -281,6 +299,14 @@ export const FROZEN_CONFIG_HASH = "3cc0ddad";
 // derselbe wie ohne diese Felder.
 export function hashAnchorDeviations(config: PipelineConfig): [AnchoredField, number | string][] {
   return ANCHORED_FIELDS.filter((k) => config[k] !== HASH_ANCHOR[k]).map((k) => [k, config[k]]);
+}
+
+// Anteil echter Tore am Fit-Ziel, aus denselben Optionen, die der Fit bekommt.
+export function fitGoalShareOf(options: LeagueModelOptions): number {
+  const target = options.target ?? "goals";
+  if (target === "goals") return 1;
+  if (target === "xg") return 0;
+  return options.xgBlendWeight ?? 0.5;
 }
 
 // Exakt die aktuell produktiven Werte.
@@ -306,7 +332,32 @@ export const DEFAULT_PIPELINE: PipelineConfig = {
   llmExtractionBlockSize: EXTRACTION_BLOCK_SIZE,
   llmMaxSearches: MAX_SEARCHES,
   llmMappingCoverageFingerprint: llmMappingCoverageFingerprint(),
+  fitGoalShare: fitGoalShareOf(PRODUCTION_MODEL_OPTIONS),
+  formApplication: "own",
+  temperatureReference: "uniform",
 };
+
+// Der Kandidat 2027/28 als Pipeline, live ab Spieltag 11 (livePipeline.ts). Jeder Wert, in
+// dem er sich unterscheidet, kommt aus CANDIDATE_2027 -- dieselbe Quelle wie sein Fit und
+// seine Matrix, sonst beschriebe der Hash eine Konfiguration, die so gar nicht laeuft (der
+// Fehler vom 10.09.). LLM-Layer, Prompt und Faktenzuordnung sind dieselben wie oben.
+export const KANDIDAT_PIPELINE: PipelineConfig = {
+  ...DEFAULT_PIPELINE,
+  ridgePseudoMatches: CANDIDATE_2027.ridgePseudoMatches,
+  halfLifeDays: CANDIDATE_2027.halfLifeDays,
+  xgFormWeight: CANDIDATE_2027.formWeight,
+  rho: CANDIDATE_2027.rho,
+  outcomeTemperature: CANDIDATE_2027.outcomeTemperature,
+  fitGoalShare: fitGoalShareOf(candidateModelOptions()),
+  formApplication: "ratio",
+  temperatureReference: "baseRate",
+};
+
+// Der Hash, unter dem der Kandidat ab Spieltag 11 live laeuft. selfCheck verlangt, dass
+// KANDIDAT_PIPELINE ihn trifft, und forward-log meldet sich laut, wenn eine Zeile ab
+// Spieltag 11 unter einem anderen Hash entstuende. Nachziehen nur nach SAISONBETRIEB.md,
+// Sonderfall -- wie FROZEN_CONFIG_HASH.
+export const KANDIDAT_CONFIG_HASH = "59ddd123";
 
 export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
   const deviations = hashAnchorDeviations(config);
