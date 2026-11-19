@@ -26,6 +26,7 @@ import { baseLambdas } from "../model/predictMatch";
 import {
   DEFAULT_OUTCOME_TEMPERATURE,
   applyOutcomeTemperature,
+  applyOutcomeTemperatureTowards,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
   outcomeMasses,
@@ -34,6 +35,7 @@ import {
   type ScoreMatrix,
 } from "../model/scoreMatrix";
 import { XG_FORM_WEIGHT, computeXgForm, computeXgFormResidual } from "../model/xgForm";
+import { CANDIDATE_2027, ratioFormLambdas, type CandidateConfig } from "../model/candidate";
 import {
   benchmarkQuote,
   DEFAULT_BENCHMARK,
@@ -328,6 +330,28 @@ export interface RunSpec {
   drawBoost?: number;
   // Kalibrierungstemperatur auf den 1X2-Massen. Ohne Angabe der produktive Wert.
   outcomeTemperature?: number;
+  // Seit 2026-11-19 fuer den Kandidaten 2027/28 (src/model/candidate.ts). Ohne Angabe laeuft
+  // exakt der produktive Rechenweg, Operation fuer Operation.
+  //   formApplication: "own" (produktiv) multipliziert die eigene Torerwartung mit
+  //     exp(Gewicht * Form); "ratio" verschiebt nur log(λHeim / λGast), die Summe bleibt.
+  //   temperatureReference: "uniform" (produktiv) zieht zur Gleichverteilung, "baseRate"
+  //     zur 1X2-Grundrate der Spiele vor der Saison (SeasonContexts.baseRates.outcome).
+  formApplication?: "own" | "ratio";
+  temperatureReference?: "uniform" | "baseRate";
+}
+
+// Der Kandidat als RunSpec. Er braucht Kontexte aus SEINEM Fit (candidateModelOptions in
+// candidate.ts) -- auf den Kontexten des produktiven Fits waere er ein anderes Modell.
+export function candidateRunSpec(config: CandidateConfig = CANDIDATE_2027): RunSpec {
+  return {
+    name: config.name,
+    variant: "model",
+    xgFormWeight: config.formWeight,
+    formApplication: "ratio",
+    rho: config.rho,
+    outcomeTemperature: config.outcomeTemperature,
+    temperatureReference: "baseRate",
+  };
 }
 
 export interface MatchEvaluation {
@@ -415,14 +439,19 @@ function predictVariant(
   const residual = spec.formMode === "residual";
   const homeForm = residual ? ctx.homeFormResidual : ctx.homeForm;
   const awayForm = residual ? ctx.awayFormResidual : ctx.awayForm;
-  const matrix = buildDixonColesMatrix(
-    ctx.baseLambdaHome * Math.exp(formWeight * homeForm),
-    ctx.baseLambdaAway * Math.exp(formWeight * awayForm),
-    { rho: spec.rho, drawBoost: spec.drawBoost }
-  );
+  const [lambdaHome, lambdaAway] =
+    spec.formApplication === "ratio"
+      ? ratioFormLambdas(ctx.baseLambdaHome, ctx.baseLambdaAway, homeForm, awayForm, formWeight)
+      : [ctx.baseLambdaHome * Math.exp(formWeight * homeForm), ctx.baseLambdaAway * Math.exp(formWeight * awayForm)];
+  const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway, { rho: spec.rho, drawBoost: spec.drawBoost });
   // Vor allem anderen: Totals, Handicap und exaktes Ergebnis werden aus derselben Matrix
   // gelesen und muessen dieselbe Temperatur gesehen haben wie die 1X2-Massen.
-  applyOutcomeTemperature(matrix, spec.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE);
+  const temperature = spec.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE;
+  if (spec.temperatureReference === "baseRate") {
+    applyOutcomeTemperatureTowards(matrix, temperature, baseRates.outcome);
+  } else {
+    applyOutcomeTemperature(matrix, temperature);
+  }
 
   const totalMarginal = totalGoalsMarginal(matrix);
   let over = 0;

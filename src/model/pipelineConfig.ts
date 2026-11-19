@@ -37,6 +37,8 @@ import {
 } from "./scoreMatrix";
 import { PRODUCTION_MODEL_OPTIONS } from "./teamStrength";
 import { XG_FORM_WEIGHT, XG_FORM_WINDOW } from "./xgForm";
+// FNV-1a, 32 Bit -- seit dem 2026-11-19 in eigenem Modul, unveraendert (siehe fnv1a.ts).
+import { fnv1a } from "./fnv1a";
 
 export interface PipelineConfig {
   // Fit. Diese beiden Felder waren bis 2026-09-10 reine Behauptung: sie standen hier, sie
@@ -305,17 +307,6 @@ export const DEFAULT_PIPELINE: PipelineConfig = {
   llmMaxSearches: MAX_SEARCHES,
   llmMappingCoverageFingerprint: llmMappingCoverageFingerprint(),
 };
-
-// FNV-1a, 32 Bit. Kurz genug zum Lesen im Log, kollisionsfrei genug fuer eine Handvoll
-// Konfigurationen pro Saison.
-function fnv1a(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
-}
 
 export function configHash(config: PipelineConfig = DEFAULT_PIPELINE): string {
   const deviations = hashAnchorDeviations(config);

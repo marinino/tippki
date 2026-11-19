@@ -57,7 +57,20 @@ import {
   MATCHES_PER_REFIT,
   buildContexts,
   buildWalkForwardContexts,
+  candidateRunSpec,
+  evaluateRun,
+  type PredictionContext,
+  type SeasonContexts,
 } from "../eval/backtestCore";
+import {
+  CANDIDATE_2027,
+  CANDIDATE_FINGERPRINT,
+  candidateFingerprint,
+  candidateMatrix,
+  outcomeBaseRate,
+  ratioFormLambdas,
+  type CandidateConfig,
+} from "../model/candidate";
 import {
   FIXTURE_TIMEZONE,
   firstKickoffOf,
@@ -115,6 +128,7 @@ import {
   DEFAULT_OUTCOME_TEMPERATURE,
   DEFAULT_RHO,
   applyOutcomeTemperature,
+  applyOutcomeTemperatureTowards,
   argmaxCell,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
@@ -3042,6 +3056,186 @@ section("Konfigurations-Hash", () => {
       "der breite Abdruck ist nicht bloss der alte"
     )
   );
+});
+
+// ---------------------------------------------------------------------------
+
+section("Kandidat 2027/28 festgeschrieben", () => {
+  // Der Kandidat (src/model/candidate.ts, MESSLAUF.md "Messplan 2") tritt im Sommer 2027 EINMAL
+  // gegen die Produktion an, auf Spielen, die beim Festschreiben niemand gesehen hat. Das ist
+  // nur etwas wert, wenn er bis dahin genau derselbe bleibt -- und wenn er nicht still in den
+  // Vorhersageweg rutscht, solange der Freeze gilt.
+
+  // 1. Der Abdruck. Schlaegt das an, wurde der Kandidat nach dem Festschreiben veraendert. Dann
+  //    nicht den Abdruck nachziehen, sondern einen neuen Kandidaten mit neuem Messplan anlegen.
+  check(() =>
+    assert.equal(
+      candidateFingerprint(),
+      CANDIDATE_FINGERPRINT,
+      "der Kandidat hat sich seit dem Festschreiben veraendert (candidate.ts, MESSLAUF.md Messplan 2)"
+    )
+  );
+  // ... und er sieht jedes Feld. Sonst bliebe eine Aenderung an genau diesem Feld unbemerkt.
+  const variations: [keyof CandidateConfig, Partial<CandidateConfig>][] = [
+    ["firstEvaluatedKickoff", { firstEvaluatedKickoff: "2026-11-27T20:30:00+01:00" }],
+    ["halfLifeDays", { halfLifeDays: CANDIDATE_2027.halfLifeDays + 1 }],
+    ["ridgePseudoMatches", { ridgePseudoMatches: CANDIDATE_2027.ridgePseudoMatches + 1 }],
+    ["xgBlendWeight", { xgBlendWeight: CANDIDATE_2027.xgBlendWeight + 0.1 }],
+    ["formWeight", { formWeight: CANDIDATE_2027.formWeight + 0.01 }],
+    ["rho", { rho: CANDIDATE_2027.rho + 0.01 }],
+    ["outcomeTemperature", { outcomeTemperature: CANDIDATE_2027.outcomeTemperature + 0.05 }],
+  ];
+  for (const [name, override] of variations) {
+    check(() =>
+      assert.notEqual(
+        candidateFingerprint({ ...CANDIDATE_2027, ...override }),
+        CANDIDATE_FINGERPRINT,
+        `${name} veraendert den Abdruck des Kandidaten nicht`
+      )
+    );
+  }
+
+  // 2. Der Kandidat ist NICHT im Vorhersageweg. Er gehoert in die Auswertung, bis der
+  //    Messplan entschieden hat. Geprueft werden die Dateien, die eine angezeigte oder
+  //    protokollierte Zahl erzeugen.
+  const productionPath = [
+    "src/model/predictPipeline.ts",
+    "src/model/predictMatch.ts",
+    "src/scripts/forwardLog.ts",
+    "src/scripts/predict.ts",
+    "src/scripts/kickoffSnapshot.ts",
+    "src/data/displayPredictions.ts",
+    "src/app/api/predictions/route.ts",
+  ];
+  for (const file of productionPath) {
+    const source = readFileSync(join(process.cwd(), file), "utf-8");
+    check(() =>
+      assert.ok(
+        !/from\s+["'][^"']*\/candidate["']/.test(source) && !source.includes("candidateRunSpec"),
+        `${file} benutzt den Kandidaten -- der Freeze gilt bis zur Entscheidung im Sommer 2027`
+      )
+    );
+  }
+
+  // 3. Die Temperatur zur Bezugsverteilung.
+  const q: OutcomeProbs = { homeWinProb: 0.45, drawProb: 0.245, awayWinProb: 0.305 };
+  const uniform: OutcomeProbs = { homeWinProb: 1 / 3, drawProb: 1 / 3, awayWinProb: 1 / 3 };
+  const identity = buildDixonColesMatrix(1.7, 1.1);
+  const identityCopy = Float64Array.from(identity.cells);
+  applyOutcomeTemperatureTowards(identity, 1, q);
+  check(() => assert.deepEqual(Array.from(identity.cells), Array.from(identityCopy), "T = 1 aendert nichts"));
+  for (const [lh, la] of [
+    [2.1, 0.9],
+    [1.35, 1.35],
+    [0.8, 2.2],
+  ]) {
+    // Mit Gleichverteilung als Bezug ist es die produktive Temperatur.
+    const a = buildDixonColesMatrix(lh, la);
+    const b = buildDixonColesMatrix(lh, la);
+    applyOutcomeTemperature(a, 1.25);
+    applyOutcomeTemperatureTowards(b, 1.25, uniform);
+    let maxDev = 0;
+    for (let i = 0; i < a.cells.length; i++) maxDev = Math.max(maxDev, Math.abs(a.cells[i] - b.cells[i]));
+    check(() => assert.ok(maxDev < 1e-12, `gleichverteilter Bezug weicht um ${maxDev} von der alten Temperatur ab`));
+    // Normiert, Form innerhalb der Tendenz unveraendert.
+    const c = buildDixonColesMatrix(lh, la);
+    const shape = scoreProb(c, 3, 1) / scoreProb(c, 2, 0);
+    applyOutcomeTemperatureTowards(c, 1.25, q);
+    let total = 0;
+    for (let i = 0; i < c.cells.length; i++) total += c.cells[i];
+    check(() => closeTo(total, 1, 1e-9, "Matrix bleibt normiert"));
+    check(() => closeTo(scoreProb(c, 3, 1) / scoreProb(c, 2, 0), shape, 1e-9, "Form innerhalb der Tendenz"));
+  }
+  // Steht die Vorhersage schon auf der Grundrate, bleibt sie dort -- das ist der Fixpunkt, zu
+  // dem gezogen wird, und genau darin unterscheidet sie sich von der alten Temperatur.
+  const atBase = buildDixonColesMatrix(1.6, 1.2);
+  const base = outcomeMasses(atBase);
+  applyOutcomeTemperatureTowards(atBase, 1.5, base);
+  const after = outcomeMasses(atBase);
+  check(() => closeTo(after.homeWinProb, base.homeWinProb, 1e-12, "Fixpunkt Heim"));
+  check(() => closeTo(after.drawProb, base.drawProb, 1e-12, "Fixpunkt Remis"));
+  const pulled = buildDixonColesMatrix(1.6, 1.2);
+  applyOutcomeTemperature(pulled, 1.5);
+  check(() => assert.ok(Math.abs(outcomeMasses(pulled).homeWinProb - base.homeWinProb) > 1e-3, "die alte Temperatur hat diesen Fixpunkt nicht"));
+
+  // 4. Die Form als Differenzsignal.
+  for (const [lh, la, fh, fa] of [
+    [1.7, 1.1, 0.8, -0.4],
+    [3.61, 0.75, 2.55, 0.38],
+    [0.9, 2.4, -1.4, 1.95],
+    [1.4, 1.4, 0, 0],
+  ]) {
+    const [h, a] = ratioFormLambdas(lh, la, fh, fa, 0.2);
+    check(() => closeTo(h + a, lh + la, 1e-12, "die Summe der Torerwartungen bleibt"));
+    check(() => closeTo(Math.log(h / a) - Math.log(lh / la), 0.2 * (fh - fa), 1e-9, "das Verhaeltnis verschiebt sich wie produktiv"));
+    // Dieselbe Verschiebung des Verhaeltnisses wie der produktive Faktor auf jede Seite.
+    const ownRatio = Math.log((lh * Math.exp(0.2 * fh)) / (la * Math.exp(0.2 * fa)));
+    check(() => closeTo(Math.log(h / a), ownRatio, 1e-9, "gleiches Verhaeltnis wie die produktive Form"));
+    // Keine Torerwartung ueber der Basis-Summe: Bayern-Koeln (Punkt 20) bleibt weit unter 6,67.
+    check(() => assert.ok(h < lh + la && a < lh + la, "Torerwartung ueber der Basis-Summe"));
+  }
+  const same = ratioFormLambdas(1.7, 1.1, 0.6, 0.6, 0.2);
+  check(() => closeTo(same[0], 1.7, 1e-12, "gleiche Form aendert nichts (Heim)"));
+  check(() => closeTo(same[1], 1.1, 1e-12, "gleiche Form aendert nichts (Gast)"));
+
+  // 5. Der Backtest rechnet den Kandidaten genau wie candidateMatrix, und ohne die neuen Felder
+  //    genau wie vorher.
+  const ctxOf = (lh: number, la: number, fh: number, fa: number, h: number, a: number): PredictionContext => ({
+    season: "2020",
+    date: "01/09/2020",
+    homeTeam: `H${lh}`,
+    awayTeam: `A${la}`,
+    actualHome: h,
+    actualAway: a,
+    actual: outcomeOf(h, a),
+    actualTotal: h + a,
+    baseLambdaHome: lh,
+    baseLambdaAway: la,
+    homeForm: fh,
+    awayForm: fa,
+    homeFormResidual: 0,
+    awayFormResidual: 0,
+    homeIsEstimated: false,
+    awayIsEstimated: false,
+    benchmark: null,
+  });
+  const synthetic: SeasonContexts[] = [
+    {
+      season: "2020",
+      trainMatchCount: 0,
+      baseRates: { outcome: q, overProb: 0.55, scoreProbs: [[1]], diffProbs: new Float64Array(21) },
+      contexts: [ctxOf(2.1, 0.9, 1.2, -0.3, 2, 1), ctxOf(1.3, 1.5, -0.5, 0.9, 1, 1), ctxOf(3.6, 0.7, 2.5, 0.4, 0, 1)],
+    },
+  ];
+  const viaBacktest = evaluateRun(synthetic, candidateRunSpec(), { requireBenchmark: false, keepMatrices: true });
+  synthetic[0].contexts.forEach((c, i) => {
+    const direct = candidateMatrix(c.baseLambdaHome, c.baseLambdaAway, c.homeForm, c.awayForm, q);
+    let maxDev = 0;
+    for (let k = 0; k < direct.cells.length; k++) maxDev = Math.max(maxDev, Math.abs(direct.cells[k] - viaBacktest[i].matrix!.cells[k]));
+    check(() => assert.equal(maxDev, 0, `Backtest und candidateMatrix rechnen verschieden (${maxDev})`));
+  });
+  const plain = evaluateRun(synthetic, { name: "p", variant: "model" }, { requireBenchmark: false });
+  const explicit = evaluateRun(
+    synthetic,
+    { name: "p", variant: "model", formApplication: "own", temperatureReference: "uniform" },
+    { requireBenchmark: false }
+  );
+  check(() =>
+    assert.deepEqual(plain.map((e) => e.probs), explicit.map((e) => e.probs), "die Voreinstellung ist nicht der produktive Weg")
+  );
+  const byHand = synthetic[0].contexts.map((c) => {
+    const m = buildDixonColesMatrix(c.baseLambdaHome * Math.exp(0.2 * c.homeForm), c.baseLambdaAway * Math.exp(0.2 * c.awayForm));
+    applyOutcomeTemperature(m, DEFAULT_OUTCOME_TEMPERATURE);
+    return outcomeMasses(m);
+  });
+  check(() => assert.deepEqual(plain.map((e) => e.probs), byHand, "der produktive Backtest-Weg hat sich bewegt"));
+
+  // 6. Die Grundrate des Kandidaten ist dieselbe, die der Backtest benutzt -- sonst rechnete
+  //    der Echtbetrieb 2027/28 gegen einen anderen Bezug als die Bestaetigung.
+  const all = loadAllMatches();
+  const boundary = buildContexts(["2020"], PRODUCTION_MODEL_OPTIONS, all)[0];
+  const own = outcomeBaseRate(all.filter((m) => m.season < "2020"));
+  check(() => assert.deepEqual(own, boundary.baseRates.outcome, "outcomeBaseRate weicht von baseRatesOf ab"));
 });
 
 // ---------------------------------------------------------------------------

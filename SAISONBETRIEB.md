@@ -772,4 +772,12 @@ Konfidenzintervall nicht verlassen. Das ist kein Scheitern, sondern die Fallzahl
 sind ein Anfang, keine Antwort. Der Wert liegt darin, dass die Zahl **ehrlich** ist und mit
 der nächsten Saison zusammengelegt werden kann.
 
+Danach, genau einmal: `npm run kandidat -- --bestaetigung` (MESSLAUF.md, Messplan 2).
+
+- Der Lauf entscheidet, ob der am 19.11.2026 festgeschriebene Kandidat oder die Klammer B1 zur
+  Saison 2027/28 produktiv wird.
+- Vorher verweigert das Skript, ebenso bei verändertem Kandidaten.
+- Der Kandidat liegt bis dahin nur in der Auswertung. An der Vorhersage dieser Saison ändert er
+  nichts, und der configHash bleibt `3cc0ddad`.
+
 Erst dann werden die eingefrorenen Parameter wieder angefasst.
