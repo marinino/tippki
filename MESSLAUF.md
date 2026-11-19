@@ -135,3 +135,205 @@ einseitig, α = 0,05. Zusätzlich darf der 1X2-RPS nicht signifikant schlechter 
 Ausgewählt nach der Zielgröße auf Validation (+0,0081 gegen +0,0047 für ±0,25); im 1X2
 sind beide unauffällig. Gewählt wird das hier und jetzt, nicht nach dem Testlauf. Die Vorwärtssaison 2026/27 kommt
 als zweite Bestätigung dazu, sobald sie abgeschlossen ist.
+
+---
+
+# Messplan 2: der Kandidat für die Saison 2027/28
+
+Festgelegt am **19.11.2026**, vor Spieltag 10 der Saison 2026/27. Code: `src/model/candidate.ts`
+(der Kandidat), `src/scripts/candidate.ts` (`npm run kandidat`, die Auswertung) und der
+selfCheck-Abschnitt „Kandidat 2027/28 festgeschrieben“, der den Abdruck `f89c6088` festhält.
+Herkunft der drei Änderungen: die Hebelmessung vom selben Tag (Bundesliga-Validation) und
+`RECHERCHE.md` (fünf Ligen, 2014/15 bis 2022/23).
+
+## Der Kandidat (K1)
+
+Drei Änderungen gegenüber der Produktion (configHash `3cc0ddad`), sonst alles gleich:
+
+| | Produktion | Kandidat | Begründung |
+|---|---|---|---|
+| Fit-Ziel | Tore | 50 % Tore, 50 % xG | Im August an der Saisongrenze leicht positiv, am 19.11. walk-forward bestätigt (LogLoss +0,0032, p 0,01) |
+| Form | exp(0,2 · Form) auf die eigene Torerwartung | dieselbe Verschiebung nur auf log(λHeim/λGast), die Summe bleibt fest | Form trägt keine Information über die Toranzahl (RECHERCHE.md, Abschnitt 4); produktiv bläht sie die Torsumme auf |
+| Temperatur | T = 1,20, zur Gleichverteilung | T = 1,25, zur Grundrate der Trainingsspiele | Die alte nimmt dem Heimsieg im Schnitt 1,5 Prozentpunkte (VERBESSERUNGEN.md, Punkt 21). T gescannt, Regel vor dem Lauf: kleinster 1X2-LogLoss |
+
+Unverändert bleiben 500 Tage, Ridge 8, die xG-Form der letzten bis zu 3 Spiele, ρ = −0,15,
+maxGoals 10 und der Verzicht auf einen Draw-Boost. Der LLM-Layer gehört auf keiner Seite dazu,
+er wird im Vorwärts-Log getrennt bewertet.
+
+**Eine Entscheidung beim Festschreiben, offen festgehalten:**
+
+- Vorgesehen war zuerst ρ = −0,05, das Optimum über fünf Ligen.
+- Je Liga trägt das aber nur außerhalb der Bundesliga (RECHERCHE.md, Abschnitt 2). In der
+  Bundesliga sind 1:0 und 0:1 viel seltener, und −0,15 passt dort besser.
+- Die Kontrolle im Kandidaten auf der Validation zeigte dasselbe. ρ wurde deshalb vor dem
+  Festschreiben auf den produktiven Wert zurückgesetzt, und T wurde danach gescannt.
+- Beides ist eine Entscheidung auf derselben Validation, die damit endgültig verbraucht ist.
+
+**Auf Validation** (2019 bis 2022, 1.224 Spiele mit Marktmittel-Schlusskurs; der Kandidat wurde
+dort zusammengesetzt, die Zahlen sind deshalb zu optimistisch):
+
+| | Kandidat gegen Produktion |
+|---|---|
+| exaktes Ergebnis | +0,031 [+0,014; +0,048] |
+| 1X2-LogLoss | +0,0063 (p 0,049) |
+| RPS | +0,0013 (p 0,07) |
+| Über/Unter 2,5 | +0,011 (p 0,09) |
+
+Der Abstand zum Markt sinkt im 1X2-LogLoss von 0,0123 auf 0,0060 und bei Über/Unter von
+0,0218 auf 0,0104. Die uneinigen Spiele gehen von 156 auf 140 zurück, der Rückstand darin von
++0,018 auf +0,010.
+
+## Daten
+
+1. **Test:** Saisons 2023/24 bis 2025/26, walk-forward, Messlatte wie überall das
+   Marktmittel zum Anpfiff (100 % Abdeckung).
+2. **Vorwärts:** Saison 2026/27, alle Spiele ab dem 20.11.2026. Der erste Anpfiff ist um
+   20:30 Uhr, Bayern gegen Köln. Gerechnet wird walk-forward, nach dem letzten Spieltag.
+   - Bedingung: Der Commit, der `src/model/candidate.ts` einführt, liegt vor diesem Anpfiff.
+     Die Auswertung prüft das gegen git und verweigert sonst.
+   - Wird später committet, vorher `firstEvaluatedKickoff` auf den ersten Anpfiff nach dem
+     Commit setzen und den Abdruck im selben Commit nachziehen. Danach nie wieder.
+3. Die Bundesliga-Validation (2018 bis 2022) ist verbraucht und zählt nicht.
+
+## Kennzahlen und Entscheidungsregel
+
+- **K1, Kandidat gegen Produktion.**
+  - Primär: LogLoss auf dem exakten Ergebnis, Test und Vorwärts zusammen, einseitig,
+    gepaarter Bootstrap mit Standardseed.
+  - Warum diese Kennzahl: Der Kandidat verändert die ganze Verteilung, und der LogLoss auf der
+    vollen Matrix ist die strikt propere Bewertung genau dieser Verteilung. Preisblatt,
+    Torsumme und Handicap werden aus ihr gelesen. Sie hat außerdem die meiste Trennschärfe:
+    Auf Validation liegt der Standardfehler bei rund 0,009. Hält der Effekt, wäre z auf rund
+    1.140 Spielen etwa 3,4. Bei halbem Effekt sinkt die Chance auf einen Nachweis auf etwa die
+    Hälfte.
+  - Ausschluss: 1X2-LogLoss oder RPS signifikant schlechter, zweiseitig p < 0,05 in die
+    falsche Richtung.
+- **B1, Klammer ±0,15.** Unverändert aus dem Folgeplan vom 18.11.: Über/Unter-LogLoss,
+  einseitig, nur Test. Ausschluss: RPS signifikant schlechter. Die Vorwärtssaison wird
+  berichtet, ohne Entscheidungskraft.
+- **Holm über K1 und B1, α = 0,05.** Das macht B1 strenger als am 18.11. festgelegt, nie
+  lockerer.
+- **Entscheidung:**
+  - Besteht K1, wird der Kandidat zur Saison 2027/28 produktiv, mit neuem configHash und neuem
+    Freeze.
+  - Besteht nur B1, wird die Klammer produktiv.
+  - Sonst bleibt die Produktion. Das heißt „kein Nachweis“, nicht „kein Effekt“.
+- **Berichtet, ohne Entscheidungskraft:** RPS, 1X2-LogLoss, Über/Unter, Handicap, der Abstand
+  zum Markt je Datensatz, die mittlere 1X2-Masse und die uneinigen Spiele.
+
+## Ablauf und Sperren
+
+- `npm run kandidat -- --bestaetigung` läuft genau einmal, nach dem letzten Spieltag 2026/27.
+  Vorher verweigert das Skript, ebenso bei einem Abdruck ungleich `f89c6088` oder ohne
+  passenden Commit.
+- `npm run kandidat -- --trockenlauf` spielt denselben Weg auf Validation-Saisons durch
+  (2020 und 2021 als Test, 2022 ab November als Vorwärts) und entscheidet nichts.
+- `npm run kandidat` und `--temperatur-scan` zeigen, wie der Kandidat auf Validation
+  zustande kam.
+- Der Kandidat ist nicht im Vorhersageweg. selfCheck prüft die Dateien, die eine angezeigte
+  oder protokollierte Zahl erzeugen.
+- Die produktiven Vorhersagen von Spieltag 10 sind vor und nach der Änderung byte-gleich
+  (`npm run predict`), der configHash bleibt `3cc0ddad`.
+
+## Was nicht dazugehört
+
+- **Der LLM-Layer:** Er wird im Vorwärts-Log getrennt bewertet.
+- **Der Endspurt-Effekt auf die Torsumme** (RECHERCHE.md, Abschnitt 5): eine Hypothese für die
+  fünf Ligen 2023 bis 2025, mit eigenem Plan, sobald die Mehrliga-Messbasis steht.
+- **Das überschätzte 0:0 in der Bundesliga:** offen, VERBESSERUNGEN.md Punkt 22.
+- **Nachjustieren:** Nach dem Festschreiben wird nichts mehr gedreht. Ein geänderter Kandidat
+  ist ein neuer Messplan.
+
+---
+
+# Mehrliga-Messbasis
+
+Eingerichtet am **19.11.2026**.
+
+- **Code:** `src/data/leagues.ts` (Daten), `src/eval/leagueBacktest.ts` (Walk-forward und
+  Sperre), `npm run ligen` (Auswertung) und der selfCheck-Abschnitt „Mehrliga-Messbasis“.
+- **Daten:** football-data.co.uk, Premier League, La Liga, Serie A und Ligue 1, 2014/15 bis
+  2025/26. Sie liegen unter `ligen/` und nicht unter `data/`, weil `data/` ins Serverbündel
+  geht. Die Bundesliga kommt unverändert aus `data/`.
+- **Wozu:** Auf 1.529 Bundesliga-Spielen sind Unterschiede um 0,001 RPS nicht auflösbar. Der
+  Messlauf vom 18.11. ging deshalb siebenmal ohne Nachweis aus. Mit den vier anderen Ligen gibt
+  es rund sechsmal so viele Spiele.
+- **Was sie nicht ersetzt:** die Bundesliga selbst. ρ zum Beispiel ist ligaabhängig
+  (RECHERCHE.md, Abschnitt 2).
+
+## Was wofür da ist
+
+| Saisons | Rolle | Bundesliga | vier andere Ligen |
+|---|---|---|---|
+| 2014/15, 2015/16 | Anlauf, nie bewertet | Training | Training |
+| 2016/17 bis 2022/23 | Entwicklung: messen, vergleichen, wählen | 2.142 Spiele, die verbrauchte Validation 2018–2022 eingeschlossen | 10.539 Spiele |
+| 2023/24 bis 2025/26 | Holdout | Testsaisons von Messplan 2, nur dort | Bestätigung künftiger Messpläne, 4.338 Spiele |
+| 2026/27 | Vorwärtssaison | Messplan 2 und Vorwärts-Log | nicht geladen |
+
+**Regeln:**
+
+- **Holdout nur mit Messplan.** Er öffnet sich nur mit dem Namen eines vorab hier festgelegten
+  Messplans (`holdoutPlan` in `leagueWalkForward`). Jede Öffnung wird ausgegeben. Anlauf und
+  Vorwärtssaison sind auch mit Plan gesperrt, selfCheck prüft beides.
+- **Einmal je Frage.** Wer nach einem Holdout-Lauf an derselben Frage weiterdreht, hat danach
+  keinen Holdout mehr.
+- **Die Bundesliga-Testsaisons gehören Messplan 2.** Sie laufen über `npm run kandidat` und
+  nicht über diese Basis.
+- **Messlatte:**
+  - in der Entwicklung die Pinnacle-Schlussquote, die alle Spiele abdeckt (das Marktmittel
+    steht erst ab 2019/20 in den Dateien);
+  - im Holdout das Marktmittel mit 100 % Abdeckung, weil Pinnacle dort nur noch 83 bis 85 %
+    abdeckt.
+- **Außerhalb der Bundesliga gibt es kein xG.**
+  - Das Fit-Ziel „blend“ rechnet dort mit Toren.
+  - Die Form kommt aus Torschüssen aufs Tor, umgerechnet mit Toren je Torschuss der Vorsaisons.
+    So bedeutet das produktive Gewicht 0,2 dort dasselbe.
+  - Die Saison kommt aus dem Spiel. 2019/20 lief in England, Spanien und Italien bis in den
+    Sommer 2020.
+
+## Erster Lauf (19.11.2026, Entwicklung)
+
+Nachgerechnet mit der Recherche (Basismodell, LogLoss auf dem exakten Ergebnis): je Liga
+höchstens 0,0002 Abweichung. Die Repo-Fassung rechnet also dasselbe wie die Einmal-Skripte. Die
+Bundesliga läuft über den Mehrliga-Weg Feld für Feld wie der produktive Walk-forward (selfCheck).
+
+**Ausgangsstand, Produktion gegen Pinnacle** (positiv = Markt besser; außerhalb der Bundesliga
+mit Torschuss-Form):
+
+| | Bundesliga | Premier League | La Liga | Serie A | Ligue 1 | alle fünf |
+|---|---|---|---|---|---|---|
+| RPS | +0,0037 | +0,0060 | +0,0064 | +0,0075 | +0,0066 | +0,0062 |
+| 1X2-LogLoss | +0,0139 | +0,0219 | +0,0219 | +0,0258 | +0,0238 | +0,0217 |
+| Über/Unter-LogLoss | +0,0187 | +0,0131 | +0,0217 | +0,0235 | +0,0274 | +0,0209 |
+
+Die Bundesliga liegt am nächsten am Markt. Sie ist die einzige Liga mit xG und die, auf der
+jeder Parameter gewählt wurde.
+
+**Kandidat 2027/28 gegen Produktion** (explorativ, ohne Entscheidungskraft; Messplan 2
+entscheidet nur auf der Bundesliga):
+
+| | Bundesliga | Premier League | La Liga | Serie A | Ligue 1 | alle fünf |
+|---|---|---|---|---|---|---|
+| exaktes Ergebnis | +0,032\*\* | +0,021\*\* | +0,024\*\* | +0,017\*\* | +0,013\*\* | +0,021\*\* |
+| Über/Unter-LogLoss | +0,015\*\* | +0,011\*\* | +0,013\*\* | +0,011\*\* | +0,005 | +0,011\*\* |
+| 1X2-LogLoss | +0,0069\*\* | +0,0026 | +0,0032\* | −0,0004 | +0,0015 | +0,0026\*\* |
+
+- **Die Verteilungsmärkte werden überall besser,** obwohl in den vier anderen Ligen keiner der
+  Werte des Kandidaten gewählt wurde und es dort kein xG gibt. Das stützt die beiden Mechanismen
+  dahinter, nicht bloß die Zahlen: die Form wirkt nur aufs Kräfteverhältnis, und die Temperatur
+  zieht zur Grundrate.
+- **Im 1X2 kommt der Gewinn fast nur aus der Bundesliga,** vermutlich aus dem xG-Fit, den es
+  nur dort gibt.
+- **Der Abstand zum Markt bei Über/Unter halbiert sich** über alle fünf Ligen, von 0,0209 auf
+  0,0111.
+
+## Nächste Fragen für diese Basis (noch nicht festgelegt)
+
+1. Eine Matrixform, die das 0:0 getrennt behandelt (VERBESSERUNGEN.md, Punkt 22).
+2. Der Endspurt-Effekt auf die Torsumme (RECHERCHE.md, Abschnitt 5).
+3. Torschuss-Form zusätzlich zur xG-Form in der Bundesliga.
+4. xG für die vier anderen Ligen (Understat), damit Fit-Ziel und Form dort dieselben sind wie in
+   der Bundesliga. Dafür braucht es einen Download.
+
+Für jede Frage gilt dieselbe Reihenfolge: zuerst hier einen Plan schreiben, dann auf der
+Entwicklung messen, dann einmal auf dem Holdout bestätigen.

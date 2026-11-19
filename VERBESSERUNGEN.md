@@ -203,6 +203,15 @@ sind nach der Meinung des Marktes geschnitten und damit konfundiert; sie zeigen,
 Rückstand sitzt, nicht wie viel eine Änderung brächte. Woche für Woche sichtbar ist das
 seit heute in `npm run predict` (Zeile „ohne Form").
 
+**Stand 19.11., Kandidat 2027/28** (MESSLAUF.md, Messplan 2):
+
+- Der Kandidat setzt die Form nur auf das Kräfteverhältnis und lässt die Summe der
+  Torerwartungen stehen.
+- Das trifft den Mechanismus dieses Punktes direkt, statt ihn wie die Klammer zu begrenzen.
+- RECHERCHE.md, Abschnitt 4 stützt das auf fünf Ligen: Form sagt etwas über das
+  Kräfteverhältnis, nichts über die Toranzahl.
+- Die Klammer B1 läuft im Sommer als Alternative mit, unter Holm.
+
 ### 8. Der `configHash` sieht die Logik der Modellseite nur per Handzähler
 
 `src/model/pipelineConfig.ts`, `src/model/xgForm.ts`
@@ -288,6 +297,11 @@ nichts Neues dazukommt.
 npm run form“. Der LLM-Layer macht die vorgeschlagene Aufteilung bereits (Abwehr des
 Gegners wirkt auf das eigene λ), die Formkurve nicht.
 
+**Nachtrag 19.11.:** Auf fünf Ligen bestätigt sich, dass die Form keine Toranzahl vorhersagt
+(RECHERCHE.md, Abschnitt 4). Das Tempo der letzten Spiele, also Tore für plus gegen, bringt
+gegenüber dem Modell −0,01 Tore je Standardabweichung. Die geteilte Form ist damit erledigt. Der
+Kandidat 2027/28 geht den umgekehrten Weg und wendet die Form nur auf die Differenz an.
+
 ### 19. Der Grenzertrag dämpft über Angriff und Abwehr hinweg, und die Reihenfolge des LLM entscheidet [eingefroren]
 
 `src/llm/factMapping.ts:106-133`
@@ -353,6 +367,58 @@ Korrektur trotzdem selbst, etwa τ nicht unter 0 oder λ vor der Matrix begrenzt
 Fall vorher ein, ist er ein echter Fehler im Sinne von SAISONBETRIEB.md: dann bewusst
 entscheiden, ob repariert wird (neuer Hash, geteiltes Log) oder die winzige Abweichung bis
 Saisonende getragen wird.
+
+**Stand 19.11.:** Mit dem Kandidaten 2027/28 ist die Grenze außer Reichweite. Seine Form lässt die
+Summe der Torerwartungen stehen, keine Seite kann also über die Basis-Summe hinaus. Bayern–Köln
+bliebe unter der Summe der beiden Basis-Torerwartungen, statt von 3,61 auf 6,01 zu steigen.
+Absichern sollte man τ trotzdem, wenn ρ einmal angefasst wird (Punkt 22).
+
+### 21. Die Kalibrierungstemperatur zieht zur Gleichverteilung [eingefroren]
+
+`src/model/scoreMatrix.ts` (`applyOutcomeTemperature`)
+
+Gemessen am 19.11. (Validation, walk-forward, 1.529 Spiele mit Pinnacle-Schluss), mittlere
+1X2-Masse Heim / Remis / Gast:
+
+| | Heim | Remis | Gast |
+|---|---|---|---|
+| tatsächlich | 44,3 % | 24,2 % | 31,5 % |
+| ohne Temperatur | 44,2 % | 23,7 % | 32,0 % |
+| produktiv, T = 1,2 | **42,7 %** | **25,4 %** | 32,0 % |
+| zur Grundrate temperiert | 44,5 % | 24,1 % | 31,5 % |
+
+Die Temperatur zieht jede Vorhersage zu einem Drittel je Ausgang. Ein Drittel je Ausgang ist kein
+Fußball, und so nimmt sie dem Heimsieg im Schnitt 1,5 Prozentpunkte und gibt sie dem Remis.
+`applyOutcomeTemperatureTowards` zieht stattdessen zur Grundrate der Trainingsspiele,
+p^(1/T) · q^(1−1/T). Mit gleichverteiltem q ist das die alte Temperatur, selfCheck prüft das.
+
+Teil des Kandidaten 2027/28 (MESSLAUF.md, Messplan 2), dort T = 1,25. Produktiv unverändert bis
+zur Entscheidung im Sommer.
+
+### 22. Dixon-Coles überschätzt das 0:0, und das richtige ρ hängt an der Liga [offen]
+
+`src/model/scoreMatrix.ts` (`dixonColesTau`, `DEFAULT_RHO`)
+
+RECHERCHE.md, Abschnitt 2, auf fünf Ligen (Basismodell ohne Form und Temperatur, 2016/17 bis
+2022/23):
+
+- Mit ρ = −0,15 überschätzt das Modell das Remis um 2,2 Prozentpunkte und das 0:0 um 1,9 (8,6
+  statt 6,7 %).
+- Je Liga gerechnet wollen Premier League, La Liga, Serie A und Ligue 1 ρ ≈ −0,05, mit
+  +0,003 bis +0,004 LogLoss auf dem exakten Ergebnis.
+- Die Bundesliga will −0,15. Dort sind 1:0 und 0:1 selten (12,0 % gegen 16 bis 19 %), und genau
+  die drückt ρ nach unten.
+- Das 0:0 bleibt aber auch in der Bundesliga überschätzt: 7,1 gegen 5,5 %. Das deckt sich mit
+  der Validation (Punkt 6, Nachtrag „die Überstreuung beziffert“).
+
+ρ kann das nicht trennen, weil es 0:0 und 1:1 mit demselben Parameter anhebt. Über fünf Ligen
+war **Dixon-Coles ohne Eingriff ins 0:0** am besten (LogLoss exaktes Ergebnis +0,0029 gegenüber
+ρ = −0,15). Für die Bundesliga allein ist das nicht gemessen.
+
+**Nächster Schritt:** auf der Mehrliga-Messbasis eine Matrixform wählen, die das 0:0 und die
+liga-eigenen 1:0-Raten zugleich trifft. Danach auf frischen Daten prüfen. Nicht Teil des
+Kandidaten 2027/28, der ρ = −0,15 behält. Die Basis steht seit dem 19.11.: `npm run ligen`,
+Regeln in MESSLAUF.md, Abschnitt „Mehrliga-Messbasis“.
 
 ---
 

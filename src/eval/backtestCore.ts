@@ -26,6 +26,7 @@ import { baseLambdas } from "../model/predictMatch";
 import {
   DEFAULT_OUTCOME_TEMPERATURE,
   applyOutcomeTemperature,
+  applyOutcomeTemperatureTowards,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
   outcomeMasses,
@@ -34,6 +35,7 @@ import {
   type ScoreMatrix,
 } from "../model/scoreMatrix";
 import { XG_FORM_WEIGHT, computeXgForm, computeXgFormResidual } from "../model/xgForm";
+import { CANDIDATE_2027, ratioFormLambdas, type CandidateConfig } from "../model/candidate";
 import {
   benchmarkQuote,
   DEFAULT_BENCHMARK,
@@ -111,6 +113,25 @@ export interface SeasonContexts {
   contexts: PredictionContext[];
 }
 
+// Woher die Formkurve einer Vorhersagelage kommt. Produktiv und fuer die Bundesliga immer die
+// xG-Form (XG_FORM_PROVIDER). Injizierbar seit dem 2026-11-19 fuer die Mehrliga-Messbasis: die
+// vier anderen Ligen haben keine xG-Daten und bekommen einen Ersatz aus Torschuessen
+// (src/eval/leagueBacktest.ts). "residual" ist die Abweichung vom eigenen Normalniveau.
+//
+// Die Saison kommt aus dem Spiel, nicht aus dem Datum: 2019/20 lief in England, Spanien und
+// Italien bis in den Juli und August 2020, und deriveSeasonFromDate schluege diese Spiele der
+// neuen Saison zu. Die xG-Form braucht sie nicht -- die Bundesliga war im Juni fertig.
+export interface FormValues {
+  form: number;
+  residual: number;
+}
+export type FormProvider = (team: string, beforeDate: Date, season: string) => FormValues;
+
+export const XG_FORM_PROVIDER: FormProvider = (team, beforeDate) => ({
+  form: computeXgForm(team, beforeDate),
+  residual: computeXgFormResidual(team, beforeDate),
+});
+
 // Eine Vorhersagelage aus einem gefitteten Modell und einem Spiel.
 //
 // Bewusst EINE Funktion fuer beide Aufbauwege. Stuende sie zweimal da, liefen die
@@ -120,10 +141,13 @@ export interface SeasonContexts {
 function makeContext(
   model: LeagueModel,
   match: Match,
-  benchmark: BenchmarkSource
+  benchmark: BenchmarkSource,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): PredictionContext {
   const matchDate = parseMatchDate(match.date);
   const base = baseLambdas(model, match.homeTeam, match.awayTeam);
+  const home = formOf(match.homeTeam, matchDate, match.season);
+  const away = formOf(match.awayTeam, matchDate, match.season);
 
   return {
     season: match.season,
@@ -136,10 +160,10 @@ function makeContext(
     actualTotal: match.homeGoals + match.awayGoals,
     baseLambdaHome: base.lambdaHome,
     baseLambdaAway: base.lambdaAway,
-    homeForm: computeXgForm(match.homeTeam, matchDate),
-    awayForm: computeXgForm(match.awayTeam, matchDate),
-    homeFormResidual: computeXgFormResidual(match.homeTeam, matchDate),
-    awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
+    homeForm: home.form,
+    awayForm: away.form,
+    homeFormResidual: home.residual,
+    awayFormResidual: away.residual,
     homeIsEstimated: base.homeIsEstimated,
     awayIsEstimated: base.awayIsEstimated,
     benchmark: benchmarkQuote(match, benchmark),
@@ -164,14 +188,15 @@ export function buildContexts(
   // Injizierbar, damit der Konvergenz-Audit denselben Auswertungspfad mit dem alten
   // Gradientenfit durchlaufen lassen kann. Sonst waere der Vergleich nicht gepaart.
   buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
-  benchmark: BenchmarkSource = DEFAULT_BENCHMARK
+  benchmark: BenchmarkSource = DEFAULT_BENCHMARK,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): SeasonContexts[] {
   return seasons.map((testSeason) => {
     const trainMatches = allMatches.filter((m) => m.season < testSeason);
     const testMatches = allMatches.filter((m) => m.season === testSeason);
     const model = buildModel(trainMatches, modelOptions);
 
-    const contexts = testMatches.map((match) => makeContext(model, match, benchmark));
+    const contexts = testMatches.map((match) => makeContext(model, match, benchmark, formOf));
 
     return {
       season: testSeason,
@@ -216,7 +241,8 @@ export function buildWalkForwardContexts(
   allMatches = loadAllMatches(),
   buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
   benchmark: BenchmarkSource = DEFAULT_BENCHMARK,
-  matchesPerRefit = MATCHES_PER_REFIT
+  matchesPerRefit = MATCHES_PER_REFIT,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): SeasonContexts[] {
   // Einmal vorsortieren statt in jeder Schleife: die Zeitachse ist die einzige Struktur,
   // auf die es hier ankommt.
@@ -241,7 +267,7 @@ export function buildWalkForwardContexts(
       lastTrainCount = trainMatches.length;
 
       const model = buildModel(trainMatches, modelOptions);
-      for (const match of block) contexts.push(makeContext(model, match, benchmark));
+      for (const match of block) contexts.push(makeContext(model, match, benchmark, formOf));
     }
 
     return {
@@ -328,6 +354,28 @@ export interface RunSpec {
   drawBoost?: number;
   // Kalibrierungstemperatur auf den 1X2-Massen. Ohne Angabe der produktive Wert.
   outcomeTemperature?: number;
+  // Seit 2026-11-19 fuer den Kandidaten 2027/28 (src/model/candidate.ts). Ohne Angabe laeuft
+  // exakt der produktive Rechenweg, Operation fuer Operation.
+  //   formApplication: "own" (produktiv) multipliziert die eigene Torerwartung mit
+  //     exp(Gewicht * Form); "ratio" verschiebt nur log(λHeim / λGast), die Summe bleibt.
+  //   temperatureReference: "uniform" (produktiv) zieht zur Gleichverteilung, "baseRate"
+  //     zur 1X2-Grundrate der Spiele vor der Saison (SeasonContexts.baseRates.outcome).
+  formApplication?: "own" | "ratio";
+  temperatureReference?: "uniform" | "baseRate";
+}
+
+// Der Kandidat als RunSpec. Er braucht Kontexte aus SEINEM Fit (candidateModelOptions in
+// candidate.ts) -- auf den Kontexten des produktiven Fits waere er ein anderes Modell.
+export function candidateRunSpec(config: CandidateConfig = CANDIDATE_2027): RunSpec {
+  return {
+    name: config.name,
+    variant: "model",
+    xgFormWeight: config.formWeight,
+    formApplication: "ratio",
+    rho: config.rho,
+    outcomeTemperature: config.outcomeTemperature,
+    temperatureReference: "baseRate",
+  };
 }
 
 export interface MatchEvaluation {
@@ -415,14 +463,19 @@ function predictVariant(
   const residual = spec.formMode === "residual";
   const homeForm = residual ? ctx.homeFormResidual : ctx.homeForm;
   const awayForm = residual ? ctx.awayFormResidual : ctx.awayForm;
-  const matrix = buildDixonColesMatrix(
-    ctx.baseLambdaHome * Math.exp(formWeight * homeForm),
-    ctx.baseLambdaAway * Math.exp(formWeight * awayForm),
-    { rho: spec.rho, drawBoost: spec.drawBoost }
-  );
+  const [lambdaHome, lambdaAway] =
+    spec.formApplication === "ratio"
+      ? ratioFormLambdas(ctx.baseLambdaHome, ctx.baseLambdaAway, homeForm, awayForm, formWeight)
+      : [ctx.baseLambdaHome * Math.exp(formWeight * homeForm), ctx.baseLambdaAway * Math.exp(formWeight * awayForm)];
+  const matrix = buildDixonColesMatrix(lambdaHome, lambdaAway, { rho: spec.rho, drawBoost: spec.drawBoost });
   // Vor allem anderen: Totals, Handicap und exaktes Ergebnis werden aus derselben Matrix
   // gelesen und muessen dieselbe Temperatur gesehen haben wie die 1X2-Massen.
-  applyOutcomeTemperature(matrix, spec.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE);
+  const temperature = spec.outcomeTemperature ?? DEFAULT_OUTCOME_TEMPERATURE;
+  if (spec.temperatureReference === "baseRate") {
+    applyOutcomeTemperatureTowards(matrix, temperature, baseRates.outcome);
+  } else {
+    applyOutcomeTemperature(matrix, temperature);
+  }
 
   const totalMarginal = totalGoalsMarginal(matrix);
   let over = 0;

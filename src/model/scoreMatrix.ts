@@ -180,6 +180,50 @@ export function applyOutcomeTemperature(m: ScoreMatrix, temperature: number): vo
   normalize(m);
 }
 
+// Dieselbe Temperatur, aber zu einer Bezugsverteilung statt zur Gleichverteilung:
+//
+//   p_i' proportional zu p_i^(1/T) * q_i^(1 - 1/T)
+//
+// Warum: applyOutcomeTemperature zieht jede Vorhersage zu einem Drittel je Ausgang, und ein
+// Drittel je Ausgang ist kein Fussball. Gemessen am 2026-11-19 (Validation, walk-forward,
+// 1529 Spiele): die produktive Temperatur nimmt dem Heimsieg im Schnitt 1,5 Prozentpunkte
+// und gibt sie dem Remis -- mittlere 1X2-Masse 42,7/25,4/32,0 gegen tatsaechlich
+// 44,3/24,2/31,5. Zur Grundrate temperiert: 44,5/24,1/31,5.
+//
+// Mit q gleichverteilt ist das die alte Temperatur (der q-Faktor kuerzt sich bei der Normierung
+// heraus, bis auf Rundung), mit T = 1 die Identitaet. Angewandt wie dort blockweise auf die
+// Matrix, damit das Preisblatt konsistent bleibt.
+//
+// Produktiv benutzt sie niemand, solange der Freeze gilt. Sie gehoert zum Kandidaten fuer
+// 2027/28 (candidate.ts, MESSLAUF.md "Messplan 2").
+export function applyOutcomeTemperatureTowards(
+  m: ScoreMatrix,
+  temperature: number,
+  reference: OutcomeProbs
+): void {
+  if (!Number.isFinite(temperature) || Math.abs(temperature - 1) < 1e-12) return;
+  const q = [reference.homeWinProb, reference.drawProb, reference.awayWinProb];
+  if (q.some((x) => !(x > 0))) return;
+
+  const before = outcomeMasses(m);
+  const masses = [before.homeWinProb, before.drawProb, before.awayWinProb];
+  if (masses.some((p) => p <= 0)) return;
+
+  const k = 1 - 1 / temperature;
+  const raw = masses.map((p, i) => p ** (1 / temperature) * q[i] ** k);
+  const sum = raw[0] + raw[1] + raw[2];
+  if (!(sum > 0)) return;
+  const factors = raw.map((r, i) => r / sum / masses[i]);
+
+  for (let h = 0; h <= m.maxGoals; h++) {
+    for (let a = 0; a <= m.maxGoals; a++) {
+      const block = h > a ? 0 : h === a ? 1 : 2;
+      m.cells[h * (m.maxGoals + 1) + a] *= factors[block];
+    }
+  }
+  normalize(m);
+}
+
 export function normalize(m: ScoreMatrix): void {
   let total = 0;
   for (let i = 0; i < m.cells.length; i++) total += m.cells[i];

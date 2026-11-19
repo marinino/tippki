@@ -57,7 +57,27 @@ import {
   MATCHES_PER_REFIT,
   buildContexts,
   buildWalkForwardContexts,
+  candidateRunSpec,
+  evaluateRun,
+  type PredictionContext,
+  type SeasonContexts,
 } from "../eval/backtestCore";
+import { LEAGUES, loadLeagueMatches, teamsInSeason, type LeagueCode } from "../data/leagues";
+import {
+  LEAGUE_DEVELOPMENT_SEASONS,
+  assertLeagueSeasons,
+  leagueWalkForward,
+  shotsOnTargetFormProvider,
+} from "../eval/leagueBacktest";
+import {
+  CANDIDATE_2027,
+  CANDIDATE_FINGERPRINT,
+  candidateFingerprint,
+  candidateMatrix,
+  outcomeBaseRate,
+  ratioFormLambdas,
+  type CandidateConfig,
+} from "../model/candidate";
 import {
   FIXTURE_TIMEZONE,
   firstKickoffOf,
@@ -115,6 +135,7 @@ import {
   DEFAULT_OUTCOME_TEMPERATURE,
   DEFAULT_RHO,
   applyOutcomeTemperature,
+  applyOutcomeTemperatureTowards,
   argmaxCell,
   buildDixonColesMatrix,
   goalDifferenceMarginal,
@@ -3042,6 +3063,302 @@ section("Konfigurations-Hash", () => {
       "der breite Abdruck ist nicht bloss der alte"
     )
   );
+});
+
+// ---------------------------------------------------------------------------
+
+section("Kandidat 2027/28 festgeschrieben", () => {
+  // Der Kandidat (src/model/candidate.ts, MESSLAUF.md "Messplan 2") tritt im Sommer 2027 EINMAL
+  // gegen die Produktion an, auf Spielen, die beim Festschreiben niemand gesehen hat. Das ist
+  // nur etwas wert, wenn er bis dahin genau derselbe bleibt -- und wenn er nicht still in den
+  // Vorhersageweg rutscht, solange der Freeze gilt.
+
+  // 1. Der Abdruck. Schlaegt das an, wurde der Kandidat nach dem Festschreiben veraendert. Dann
+  //    nicht den Abdruck nachziehen, sondern einen neuen Kandidaten mit neuem Messplan anlegen.
+  check(() =>
+    assert.equal(
+      candidateFingerprint(),
+      CANDIDATE_FINGERPRINT,
+      "der Kandidat hat sich seit dem Festschreiben veraendert (candidate.ts, MESSLAUF.md Messplan 2)"
+    )
+  );
+  // ... und er sieht jedes Feld. Sonst bliebe eine Aenderung an genau diesem Feld unbemerkt.
+  const variations: [keyof CandidateConfig, Partial<CandidateConfig>][] = [
+    ["firstEvaluatedKickoff", { firstEvaluatedKickoff: "2026-11-27T20:30:00+01:00" }],
+    ["halfLifeDays", { halfLifeDays: CANDIDATE_2027.halfLifeDays + 1 }],
+    ["ridgePseudoMatches", { ridgePseudoMatches: CANDIDATE_2027.ridgePseudoMatches + 1 }],
+    ["xgBlendWeight", { xgBlendWeight: CANDIDATE_2027.xgBlendWeight + 0.1 }],
+    ["formWeight", { formWeight: CANDIDATE_2027.formWeight + 0.01 }],
+    ["rho", { rho: CANDIDATE_2027.rho + 0.01 }],
+    ["outcomeTemperature", { outcomeTemperature: CANDIDATE_2027.outcomeTemperature + 0.05 }],
+  ];
+  for (const [name, override] of variations) {
+    check(() =>
+      assert.notEqual(
+        candidateFingerprint({ ...CANDIDATE_2027, ...override }),
+        CANDIDATE_FINGERPRINT,
+        `${name} veraendert den Abdruck des Kandidaten nicht`
+      )
+    );
+  }
+
+  // 2. Der Kandidat ist NICHT im Vorhersageweg. Er gehoert in die Auswertung, bis der
+  //    Messplan entschieden hat. Geprueft werden die Dateien, die eine angezeigte oder
+  //    protokollierte Zahl erzeugen.
+  const productionPath = [
+    "src/model/predictPipeline.ts",
+    "src/model/predictMatch.ts",
+    "src/scripts/forwardLog.ts",
+    "src/scripts/predict.ts",
+    "src/scripts/kickoffSnapshot.ts",
+    "src/data/displayPredictions.ts",
+    "src/app/api/predictions/route.ts",
+  ];
+  for (const file of productionPath) {
+    const source = readFileSync(join(process.cwd(), file), "utf-8");
+    check(() =>
+      assert.ok(
+        !/from\s+["'][^"']*\/candidate["']/.test(source) && !source.includes("candidateRunSpec"),
+        `${file} benutzt den Kandidaten -- der Freeze gilt bis zur Entscheidung im Sommer 2027`
+      )
+    );
+  }
+
+  // 3. Die Temperatur zur Bezugsverteilung.
+  const q: OutcomeProbs = { homeWinProb: 0.45, drawProb: 0.245, awayWinProb: 0.305 };
+  const uniform: OutcomeProbs = { homeWinProb: 1 / 3, drawProb: 1 / 3, awayWinProb: 1 / 3 };
+  const identity = buildDixonColesMatrix(1.7, 1.1);
+  const identityCopy = Float64Array.from(identity.cells);
+  applyOutcomeTemperatureTowards(identity, 1, q);
+  check(() => assert.deepEqual(Array.from(identity.cells), Array.from(identityCopy), "T = 1 aendert nichts"));
+  for (const [lh, la] of [
+    [2.1, 0.9],
+    [1.35, 1.35],
+    [0.8, 2.2],
+  ]) {
+    // Mit Gleichverteilung als Bezug ist es die produktive Temperatur.
+    const a = buildDixonColesMatrix(lh, la);
+    const b = buildDixonColesMatrix(lh, la);
+    applyOutcomeTemperature(a, 1.25);
+    applyOutcomeTemperatureTowards(b, 1.25, uniform);
+    let maxDev = 0;
+    for (let i = 0; i < a.cells.length; i++) maxDev = Math.max(maxDev, Math.abs(a.cells[i] - b.cells[i]));
+    check(() => assert.ok(maxDev < 1e-12, `gleichverteilter Bezug weicht um ${maxDev} von der alten Temperatur ab`));
+    // Normiert, Form innerhalb der Tendenz unveraendert.
+    const c = buildDixonColesMatrix(lh, la);
+    const shape = scoreProb(c, 3, 1) / scoreProb(c, 2, 0);
+    applyOutcomeTemperatureTowards(c, 1.25, q);
+    let total = 0;
+    for (let i = 0; i < c.cells.length; i++) total += c.cells[i];
+    check(() => closeTo(total, 1, 1e-9, "Matrix bleibt normiert"));
+    check(() => closeTo(scoreProb(c, 3, 1) / scoreProb(c, 2, 0), shape, 1e-9, "Form innerhalb der Tendenz"));
+  }
+  // Steht die Vorhersage schon auf der Grundrate, bleibt sie dort -- das ist der Fixpunkt, zu
+  // dem gezogen wird, und genau darin unterscheidet sie sich von der alten Temperatur.
+  const atBase = buildDixonColesMatrix(1.6, 1.2);
+  const base = outcomeMasses(atBase);
+  applyOutcomeTemperatureTowards(atBase, 1.5, base);
+  const after = outcomeMasses(atBase);
+  check(() => closeTo(after.homeWinProb, base.homeWinProb, 1e-12, "Fixpunkt Heim"));
+  check(() => closeTo(after.drawProb, base.drawProb, 1e-12, "Fixpunkt Remis"));
+  const pulled = buildDixonColesMatrix(1.6, 1.2);
+  applyOutcomeTemperature(pulled, 1.5);
+  check(() => assert.ok(Math.abs(outcomeMasses(pulled).homeWinProb - base.homeWinProb) > 1e-3, "die alte Temperatur hat diesen Fixpunkt nicht"));
+
+  // 4. Die Form als Differenzsignal.
+  for (const [lh, la, fh, fa] of [
+    [1.7, 1.1, 0.8, -0.4],
+    [3.61, 0.75, 2.55, 0.38],
+    [0.9, 2.4, -1.4, 1.95],
+    [1.4, 1.4, 0, 0],
+  ]) {
+    const [h, a] = ratioFormLambdas(lh, la, fh, fa, 0.2);
+    check(() => closeTo(h + a, lh + la, 1e-12, "die Summe der Torerwartungen bleibt"));
+    check(() => closeTo(Math.log(h / a) - Math.log(lh / la), 0.2 * (fh - fa), 1e-9, "das Verhaeltnis verschiebt sich wie produktiv"));
+    // Dieselbe Verschiebung des Verhaeltnisses wie der produktive Faktor auf jede Seite.
+    const ownRatio = Math.log((lh * Math.exp(0.2 * fh)) / (la * Math.exp(0.2 * fa)));
+    check(() => closeTo(Math.log(h / a), ownRatio, 1e-9, "gleiches Verhaeltnis wie die produktive Form"));
+    // Keine Torerwartung ueber der Basis-Summe: Bayern-Koeln (Punkt 20) bleibt weit unter 6,67.
+    check(() => assert.ok(h < lh + la && a < lh + la, "Torerwartung ueber der Basis-Summe"));
+  }
+  const same = ratioFormLambdas(1.7, 1.1, 0.6, 0.6, 0.2);
+  check(() => closeTo(same[0], 1.7, 1e-12, "gleiche Form aendert nichts (Heim)"));
+  check(() => closeTo(same[1], 1.1, 1e-12, "gleiche Form aendert nichts (Gast)"));
+
+  // 5. Der Backtest rechnet den Kandidaten genau wie candidateMatrix, und ohne die neuen Felder
+  //    genau wie vorher.
+  const ctxOf = (lh: number, la: number, fh: number, fa: number, h: number, a: number): PredictionContext => ({
+    season: "2020",
+    date: "01/09/2020",
+    homeTeam: `H${lh}`,
+    awayTeam: `A${la}`,
+    actualHome: h,
+    actualAway: a,
+    actual: outcomeOf(h, a),
+    actualTotal: h + a,
+    baseLambdaHome: lh,
+    baseLambdaAway: la,
+    homeForm: fh,
+    awayForm: fa,
+    homeFormResidual: 0,
+    awayFormResidual: 0,
+    homeIsEstimated: false,
+    awayIsEstimated: false,
+    benchmark: null,
+  });
+  const synthetic: SeasonContexts[] = [
+    {
+      season: "2020",
+      trainMatchCount: 0,
+      baseRates: { outcome: q, overProb: 0.55, scoreProbs: [[1]], diffProbs: new Float64Array(21) },
+      contexts: [ctxOf(2.1, 0.9, 1.2, -0.3, 2, 1), ctxOf(1.3, 1.5, -0.5, 0.9, 1, 1), ctxOf(3.6, 0.7, 2.5, 0.4, 0, 1)],
+    },
+  ];
+  const viaBacktest = evaluateRun(synthetic, candidateRunSpec(), { requireBenchmark: false, keepMatrices: true });
+  synthetic[0].contexts.forEach((c, i) => {
+    const direct = candidateMatrix(c.baseLambdaHome, c.baseLambdaAway, c.homeForm, c.awayForm, q);
+    let maxDev = 0;
+    for (let k = 0; k < direct.cells.length; k++) maxDev = Math.max(maxDev, Math.abs(direct.cells[k] - viaBacktest[i].matrix!.cells[k]));
+    check(() => assert.equal(maxDev, 0, `Backtest und candidateMatrix rechnen verschieden (${maxDev})`));
+  });
+  const plain = evaluateRun(synthetic, { name: "p", variant: "model" }, { requireBenchmark: false });
+  const explicit = evaluateRun(
+    synthetic,
+    { name: "p", variant: "model", formApplication: "own", temperatureReference: "uniform" },
+    { requireBenchmark: false }
+  );
+  check(() =>
+    assert.deepEqual(plain.map((e) => e.probs), explicit.map((e) => e.probs), "die Voreinstellung ist nicht der produktive Weg")
+  );
+  const byHand = synthetic[0].contexts.map((c) => {
+    const m = buildDixonColesMatrix(c.baseLambdaHome * Math.exp(0.2 * c.homeForm), c.baseLambdaAway * Math.exp(0.2 * c.awayForm));
+    applyOutcomeTemperature(m, DEFAULT_OUTCOME_TEMPERATURE);
+    return outcomeMasses(m);
+  });
+  check(() => assert.deepEqual(plain.map((e) => e.probs), byHand, "der produktive Backtest-Weg hat sich bewegt"));
+
+  // 6. Die Grundrate des Kandidaten ist dieselbe, die der Backtest benutzt -- sonst rechnete
+  //    der Echtbetrieb 2027/28 gegen einen anderen Bezug als die Bestaetigung.
+  const all = loadAllMatches();
+  const boundary = buildContexts(["2020"], PRODUCTION_MODEL_OPTIONS, all)[0];
+  const own = outcomeBaseRate(all.filter((m) => m.season < "2020"));
+  check(() => assert.deepEqual(own, boundary.baseRates.outcome, "outcomeBaseRate weicht von baseRatesOf ab"));
+});
+
+// ---------------------------------------------------------------------------
+
+section("Mehrliga-Messbasis", () => {
+  // Die vier fremden Ligen sind ein Messgeraet, keine Modelleingabe (src/data/leagues.ts). Drei
+  // Dinge muessen halten: die Daten sind vollstaendig und doppelt nichts, der Walk-forward je
+  // Liga sieht keine Zukunft, und die Bundesliga laeuft durch die Mehrliga-Wege bitgleich
+  // mit dem produktiven Weg. Dazu die Sperre fuer die Holdout-Saisons.
+
+  // 1. Die Bundesliga ist dieselbe Instanz wie produktiv.
+  check(() => assert.equal(loadLeagueMatches("D1"), loadAllMatches(), "D1 ist nicht loadAllMatches()"));
+
+  // 2. Vollstaendig: je Saison T·(T−1) Spiele, jedes Team 2·(T−1) davon, nichts doppelt.
+  //    Einzige Ausnahme ist der Corona-Abbruch der Ligue 1 2019/20 nach 279 Spielen.
+  for (const { code } of LEAGUES.filter((l) => l.code !== "D1")) {
+    const matches = loadLeagueMatches(code);
+    for (const season of ["2014", "2015", ...LEAGUE_DEVELOPMENT_SEASONS, "2023", "2024", "2025"]) {
+      const ms = matches.filter((m) => m.season === season);
+      const teams = teamsInSeason(matches, season);
+      const keys = new Set(ms.map((m) => `${m.date}|${m.homeTeam}|${m.awayTeam}`));
+      check(() => assert.equal(keys.size, ms.length, `${code} ${season}: Spiel doppelt`));
+      if (code === "F1" && season === "2019") {
+        check(() => assert.equal(ms.length, 279, "Ligue 1 2019/20 wurde nach 279 Spielen abgebrochen"));
+        continue;
+      }
+      check(() => assert.equal(ms.length, teams * (teams - 1), `${code} ${season}: ${ms.length} Spiele bei ${teams} Teams`));
+      const games = new Map<string, number>();
+      for (const m of ms) for (const t of [m.homeTeam, m.awayTeam]) games.set(t, (games.get(t) ?? 0) + 1);
+      check(() =>
+        assert.ok([...games.values()].every((g) => g === 2 * (teams - 1)), `${code} ${season}: nicht jedes Team hat ${2 * (teams - 1)} Spiele`)
+      );
+    }
+  }
+
+  // 3. Auf der Entwicklung traegt jede Liga Pinnacle-Schlussquote und Torschuesse -- sonst
+  //    fielen Spiele still aus dem gepaarten Vergleich oder die Form waere halb leer.
+  for (const { code } of LEAGUES) {
+    const dev = loadLeagueMatches(code).filter((m) => LEAGUE_DEVELOPMENT_SEASONS.includes(m.season));
+    const pinnacle = dev.filter((m) => m.closeOddsHome && m.closeOddsDraw && m.closeOddsAway).length / dev.length;
+    const shots = dev.filter((m) => m.shotsOnTargetHome !== undefined && m.shotsOnTargetAway !== undefined).length / dev.length;
+    check(() => assert.ok(pinnacle >= 0.99, `${code}: Pinnacle nur bei ${(100 * pinnacle).toFixed(1)} % der Entwicklung`));
+    check(() => assert.ok(shots >= 0.99, `${code}: Torschuesse nur bei ${(100 * shots).toFixed(1)} % der Entwicklung`));
+  }
+
+  // 4. Die Sperre. Holdout nur mit Messplan, Anlauf und Vorwaertssaison nie.
+  const throws = (code: LeagueCode, seasons: string[], plan?: string) => {
+    try {
+      assertLeagueSeasons(code, seasons, plan);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  check(() => assert.ok(throws("E0", ["2023"]), "Holdout ohne Messplan geoeffnet"));
+  check(() => assert.ok(throws("D1", ["2022", "2025"]), "Bundesliga-Holdout ohne Messplan geoeffnet"));
+  check(() => assert.ok(!throws("E0", ["2023"], "Messplan X"), "Holdout mit Messplan bleibt zu"));
+  check(() => assert.ok(throws("D1", ["2026"], "Messplan X"), "die Vorwaertssaison gehoert nicht zur Messbasis"));
+  check(() => assert.ok(throws("SP1", ["2015"]), "Anlaufsaison bewertet"));
+  check(() => assert.ok(!throws("I1", LEAGUE_DEVELOPMENT_SEASONS), "die Entwicklung ist gesperrt"));
+
+  // 5. Die Torschuss-Form: 0 vor dem ersten Spiel, danach das Mittel der letzten bis zu drei
+  //    Spiele DIESER Saison mal Tore je Torschuss aufs Tor der Vorsaisons. 2019/20 ist der
+  //    Haertefall: in England lief die Saison bis Ende Juli 2020, die Saison kommt aus dem Spiel.
+  const epl = loadLeagueMatches("E0");
+  const sotForm = shotsOnTargetFormProvider(epl);
+  const arsenal = epl
+    .filter((m) => m.season === "2019" && (m.homeTeam === "Arsenal" || m.awayTeam === "Arsenal"))
+    .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
+  const prior = epl.filter((m) => m.season < "2019");
+  const factor =
+    prior.reduce((s, m) => s + m.homeGoals + m.awayGoals, 0) /
+    prior.reduce((s, m) => s + m.shotsOnTargetHome! + m.shotsOnTargetAway!, 0);
+  const diffOf = (m: Match) => (m.homeTeam === "Arsenal" ? 1 : -1) * (m.shotsOnTargetHome! - m.shotsOnTargetAway!);
+  check(() => assert.equal(sotForm("Arsenal", parseMatchDate(arsenal[0].date), "2019").form, 0, "Form vor dem ersten Spiel"));
+  for (const k of [1, 2, 3, 10, arsenal.length - 1]) {
+    const window = arsenal.slice(Math.max(0, k - 3), k);
+    const expected = (window.reduce((s, m) => s + diffOf(m), 0) / window.length) * factor;
+    check(() => closeTo(sotForm("Arsenal", parseMatchDate(arsenal[k].date), "2019").form, expected, 1e-12, `Torschuss-Form Arsenal, Spiel ${k + 1}`));
+  }
+  check(() => assert.ok(parseMatchDate(arsenal[arsenal.length - 1].date).getMonth() === 6, "das letzte Spiel 2019/20 liegt im Juli 2020"));
+
+  // 6. Kein Zukunftsleck in einer 20er-Liga: Bloecke zu 10 Spielen, jeder Fit kennt nur Spiele
+  //    vor seinem ersten Anpfifftag. Gleiche Bauart wie "Walk-forward leckt keine Zukunft".
+  const fits: number[] = [];
+  const spy = (matches: Match[], options: LeagueModelOptions) => {
+    fits.push(Math.max(...matches.map((m) => parseMatchDate(m.date).getTime())));
+    return buildLeagueModel(matches, options);
+  };
+  const eplContexts = leagueWalkForward("E0", ["2019"], PRODUCTION_MODEL_OPTIONS, { buildModel: spy })[0];
+  const eplSeason = epl
+    .filter((m) => m.season === "2019")
+    .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
+  check(() => assert.equal(eplContexts.contexts.length, 380, "alle 380 Spiele bewertet"));
+  check(() => assert.equal(fits.length, 38, "38 Refits, einer je Spieltag"));
+  for (let block = 0; block < fits.length; block++) {
+    check(() => assert.ok(fits[block] < parseMatchDate(eplSeason[block * 10].date).getTime(), `EPL-Refit ${block + 1} sieht die Zukunft`));
+  }
+
+  // 7. Die Bundesliga durch den Mehrliga-Weg ist der produktive Walk-forward, Feld fuer Feld.
+  const direct = buildWalkForwardContexts(["2021"], PRODUCTION_MODEL_OPTIONS, loadAllMatches(), buildLeagueModel, DEFAULT_BENCHMARK)[0];
+  const viaLeagues = leagueWalkForward("D1", ["2021"], PRODUCTION_MODEL_OPTIONS, { benchmark: DEFAULT_BENCHMARK })[0];
+  check(() => assert.deepEqual(viaLeagues.contexts, direct.contexts, "Bundesliga ueber die Mehrliga-Messbasis weicht vom produktiven Walk-forward ab"));
+
+  // 8. Und nichts davon im Vorhersageweg.
+  for (const file of [
+    "src/model/predictPipeline.ts",
+    "src/scripts/forwardLog.ts",
+    "src/scripts/predict.ts",
+    "src/scripts/kickoffSnapshot.ts",
+    "src/data/displayPredictions.ts",
+    "src/app/api/predictions/route.ts",
+  ]) {
+    const source = readFileSync(join(process.cwd(), file), "utf-8");
+    check(() => assert.ok(!/\/leagues["']|leagueBacktest/.test(source), `${file} benutzt die Mehrliga-Messbasis`));
+  }
 });
 
 // ---------------------------------------------------------------------------

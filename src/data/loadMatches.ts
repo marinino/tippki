@@ -133,7 +133,10 @@ function normalizeSeasonCode(rawCode: string): string {
   return String(startYear);
 }
 
-function parseCsvFile(filePath: string, season: string): Match[] {
+// Exportiert seit dem 2026-11-19 fuer die Mehrliga-Messbasis (src/data/leagues.ts): die vier
+// anderen Ligen kommen aus denselben football-data-Dateien mit denselben Spalten und werden
+// genau so gelesen. Am Bundesliga-Weg (loadAllMatches) aendert das nichts.
+export function parseCsvFile(filePath: string, season: string): Match[] {
   const raw = readFileSync(filePath, "utf-8");
   const rows: Record<string, string>[] = parse(raw, {
     columns: true,
