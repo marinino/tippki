@@ -417,7 +417,8 @@ war **Dixon-Coles ohne Eingriff ins 0:0** am besten (LogLoss exaktes Ergebnis +0
 
 **Nächster Schritt:** auf der Mehrliga-Messbasis eine Matrixform wählen, die das 0:0 und die
 liga-eigenen 1:0-Raten zugleich trifft. Danach auf frischen Daten prüfen. Nicht Teil des
-Kandidaten 2027/28, der ρ = −0,15 behält.
+Kandidaten 2027/28, der ρ = −0,15 behält. Die Basis steht seit dem 19.11.: `npm run ligen`,
+Regeln in MESSLAUF.md, Abschnitt „Mehrliga-Messbasis“.
 
 ---
 

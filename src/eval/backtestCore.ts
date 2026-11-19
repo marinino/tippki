@@ -113,6 +113,25 @@ export interface SeasonContexts {
   contexts: PredictionContext[];
 }
 
+// Woher die Formkurve einer Vorhersagelage kommt. Produktiv und fuer die Bundesliga immer die
+// xG-Form (XG_FORM_PROVIDER). Injizierbar seit dem 2026-11-19 fuer die Mehrliga-Messbasis: die
+// vier anderen Ligen haben keine xG-Daten und bekommen einen Ersatz aus Torschuessen
+// (src/eval/leagueBacktest.ts). "residual" ist die Abweichung vom eigenen Normalniveau.
+//
+// Die Saison kommt aus dem Spiel, nicht aus dem Datum: 2019/20 lief in England, Spanien und
+// Italien bis in den Juli und August 2020, und deriveSeasonFromDate schluege diese Spiele der
+// neuen Saison zu. Die xG-Form braucht sie nicht -- die Bundesliga war im Juni fertig.
+export interface FormValues {
+  form: number;
+  residual: number;
+}
+export type FormProvider = (team: string, beforeDate: Date, season: string) => FormValues;
+
+export const XG_FORM_PROVIDER: FormProvider = (team, beforeDate) => ({
+  form: computeXgForm(team, beforeDate),
+  residual: computeXgFormResidual(team, beforeDate),
+});
+
 // Eine Vorhersagelage aus einem gefitteten Modell und einem Spiel.
 //
 // Bewusst EINE Funktion fuer beide Aufbauwege. Stuende sie zweimal da, liefen die
@@ -122,10 +141,13 @@ export interface SeasonContexts {
 function makeContext(
   model: LeagueModel,
   match: Match,
-  benchmark: BenchmarkSource
+  benchmark: BenchmarkSource,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): PredictionContext {
   const matchDate = parseMatchDate(match.date);
   const base = baseLambdas(model, match.homeTeam, match.awayTeam);
+  const home = formOf(match.homeTeam, matchDate, match.season);
+  const away = formOf(match.awayTeam, matchDate, match.season);
 
   return {
     season: match.season,
@@ -138,10 +160,10 @@ function makeContext(
     actualTotal: match.homeGoals + match.awayGoals,
     baseLambdaHome: base.lambdaHome,
     baseLambdaAway: base.lambdaAway,
-    homeForm: computeXgForm(match.homeTeam, matchDate),
-    awayForm: computeXgForm(match.awayTeam, matchDate),
-    homeFormResidual: computeXgFormResidual(match.homeTeam, matchDate),
-    awayFormResidual: computeXgFormResidual(match.awayTeam, matchDate),
+    homeForm: home.form,
+    awayForm: away.form,
+    homeFormResidual: home.residual,
+    awayFormResidual: away.residual,
     homeIsEstimated: base.homeIsEstimated,
     awayIsEstimated: base.awayIsEstimated,
     benchmark: benchmarkQuote(match, benchmark),
@@ -166,14 +188,15 @@ export function buildContexts(
   // Injizierbar, damit der Konvergenz-Audit denselben Auswertungspfad mit dem alten
   // Gradientenfit durchlaufen lassen kann. Sonst waere der Vergleich nicht gepaart.
   buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
-  benchmark: BenchmarkSource = DEFAULT_BENCHMARK
+  benchmark: BenchmarkSource = DEFAULT_BENCHMARK,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): SeasonContexts[] {
   return seasons.map((testSeason) => {
     const trainMatches = allMatches.filter((m) => m.season < testSeason);
     const testMatches = allMatches.filter((m) => m.season === testSeason);
     const model = buildModel(trainMatches, modelOptions);
 
-    const contexts = testMatches.map((match) => makeContext(model, match, benchmark));
+    const contexts = testMatches.map((match) => makeContext(model, match, benchmark, formOf));
 
     return {
       season: testSeason,
@@ -218,7 +241,8 @@ export function buildWalkForwardContexts(
   allMatches = loadAllMatches(),
   buildModel: (matches: Match[], options: LeagueModelOptions) => LeagueModel = buildLeagueModel,
   benchmark: BenchmarkSource = DEFAULT_BENCHMARK,
-  matchesPerRefit = MATCHES_PER_REFIT
+  matchesPerRefit = MATCHES_PER_REFIT,
+  formOf: FormProvider = XG_FORM_PROVIDER
 ): SeasonContexts[] {
   // Einmal vorsortieren statt in jeder Schleife: die Zeitachse ist die einzige Struktur,
   // auf die es hier ankommt.
@@ -243,7 +267,7 @@ export function buildWalkForwardContexts(
       lastTrainCount = trainMatches.length;
 
       const model = buildModel(trainMatches, modelOptions);
-      for (const match of block) contexts.push(makeContext(model, match, benchmark));
+      for (const match of block) contexts.push(makeContext(model, match, benchmark, formOf));
     }
 
     return {

@@ -502,6 +502,11 @@ Alles, was die Vorhersage nicht verändert:
   weiter getroffen wird. Der selfCheck prüft genau das.
 - **Admin-Modus und Hosting** — Passwort, Token, Oberfläche. Sie verändern keine Zahl.
 - **Tests** — neue Prüfungen sind immer willkommen.
+- **Mehrliga-Messbasis** — `ligen/`, `npm run ligen`, `src/data/leagues.ts` und
+  `src/eval/leagueBacktest.ts`. Das ist reine Auswertung über fünf Ligen, sie berührt keine
+  Vorhersage (selfCheck prüft das).
+  - Frei ist sie nur auf der Entwicklung 2016 bis 2022.
+  - Der Holdout 2023 bis 2025 gehört festgelegten Messplänen (MESSLAUF.md).
 
 ---
 

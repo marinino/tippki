@@ -243,3 +243,97 @@ Der Abstand zum Markt sinkt im 1X2-LogLoss von 0,0123 auf 0,0060 und bei Über/U
 - **Das überschätzte 0:0 in der Bundesliga:** offen, VERBESSERUNGEN.md Punkt 22.
 - **Nachjustieren:** Nach dem Festschreiben wird nichts mehr gedreht. Ein geänderter Kandidat
   ist ein neuer Messplan.
+
+---
+
+# Mehrliga-Messbasis
+
+Eingerichtet am **19.11.2026**.
+
+- **Code:** `src/data/leagues.ts` (Daten), `src/eval/leagueBacktest.ts` (Walk-forward und
+  Sperre), `npm run ligen` (Auswertung) und der selfCheck-Abschnitt „Mehrliga-Messbasis“.
+- **Daten:** football-data.co.uk, Premier League, La Liga, Serie A und Ligue 1, 2014/15 bis
+  2025/26. Sie liegen unter `ligen/` und nicht unter `data/`, weil `data/` ins Serverbündel
+  geht. Die Bundesliga kommt unverändert aus `data/`.
+- **Wozu:** Auf 1.529 Bundesliga-Spielen sind Unterschiede um 0,001 RPS nicht auflösbar. Der
+  Messlauf vom 18.11. ging deshalb siebenmal ohne Nachweis aus. Mit den vier anderen Ligen gibt
+  es rund sechsmal so viele Spiele.
+- **Was sie nicht ersetzt:** die Bundesliga selbst. ρ zum Beispiel ist ligaabhängig
+  (RECHERCHE.md, Abschnitt 2).
+
+## Was wofür da ist
+
+| Saisons | Rolle | Bundesliga | vier andere Ligen |
+|---|---|---|---|
+| 2014/15, 2015/16 | Anlauf, nie bewertet | Training | Training |
+| 2016/17 bis 2022/23 | Entwicklung: messen, vergleichen, wählen | 2.142 Spiele, die verbrauchte Validation 2018–2022 eingeschlossen | 10.539 Spiele |
+| 2023/24 bis 2025/26 | Holdout | Testsaisons von Messplan 2, nur dort | Bestätigung künftiger Messpläne, 4.338 Spiele |
+| 2026/27 | Vorwärtssaison | Messplan 2 und Vorwärts-Log | nicht geladen |
+
+**Regeln:**
+
+- **Holdout nur mit Messplan.** Er öffnet sich nur mit dem Namen eines vorab hier festgelegten
+  Messplans (`holdoutPlan` in `leagueWalkForward`). Jede Öffnung wird ausgegeben. Anlauf und
+  Vorwärtssaison sind auch mit Plan gesperrt, selfCheck prüft beides.
+- **Einmal je Frage.** Wer nach einem Holdout-Lauf an derselben Frage weiterdreht, hat danach
+  keinen Holdout mehr.
+- **Die Bundesliga-Testsaisons gehören Messplan 2.** Sie laufen über `npm run kandidat` und
+  nicht über diese Basis.
+- **Messlatte:**
+  - in der Entwicklung die Pinnacle-Schlussquote, die alle Spiele abdeckt (das Marktmittel
+    steht erst ab 2019/20 in den Dateien);
+  - im Holdout das Marktmittel mit 100 % Abdeckung, weil Pinnacle dort nur noch 83 bis 85 %
+    abdeckt.
+- **Außerhalb der Bundesliga gibt es kein xG.**
+  - Das Fit-Ziel „blend“ rechnet dort mit Toren.
+  - Die Form kommt aus Torschüssen aufs Tor, umgerechnet mit Toren je Torschuss der Vorsaisons.
+    So bedeutet das produktive Gewicht 0,2 dort dasselbe.
+  - Die Saison kommt aus dem Spiel. 2019/20 lief in England, Spanien und Italien bis in den
+    Sommer 2020.
+
+## Erster Lauf (19.11.2026, Entwicklung)
+
+Nachgerechnet mit der Recherche (Basismodell, LogLoss auf dem exakten Ergebnis): je Liga
+höchstens 0,0002 Abweichung. Die Repo-Fassung rechnet also dasselbe wie die Einmal-Skripte. Die
+Bundesliga läuft über den Mehrliga-Weg Feld für Feld wie der produktive Walk-forward (selfCheck).
+
+**Ausgangsstand, Produktion gegen Pinnacle** (positiv = Markt besser; außerhalb der Bundesliga
+mit Torschuss-Form):
+
+| | Bundesliga | Premier League | La Liga | Serie A | Ligue 1 | alle fünf |
+|---|---|---|---|---|---|---|
+| RPS | +0,0037 | +0,0060 | +0,0064 | +0,0075 | +0,0066 | +0,0062 |
+| 1X2-LogLoss | +0,0139 | +0,0219 | +0,0219 | +0,0258 | +0,0238 | +0,0217 |
+| Über/Unter-LogLoss | +0,0187 | +0,0131 | +0,0217 | +0,0235 | +0,0274 | +0,0209 |
+
+Die Bundesliga liegt am nächsten am Markt. Sie ist die einzige Liga mit xG und die, auf der
+jeder Parameter gewählt wurde.
+
+**Kandidat 2027/28 gegen Produktion** (explorativ, ohne Entscheidungskraft; Messplan 2
+entscheidet nur auf der Bundesliga):
+
+| | Bundesliga | Premier League | La Liga | Serie A | Ligue 1 | alle fünf |
+|---|---|---|---|---|---|---|
+| exaktes Ergebnis | +0,032\*\* | +0,021\*\* | +0,024\*\* | +0,017\*\* | +0,013\*\* | +0,021\*\* |
+| Über/Unter-LogLoss | +0,015\*\* | +0,011\*\* | +0,013\*\* | +0,011\*\* | +0,005 | +0,011\*\* |
+| 1X2-LogLoss | +0,0069\*\* | +0,0026 | +0,0032\* | −0,0004 | +0,0015 | +0,0026\*\* |
+
+- **Die Verteilungsmärkte werden überall besser,** obwohl in den vier anderen Ligen keiner der
+  Werte des Kandidaten gewählt wurde und es dort kein xG gibt. Das stützt die beiden Mechanismen
+  dahinter, nicht bloß die Zahlen: die Form wirkt nur aufs Kräfteverhältnis, und die Temperatur
+  zieht zur Grundrate.
+- **Im 1X2 kommt der Gewinn fast nur aus der Bundesliga,** vermutlich aus dem xG-Fit, den es
+  nur dort gibt.
+- **Der Abstand zum Markt bei Über/Unter halbiert sich** über alle fünf Ligen, von 0,0209 auf
+  0,0111.
+
+## Nächste Fragen für diese Basis (noch nicht festgelegt)
+
+1. Eine Matrixform, die das 0:0 getrennt behandelt (VERBESSERUNGEN.md, Punkt 22).
+2. Der Endspurt-Effekt auf die Torsumme (RECHERCHE.md, Abschnitt 5).
+3. Torschuss-Form zusätzlich zur xG-Form in der Bundesliga.
+4. xG für die vier anderen Ligen (Understat), damit Fit-Ziel und Form dort dieselben sind wie in
+   der Bundesliga. Dafür braucht es einen Download.
+
+Für jede Frage gilt dieselbe Reihenfolge: zuerst hier einen Plan schreiben, dann auf der
+Entwicklung messen, dann einmal auf dem Holdout bestätigen.

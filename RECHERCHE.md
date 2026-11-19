@@ -417,8 +417,16 @@ Daten: [football-data.co.uk](https://football-data.co.uk), Ergebnisse, Torschüs
 
 ## Reproduzieren
 
-Gerechnet mit Einmal-Skripten außerhalb des Repos. Sie liegen im temporären Scratchpad und
-gehen bei einem Neustart verloren:
+**Seit dem 19.11. im Repo:**
+
+- Die Daten liegen unter `ligen/`.
+- `npm run ligen` rechnet das Basismodell auf derselben Grundlage nach. Je Liga weicht der
+  LogLoss auf dem exakten Ergebnis um höchstens 0,0002 ab, Regeln und Ergebnisse stehen in
+  MESSLAUF.md, Abschnitt „Mehrliga-Messbasis“.
+- Tabellenplatz, Endspurt und Formregressionen sind dort noch nicht nachgebaut.
+
+Gerechnet wurde der Bericht mit Einmal-Skripten außerhalb des Repos. Sie liegen im temporären
+Scratchpad und gehen bei einem Neustart verloren:
 
 - `C:\Users\noahm\AppData\Local\Temp\claude\4b130fea4dc04c43\3f5eb561-0179-4d6c-b56b-644ff0988744\scratchpad\top5core.mts`
 - `C:\Users\noahm\AppData\Local\Temp\claude\4b130fea4dc04c43\3f5eb561-0179-4d6c-b56b-644ff0988744\scratchpad\top5.mts`

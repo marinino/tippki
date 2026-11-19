@@ -62,6 +62,13 @@ import {
   type PredictionContext,
   type SeasonContexts,
 } from "../eval/backtestCore";
+import { LEAGUES, loadLeagueMatches, teamsInSeason, type LeagueCode } from "../data/leagues";
+import {
+  LEAGUE_DEVELOPMENT_SEASONS,
+  assertLeagueSeasons,
+  leagueWalkForward,
+  shotsOnTargetFormProvider,
+} from "../eval/leagueBacktest";
 import {
   CANDIDATE_2027,
   CANDIDATE_FINGERPRINT,
@@ -3236,6 +3243,122 @@ section("Kandidat 2027/28 festgeschrieben", () => {
   const boundary = buildContexts(["2020"], PRODUCTION_MODEL_OPTIONS, all)[0];
   const own = outcomeBaseRate(all.filter((m) => m.season < "2020"));
   check(() => assert.deepEqual(own, boundary.baseRates.outcome, "outcomeBaseRate weicht von baseRatesOf ab"));
+});
+
+// ---------------------------------------------------------------------------
+
+section("Mehrliga-Messbasis", () => {
+  // Die vier fremden Ligen sind ein Messgeraet, keine Modelleingabe (src/data/leagues.ts). Drei
+  // Dinge muessen halten: die Daten sind vollstaendig und doppelt nichts, der Walk-forward je
+  // Liga sieht keine Zukunft, und die Bundesliga laeuft durch die Mehrliga-Wege bitgleich
+  // mit dem produktiven Weg. Dazu die Sperre fuer die Holdout-Saisons.
+
+  // 1. Die Bundesliga ist dieselbe Instanz wie produktiv.
+  check(() => assert.equal(loadLeagueMatches("D1"), loadAllMatches(), "D1 ist nicht loadAllMatches()"));
+
+  // 2. Vollstaendig: je Saison T·(T−1) Spiele, jedes Team 2·(T−1) davon, nichts doppelt.
+  //    Einzige Ausnahme ist der Corona-Abbruch der Ligue 1 2019/20 nach 279 Spielen.
+  for (const { code } of LEAGUES.filter((l) => l.code !== "D1")) {
+    const matches = loadLeagueMatches(code);
+    for (const season of ["2014", "2015", ...LEAGUE_DEVELOPMENT_SEASONS, "2023", "2024", "2025"]) {
+      const ms = matches.filter((m) => m.season === season);
+      const teams = teamsInSeason(matches, season);
+      const keys = new Set(ms.map((m) => `${m.date}|${m.homeTeam}|${m.awayTeam}`));
+      check(() => assert.equal(keys.size, ms.length, `${code} ${season}: Spiel doppelt`));
+      if (code === "F1" && season === "2019") {
+        check(() => assert.equal(ms.length, 279, "Ligue 1 2019/20 wurde nach 279 Spielen abgebrochen"));
+        continue;
+      }
+      check(() => assert.equal(ms.length, teams * (teams - 1), `${code} ${season}: ${ms.length} Spiele bei ${teams} Teams`));
+      const games = new Map<string, number>();
+      for (const m of ms) for (const t of [m.homeTeam, m.awayTeam]) games.set(t, (games.get(t) ?? 0) + 1);
+      check(() =>
+        assert.ok([...games.values()].every((g) => g === 2 * (teams - 1)), `${code} ${season}: nicht jedes Team hat ${2 * (teams - 1)} Spiele`)
+      );
+    }
+  }
+
+  // 3. Auf der Entwicklung traegt jede Liga Pinnacle-Schlussquote und Torschuesse -- sonst
+  //    fielen Spiele still aus dem gepaarten Vergleich oder die Form waere halb leer.
+  for (const { code } of LEAGUES) {
+    const dev = loadLeagueMatches(code).filter((m) => LEAGUE_DEVELOPMENT_SEASONS.includes(m.season));
+    const pinnacle = dev.filter((m) => m.closeOddsHome && m.closeOddsDraw && m.closeOddsAway).length / dev.length;
+    const shots = dev.filter((m) => m.shotsOnTargetHome !== undefined && m.shotsOnTargetAway !== undefined).length / dev.length;
+    check(() => assert.ok(pinnacle >= 0.99, `${code}: Pinnacle nur bei ${(100 * pinnacle).toFixed(1)} % der Entwicklung`));
+    check(() => assert.ok(shots >= 0.99, `${code}: Torschuesse nur bei ${(100 * shots).toFixed(1)} % der Entwicklung`));
+  }
+
+  // 4. Die Sperre. Holdout nur mit Messplan, Anlauf und Vorwaertssaison nie.
+  const throws = (code: LeagueCode, seasons: string[], plan?: string) => {
+    try {
+      assertLeagueSeasons(code, seasons, plan);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  check(() => assert.ok(throws("E0", ["2023"]), "Holdout ohne Messplan geoeffnet"));
+  check(() => assert.ok(throws("D1", ["2022", "2025"]), "Bundesliga-Holdout ohne Messplan geoeffnet"));
+  check(() => assert.ok(!throws("E0", ["2023"], "Messplan X"), "Holdout mit Messplan bleibt zu"));
+  check(() => assert.ok(throws("D1", ["2026"], "Messplan X"), "die Vorwaertssaison gehoert nicht zur Messbasis"));
+  check(() => assert.ok(throws("SP1", ["2015"]), "Anlaufsaison bewertet"));
+  check(() => assert.ok(!throws("I1", LEAGUE_DEVELOPMENT_SEASONS), "die Entwicklung ist gesperrt"));
+
+  // 5. Die Torschuss-Form: 0 vor dem ersten Spiel, danach das Mittel der letzten bis zu drei
+  //    Spiele DIESER Saison mal Tore je Torschuss aufs Tor der Vorsaisons. 2019/20 ist der
+  //    Haertefall: in England lief die Saison bis Ende Juli 2020, die Saison kommt aus dem Spiel.
+  const epl = loadLeagueMatches("E0");
+  const sotForm = shotsOnTargetFormProvider(epl);
+  const arsenal = epl
+    .filter((m) => m.season === "2019" && (m.homeTeam === "Arsenal" || m.awayTeam === "Arsenal"))
+    .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
+  const prior = epl.filter((m) => m.season < "2019");
+  const factor =
+    prior.reduce((s, m) => s + m.homeGoals + m.awayGoals, 0) /
+    prior.reduce((s, m) => s + m.shotsOnTargetHome! + m.shotsOnTargetAway!, 0);
+  const diffOf = (m: Match) => (m.homeTeam === "Arsenal" ? 1 : -1) * (m.shotsOnTargetHome! - m.shotsOnTargetAway!);
+  check(() => assert.equal(sotForm("Arsenal", parseMatchDate(arsenal[0].date), "2019").form, 0, "Form vor dem ersten Spiel"));
+  for (const k of [1, 2, 3, 10, arsenal.length - 1]) {
+    const window = arsenal.slice(Math.max(0, k - 3), k);
+    const expected = (window.reduce((s, m) => s + diffOf(m), 0) / window.length) * factor;
+    check(() => closeTo(sotForm("Arsenal", parseMatchDate(arsenal[k].date), "2019").form, expected, 1e-12, `Torschuss-Form Arsenal, Spiel ${k + 1}`));
+  }
+  check(() => assert.ok(parseMatchDate(arsenal[arsenal.length - 1].date).getMonth() === 6, "das letzte Spiel 2019/20 liegt im Juli 2020"));
+
+  // 6. Kein Zukunftsleck in einer 20er-Liga: Bloecke zu 10 Spielen, jeder Fit kennt nur Spiele
+  //    vor seinem ersten Anpfifftag. Gleiche Bauart wie "Walk-forward leckt keine Zukunft".
+  const fits: number[] = [];
+  const spy = (matches: Match[], options: LeagueModelOptions) => {
+    fits.push(Math.max(...matches.map((m) => parseMatchDate(m.date).getTime())));
+    return buildLeagueModel(matches, options);
+  };
+  const eplContexts = leagueWalkForward("E0", ["2019"], PRODUCTION_MODEL_OPTIONS, { buildModel: spy })[0];
+  const eplSeason = epl
+    .filter((m) => m.season === "2019")
+    .sort((a, b) => parseMatchDate(a.date).getTime() - parseMatchDate(b.date).getTime());
+  check(() => assert.equal(eplContexts.contexts.length, 380, "alle 380 Spiele bewertet"));
+  check(() => assert.equal(fits.length, 38, "38 Refits, einer je Spieltag"));
+  for (let block = 0; block < fits.length; block++) {
+    check(() => assert.ok(fits[block] < parseMatchDate(eplSeason[block * 10].date).getTime(), `EPL-Refit ${block + 1} sieht die Zukunft`));
+  }
+
+  // 7. Die Bundesliga durch den Mehrliga-Weg ist der produktive Walk-forward, Feld fuer Feld.
+  const direct = buildWalkForwardContexts(["2021"], PRODUCTION_MODEL_OPTIONS, loadAllMatches(), buildLeagueModel, DEFAULT_BENCHMARK)[0];
+  const viaLeagues = leagueWalkForward("D1", ["2021"], PRODUCTION_MODEL_OPTIONS, { benchmark: DEFAULT_BENCHMARK })[0];
+  check(() => assert.deepEqual(viaLeagues.contexts, direct.contexts, "Bundesliga ueber die Mehrliga-Messbasis weicht vom produktiven Walk-forward ab"));
+
+  // 8. Und nichts davon im Vorhersageweg.
+  for (const file of [
+    "src/model/predictPipeline.ts",
+    "src/scripts/forwardLog.ts",
+    "src/scripts/predict.ts",
+    "src/scripts/kickoffSnapshot.ts",
+    "src/data/displayPredictions.ts",
+    "src/app/api/predictions/route.ts",
+  ]) {
+    const source = readFileSync(join(process.cwd(), file), "utf-8");
+    check(() => assert.ok(!/\/leagues["']|leagueBacktest/.test(source), `${file} benutzt die Mehrliga-Messbasis`));
+  }
 });
 
 // ---------------------------------------------------------------------------

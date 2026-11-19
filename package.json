@@ -20,6 +20,7 @@
     "kickoff-snapshot": "tsx src/scripts/kickoffSnapshot.ts",
     "messlauf": "tsx src/scripts/messlauf.ts",
     "kandidat": "tsx src/scripts/candidate.ts",
+    "ligen": "tsx src/scripts/leagues.ts",
     "walk-forward": "tsx src/scripts/walkForward.ts",
     "predict": "tsx src/scripts/predict.ts",
     "refresh-llm": "tsx src/scripts/refreshLlm.ts",
