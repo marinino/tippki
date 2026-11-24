@@ -134,22 +134,61 @@ export function chooseDisplaySource(input: {
   return { kind: "fehlt" };
 }
 
-// Fuer den Alarm: angepfiffene Partien ab SNAPSHOTS_SINCE ohne Schnappschuss.
+// Partien ab SNAPSHOTS_SINCE, deren Schnappschuss bekanntermassen fehlt. Wie KNOWN_GAPS und
+// KNOWN_RESEARCH_GAPS (src/eval/forwardLogRules.ts) ein Eingestaendnis mit Grund, kein
+// Schalter: ohne die Liste waere forward-log-check ab dem ersten verpassten Fenster fuer
+// immer rot und wuerde nicht mehr gelesen.
+//
+// Je Partie statt je Spieltag, weil jede Partie ihr eigenes Fenster hat. Faellt die
+// Freitagspartie aus, sind Samstag und Sonntag noch zu retten -- ein Eintrag fuer den ganzen
+// Spieltag liesse deren Alarm gleich mit verstummen. Erkannt wird die Partie wie beim
+// Einfrieren an Saison und Paarung; der Spieltag steht zur Orientierung dabei, und selfCheck
+// prueft, dass er stimmt und die Partie wirklich keinen Schnappschuss hat.
+export interface SnapshotGap {
+  season: string;
+  matchday: number;
+  homeTeam: string;
+  awayTeam: string;
+  grund: string;
+}
+
+const SPIELTAG_10_OHNE_TAKTGEBER =
+  "Der externe Taktgeber (cron-job.org) hatte noch keinen einzigen Lauf gestartet: die " +
+  "Actions-API kennt fuer spielkontext.yml seit dem 04.09. kein workflow_dispatch. Am " +
+  "Wochenende 20.-22.11.2026 kamen nur sechs Laeufe aus GitHubs eigenem Zeitplan (UTC: Fr " +
+  "16:54 und 23:02, Sa 16:05 und 21:37, So 16:11 und 21:54). Einzig So 16:11 lag in einem " +
+  "Einfrierfenster, dem von Werder Bremen gegen Hamburg. Aufgefallen am 23.11.2026 in der " +
+  "Nachbereitung; der Ergebnis-Workflow war schon seit Fr 22:10 UTC rot.";
+
+export const KNOWN_SNAPSHOT_GAPS: readonly SnapshotGap[] = [
+  { season: "2026", matchday: 10, homeTeam: "Bayern Munich", awayTeam: "FC Koln", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Leverkusen", awayTeam: "Paderborn", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Ein Frankfurt", awayTeam: "Hoffenheim", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Union Berlin", awayTeam: "RB Leipzig", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "M'gladbach", awayTeam: "Dortmund", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Elversberg", awayTeam: "Freiburg", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Schalke 04", awayTeam: "Stuttgart", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+  { season: "2026", matchday: 10, homeTeam: "Augsburg", awayTeam: "Mainz", grund: SPIELTAG_10_OHNE_TAKTGEBER },
+];
+
+// Fuer den Alarm: angepfiffene Partien ab SNAPSHOTS_SINCE ohne Schnappschuss, ausser den
+// eingestandenen.
 export function missingSnapshotsAfterKickoff(
   fixtures: readonly { homeTeam: string; awayTeam: string; date: string; matchday: number }[],
   snapshots: readonly KickoffSnapshot[],
   season: string,
   now: Date,
-  kickoffOf: (date: string) => Date
+  kickoffOf: (date: string) => Date,
+  gaps: readonly { season: string; homeTeam: string; awayTeam: string }[] = KNOWN_SNAPSHOT_GAPS
 ): { matchday: number; homeTeam: string; awayTeam: string; kickoff: string }[] {
   const since = new Date(SNAPSHOTS_SINCE).getTime();
-  const frozen = new Set(
-    snapshots.filter((s) => s.season === season).map((s) => `${s.homeTeam}|${s.awayTeam}`)
-  );
+  const pairing = (x: { homeTeam: string; awayTeam: string }) => `${x.homeTeam}|${x.awayTeam}`;
+  const frozen = new Set(snapshots.filter((s) => s.season === season).map(pairing));
+  const excused = new Set(gaps.filter((g) => g.season === season).map(pairing));
   return fixtures
     .filter((f) => {
       const k = kickoffOf(f.date).getTime();
-      return k >= since && k <= now.getTime() && !frozen.has(`${f.homeTeam}|${f.awayTeam}`);
+      return k >= since && k <= now.getTime() && !frozen.has(pairing(f)) && !excused.has(pairing(f));
     })
     .map((f) => ({ matchday: f.matchday, homeTeam: f.homeTeam, awayTeam: f.awayTeam, kickoff: f.date }));
 }

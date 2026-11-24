@@ -555,6 +555,15 @@ Idempotenz bleiben bei `research-due`, der GitHub-Zeitplan bleibt als zweite Cha
 `forward-log-check` meldet jetzt auch einen angepfiffenen Spieltag ohne eine einzige Zeile
 mit Kontext; 5 bis 9 stehen mit Grund in `KNOWN_RESEARCH_GAPS`.
 
+**Nachtrag 24.11.2026: umgesetzt war nur die Seite im Repository.** Die Actions-API kennt
+für `spielkontext.yml` seit dem 04.09. keinen einzigen `workflow_dispatch`-Lauf; der
+Taktgeber ist also nie bei GitHub angekommen. Spieltag 10 hing damit wieder an GitHubs
+Zeitplan (sechs Läufe von Freitag bis Sonntag): recherchiert nur, weil einer davon zufällig
+ins Fenster fiel, eingefroren nur Bremen gegen Hamburg. Die übrigen acht Partien stehen mit
+Grund in `KNOWN_SNAPSHOT_GAPS`. Offen: den Job bei cron-job.org prüfen (Verlauf und
+Statuscode, siehe `SAISONBETRIEB.md`, „Taktgeber“) und mit einem *Test run* bestätigen,
+dass unter Actions ein Spielkontext-Lauf entsteht.
+
 **Für den Freeze:** neun Spieltage gespielt, mit Spielkontext davon nur 1, 2 und 4
 (Spieltag 3 fehlt ganz, 5 bis 9 nur Basis). Die Evidenz kommt also noch langsamer als die
 zwei bis drei Saisons, mit denen der Freeze gerechnet hat.

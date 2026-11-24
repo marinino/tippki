@@ -154,7 +154,10 @@ roten Lauf. Spieltage, die sich nicht mehr nachholen lassen, stehen mit Grund in
 `KNOWN_RESEARCH_GAPS`, derzeit 5 bis 9.
 
 Seit dem 19.11.2026 meldet er außerdem jede angepfiffene Partie ohne Anpfiff-Schnappschuss
-(nächster Abschnitt).
+(nächster Abschnitt). Partien, deren Fenster verpasst ist, stehen mit Grund in
+`KNOWN_SNAPSHOT_GAPS` (`src/data/kickoffSnapshots.ts`), und zwar je Partie statt je
+Spieltag: fällt am Freitag ein Fenster aus, soll der Alarm für Samstag und Sonntag weiter
+anschlagen. Derzeit 8 der 9 Partien von Spieltag 10.
 
 ### Anpfiff einfrieren
 
@@ -181,6 +184,9 @@ Anpfiff. Dadurch *ist* er der Stand bei Anpfiff und nicht bloß eine Annäherung
   Taktgebers deshalb nicht über 18 Uhr hinaus kürzen.
 - Die Spieltage 1 bis 9 lagen vor der Regel. Sie zeigen das Vorwärts-Log, Spieltag 3
   nichts. Was dort bei Anpfiff auf der Seite stand, lässt sich nicht mehr herstellen.
+- Von Spieltag 10 ist nur Bremen gegen Hamburg eingefroren. Der Taktgeber hatte noch keinen
+  einzigen Lauf gestartet, und von GitHubs eigenen Läufen traf nur einer ein Fenster. Die
+  übrigen acht zeigen das Vorwärts-Log und stehen in `KNOWN_SNAPSHOT_GAPS`.
 
 Für den Freeze ist das neutral: kein `configHash`, keine Modelländerung. Der Schnappschuss
 rechnet mit derselben Funktion wie die Seite (`src/data/displayPredictions.ts`).

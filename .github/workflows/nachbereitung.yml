@@ -126,10 +126,30 @@ jobs:
       # Zweite Stelle fuer den Alarm aus ergebnisse.yml. Faellt dort ein Abend komplett aus,
       # meldet sich die Luecke spaetestens hier. continue-on-error, damit der Zeitplan-Test
       # darunter trotzdem laeuft; rot wird der Lauf ueber den letzten Schritt.
+      #
+      # Die Ausgabe gehoert in die Zusammenfassung: der Schritt selbst erscheint wegen
+      # continue-on-error gruen. Bis zum 24.11.2026 stand dort nur die Pauschalmeldung des
+      # letzten Schritts, und die gab fehlende Anpfiff-Schnappschuesse als fehlende
+      # Logzeilen aus.
       - name: Vorwaertstest vollstaendig?
         id: logpruefung
         continue-on-error: true
-        run: npm run forward-log-check
+        run: |
+          # set +e wie in ergebnisse.yml: sonst bricht bash beim Fehlschlag sofort ab, und die
+          # Zusammenfassung bliebe ausgerechnet im Alarmfall leer.
+          set +e
+          npm run forward-log-check > pruefung.txt 2>&1
+          status=$?
+          cat pruefung.txt
+          {
+            echo "### Vorwärts-Log"
+            echo ""
+            echo '```'
+            cat pruefung.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f pruefung.txt
+          exit $status
 
       # Bewusst als letzter Schritt und bewusst ohne continue-on-error.
       #
@@ -145,9 +165,13 @@ jobs:
       - name: Zeitplan gegen den Spielplan pruefen
         run: npm test
 
-      - name: Fehlende Logzeilen melden
+      - name: Luecken im Vorwaertstest melden
         if: ${{ !cancelled() && steps.logpruefung.outcome == 'failure' }}
         run: |
-          echo "Im Vorwaerts-Log fehlen angepfiffene Partien -- Ausgabe im Schritt" >> "$GITHUB_STEP_SUMMARY"
-          echo "\"Vorwaertstest vollstaendig?\" oben. Nachholen laesst sich nichts mehr." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "Der Vorwärtstest ist unvollständig: eine angepfiffene Partie ohne Logzeile, ein"
+            echo "Spieltag ohne Recherche oder eine Partie ohne Anpfiff-Schnappschuss. Was genau"
+            echo "fehlt und was zu tun ist, steht oben unter \"Vorwärts-Log\"."
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1

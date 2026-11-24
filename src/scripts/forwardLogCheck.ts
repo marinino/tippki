@@ -11,8 +11,9 @@
 // deshalb nicht auf Zeitplaene, sondern auf das Ergebnis: steht fuer jede angepfiffene
 // Partie etwas im Log?
 //
-// Bekannte, nicht mehr behebbare Luecken stehen mit Grund in KNOWN_GAPS
-// (src/eval/forwardLogRules.ts).
+// Bekannte, nicht mehr behebbare Luecken stehen mit Grund in KNOWN_GAPS und
+// KNOWN_RESEARCH_GAPS (src/eval/forwardLogRules.ts) sowie, je Partie, in KNOWN_SNAPSHOT_GAPS
+// (src/data/kickoffSnapshots.ts).
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -24,7 +25,11 @@ import {
   missingAfterKickoff,
   missingResearchAfterKickoff,
 } from "../eval/forwardLogRules";
-import { missingSnapshotsAfterKickoff, readKickoffSnapshots } from "../data/kickoffSnapshots";
+import {
+  KNOWN_SNAPSHOT_GAPS,
+  missingSnapshotsAfterKickoff,
+  readKickoffSnapshots,
+} from "../data/kickoffSnapshots";
 
 const DATA_DIR = join(process.cwd(), "data");
 const LOG_PATH = join(DATA_DIR, "forward_log.jsonl");
@@ -59,6 +64,13 @@ if (researchGaps.length > 0) {
   console.log(
     `Bekannte Spieltage ohne Recherche (kein Alarm): ${researchGaps.map((g) => g.matchday).join(", ")}`
   );
+}
+const snapshotGaps = KNOWN_SNAPSHOT_GAPS.filter((g) => g.season === FORWARD_SEASON);
+if (snapshotGaps.length > 0) {
+  const perMatchday = new Map<number, number>();
+  for (const g of snapshotGaps) perMatchday.set(g.matchday, (perMatchday.get(g.matchday) ?? 0) + 1);
+  const parts = [...perMatchday].map(([md, n]) => `Spieltag ${md}: ${n} ${n === 1 ? "Partie" : "Partien"}`);
+  console.log(`Bekannte Partien ohne Schnappschuss (kein Alarm): ${parts.join(", ")}`);
 }
 
 if (missing.length === 0) {
@@ -103,7 +115,9 @@ if (unfrozen.length === 0) {
     `\nNachholen geht nicht -- ein spaeterer Schnappschuss waere nicht der Stand bei Anpfiff.\n` +
       `Die Seite zeigt fuer diese Partien die Zeile aus dem Vorwaerts-Log. Ursache pruefen:\n` +
       `kam zwischen 60 und 15 Minuten vor Anpfiff ein Tick des Taktgebers an\n` +
-      `(SAISONBETRIEB.md, "Taktgeber")? Ist der Schritt "Anpfiff einfrieren" rot?`
+      `(SAISONBETRIEB.md, "Taktgeber")? Stehen unter Actions -> Spielkontext ueberhaupt Laeufe\n` +
+      `mit dem Ausloeser workflow_dispatch? Ist der Schritt "Anpfiff einfrieren" rot? Danach\n` +
+      `die Partien mit Grund in KNOWN_SNAPSHOT_GAPS (src/data/kickoffSnapshots.ts) eintragen.`
   );
 }
 

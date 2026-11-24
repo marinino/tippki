@@ -14,6 +14,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { writeCsvMerged } from "../data/refreshResults";
 import { xgCoverageGaps, xgDuplicatePairings } from "../data/xgCoverage";
 import {
+  KNOWN_SNAPSHOT_GAPS,
   SNAPSHOT_EARLIEST_MINUTES,
   SNAPSHOT_LATEST_MINUTES,
   chooseDisplaySource,
@@ -173,7 +174,7 @@ import {
   overroundOf,
   type BenchmarkSource,
 } from "../eval/benchmarkOdds";
-import { accuracyStandardError, seasonsFor } from "../eval/splits";
+import { FORWARD_SEASON, accuracyStandardError, seasonsFor } from "../eval/splits";
 import {
   KNOWN_GAPS,
   KNOWN_RESEARCH_GAPS,
@@ -2553,16 +2554,63 @@ section("Vorhersage bei Anpfiff eingefroren", () => {
     )
   );
 
-  // Der Alarm.
+  // Der Alarm. Ausdruecklich ohne Ausnahmen ([]): die Paarung oben steht seit dem 24.11.2026
+  // in KNOWN_SNAPSHOT_GAPS und wuerde mit der Voreinstellung still entschuldigt.
   const fx = [{ ...fixture, matchday: 10 }, { homeTeam: "A", awayTeam: "B", date: "2026-11-14T15:30:00", matchday: 9 }];
   check(() =>
     assert.deepEqual(
-      missingSnapshotsAfterKickoff(fx, [], "2026", before(-90), parseKickoff).map((m) => m.matchday),
+      missingSnapshotsAfterKickoff(fx, [], "2026", before(-90), parseKickoff, []).map((m) => m.matchday),
       [10],
       "fehlender Schnappschuss nach Anpfiff schlaegt an, vor SNAPSHOTS_SINCE nicht"
     )
   );
-  check(() => assert.deepEqual(missingSnapshotsAfterKickoff(fx, [exact], "2026", before(-90), parseKickoff), []));
+  check(() => assert.deepEqual(missingSnapshotsAfterKickoff(fx, [exact], "2026", before(-90), parseKickoff, []), []));
+  // Eine eingestandene Partie schweigt, aber nur in ihrer Saison.
+  check(() => {
+    const gap = { season: "2026", homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam };
+    assert.deepEqual(missingSnapshotsAfterKickoff(fx, [], "2026", before(-90), parseKickoff, [gap]), []);
+    assert.equal(
+      missingSnapshotsAfterKickoff(fx, [], "2026", before(-90), parseKickoff, [{ ...gap, season: "2025" }]).length,
+      1,
+      "eine Ausnahme der Vorsaison zaehlt nicht"
+    );
+  });
+
+  // Der echte Stand zur Nachbereitung am 23.11.2026: ohne Ausnahmen fehlen genau die acht
+  // Partien von Spieltag 10 (eingefroren nur Bremen gegen Hamburg), mit KNOWN_SNAPSHOT_GAPS
+  // keine. Die Datei ist append-only, die Aussage bleibt also wahr.
+  check(() => {
+    const echteFx = JSON.parse(readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8"));
+    const echte = readKickoffSnapshots();
+    const stichtag = new Date("2026-11-23T19:00:00Z");
+    const ohne = missingSnapshotsAfterKickoff(echteFx, echte, "2026", stichtag, parseKickoff, []);
+    assert.deepEqual([...new Set(ohne.map((m) => m.matchday))], [10]);
+    assert.equal(ohne.length, 8);
+    assert.equal(missingSnapshotsAfterKickoff(echteFx, echte, "2026", stichtag, parseKickoff).length, 0);
+  });
+  // Jeder Eintrag ist eine echte Partie seines Spieltags und hat wirklich keinen
+  // Schnappschuss. Ein Eintrag fuer eine eingefrorene Partie waere kein Eingestaendnis mehr,
+  // sondern ein Schalter.
+  check(() => {
+    const echteFx: { homeTeam: string; awayTeam: string; matchday: number }[] = JSON.parse(
+      readFileSync(join(process.cwd(), "data", "fixtures.json"), "utf-8")
+    );
+    const echte = readKickoffSnapshots();
+    for (const g of KNOWN_SNAPSHOT_GAPS.filter((x) => x.season === FORWARD_SEASON)) {
+      const name = `${g.homeTeam} vs ${g.awayTeam}`;
+      assert.ok(
+        echteFx.some((f) => f.matchday === g.matchday && f.homeTeam === g.homeTeam && f.awayTeam === g.awayTeam),
+        `${name} steht nicht an Spieltag ${g.matchday} im Spielplan`
+      );
+      assert.ok(
+        !echte.some((s) => s.season === g.season && s.homeTeam === g.homeTeam && s.awayTeam === g.awayTeam),
+        `${name} hat einen Schnappschuss und gehoert nicht in KNOWN_SNAPSHOT_GAPS`
+      );
+    }
+  });
+  check(() =>
+    assert.ok(KNOWN_SNAPSHOT_GAPS.every((g) => g.grund.length > 40), "jede Partie ohne Schnappschuss braucht einen Grund")
+  );
 
   // Der Schnappschuss traegt exakt die Live-Zahlen: dieselbe Funktion, und nach dem Weg
   // durch JSON (so steht er in der Datei) bitgleich.
