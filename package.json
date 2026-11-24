@@ -17,6 +17,7 @@
     "forward-log": "tsx src/scripts/forwardLog.ts",
     "forward-eval": "tsx src/scripts/forwardEval.ts",
     "forward-log-check": "tsx src/scripts/forwardLogCheck.ts",
+    "taktgeber-check": "tsx src/scripts/taktgeberCheck.ts",
     "kickoff-snapshot": "tsx src/scripts/kickoffSnapshot.ts",
     "messlauf": "tsx src/scripts/messlauf.ts",
     "kandidat": "tsx src/scripts/candidate.ts",

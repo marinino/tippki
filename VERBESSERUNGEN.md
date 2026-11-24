@@ -564,6 +564,11 @@ Grund in `KNOWN_SNAPSHOT_GAPS`. Offen: den Job bei cron-job.org prüfen (Verlauf
 Statuscode, siehe `SAISONBETRIEB.md`, „Taktgeber“) und mit einem *Test run* bestätigen,
 dass unter Actions ein Spielkontext-Lauf entsteht.
 
+Damit ein stummer Taktgeber nicht wieder erst nach Anpfiff auffällt, prüft die
+Nachbereitung seitdem mit `npm run taktgeber-check`, ob in den letzten 24 Stunden
+Taktgeber-Läufe ankamen (`src/data/taktgeber.ts`). Erkannt werden sie am Titel, den
+`spielkontext.yml` dafür per `run-name` setzt: „Spielkontext (taktgeber)“.
+
 **Für den Freeze:** neun Spieltage gespielt, mit Spielkontext davon nur 1, 2 und 4
 (Spieltag 3 fehlt ganz, 5 bis 9 nur Basis). Die Evidenz kommt also noch langsamer als die
 zwei bis drei Saisons, mit denen der Freeze gerechnet hat.

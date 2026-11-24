@@ -136,7 +136,7 @@ Workflows an, statt selbst zu schreiben.
 |---|---|---|
 | `spielkontext.yml` | **vom externen Taktgeber** alle 15 min, 08–18 UTC (siehe „Taktgeber“); dazu GitHubs eigener Zeitplan zu :07/:22/:37/:52 als unzuverlässige zweite Chance | prüft die Fälligkeit; im Fenster `refresh-llm`; ab 48 h vor Anpfiff oder im Fenster `forward-log`; bei jedem Tick `kickoff-snapshot` |
 | `ergebnisse.yml` | alle 30 min, 15–22 UTC, Di/Mi/Fr/Sa/So | `refresh` — Ergebnisse und xG; danach `forward-log-check` (Alarm) |
-| `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, Vorschau aufs nächste Fenster |
+| `nachbereitung.yml` | Mo + Di + Do, 07:00 UTC | `fetch-fixtures`, `refresh`, `refresh-market`, `forward-eval`, `forward-log-check`, `taktgeber-check`, Vorschau aufs nächste Fenster |
 
 **Der Alarm.** `npm run forward-log-check` wird rot, sobald eine angepfiffene Partie keine
 einzige Zeile im Vorwärts-Log hat. Das ist die einzige Prüfung, die sieht, ob GitHub die
@@ -235,6 +235,15 @@ auslösen: erwartet ist 204 und unter Actions → Spielkontext ein neuer Lauf mi
 früh“ o. ä. **Nicht** im Fenster testen — ein Lauf dort recherchiert wirklich und schreibt
 dauerhaft ins Vorwärts-Log. Commits aus dem Taktgeber tragen „(taktgeber)“ in der
 Nachricht, so ist im Log sichtbar, woher eine Recherche kam.
+
+**4. Überwachen.** Jeder Spielkontext-Lauf trägt seinen Grund im Titel: „Spielkontext
+(taktgeber)“, „(manuell)“ oder „(planmaessig)“. `npm run taktgeber-check` zählt die
+Taktgeber-Läufe der letzten 24 Stunden und wird rot, wenn kein einziger ankam. Die
+Nachbereitung führt das montags, dienstags und donnerstags aus, also vor jedem
+Spielwochenende. Weniger als die Hälfte der erwarteten 44 Läufe ist ein Hinweis, kein
+Alarm. Lokal läuft die Prüfung ohne Token; nach dem *Test run* ist sie der schnellste Weg
+zu sehen, ob die Aufrufe ankommen. Bis zum 24.11.2026 gab es sie nicht: der Taktgeber kam
+vom 18.11. an nie an, und aufgefallen ist das erst nach Anpfiff von Spieltag 10.
 
 **Kosten.** 44 zusätzliche Läufe am Tag, je etwa eine Minute (überwiegend `npm ci`). Für
 ein öffentliches Repository kostenlos. Wäre das Repository privat, fräße das rund 1300 der

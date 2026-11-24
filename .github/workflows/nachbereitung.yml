@@ -28,6 +28,8 @@ on:
 
 permissions:
   contents: write
+  # Nur lesen: taktgeber-check zaehlt die Spielkontext-Laeufe der letzten 24 Stunden.
+  actions: read
 
 concurrency:
   group: tippki-daten
@@ -151,6 +153,32 @@ jobs:
           rm -f pruefung.txt
           exit $status
 
+      # Die Ursache statt des Schadens: kam in den letzten 24 Stunden ueberhaupt ein Lauf vom
+      # externen Taktgeber an? forward-log-check sieht einen toten Taktgeber erst nach dem
+      # ersten verpassten Anpfiff; hier faellt er montags, dienstags und donnerstags auf, also
+      # vor dem naechsten Spielwochenende. Anlass: der Taktgeber galt ab dem 18.11.2026 als
+      # eingerichtet, kam nie an, und Spieltag 10 verlor acht Anpfiff-Schnappschuesse.
+      # continue-on-error wie oben; rot wird der Lauf ueber den letzten Schritt.
+      - name: Taktgeber lebendig?
+        id: taktgeber
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          npm run taktgeber-check > taktgeber.txt 2>&1
+          status=$?
+          cat taktgeber.txt
+          {
+            echo "### Taktgeber"
+            echo ""
+            echo '```'
+            cat taktgeber.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f taktgeber.txt
+          exit $status
+
       # Bewusst als letzter Schritt und bewusst ohne continue-on-error.
       #
       # Der Abschnitt "Recherchefenster" im selfCheck rechnet fuer ALLE 34 Spieltage nach,
@@ -173,5 +201,17 @@ jobs:
             echo "Der Vorwärtstest ist unvollständig: eine angepfiffene Partie ohne Logzeile, ein"
             echo "Spieltag ohne Recherche oder eine Partie ohne Anpfiff-Schnappschuss. Was genau"
             echo "fehlt und was zu tun ist, steht oben unter \"Vorwärts-Log\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Taktgeber-Ausfall melden
+        if: ${{ !cancelled() && steps.taktgeber.outcome == 'failure' }}
+        run: |
+          {
+            echo ""
+            echo "Vom Taktgeber kam in den letzten 24 Stunden kein einziger Lauf an, oder die"
+            echo "Actions-API war nicht zu erreichen. Ohne Taktgeber fallen Recherche und"
+            echo "Anpfiff-Schnappschüsse des nächsten Spieltags fast sicher aus. Einzelheiten"
+            echo "oben unter \"Taktgeber\"."
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1

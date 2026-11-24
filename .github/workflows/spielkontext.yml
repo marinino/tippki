@@ -32,6 +32,12 @@
 
 name: Spielkontext
 
+# Der Grund steht im Titel jedes Laufs: "Spielkontext (taktgeber)", "(manuell)" oder
+# "(planmaessig)". Daran erkennt `npm run taktgeber-check` in der Nachbereitung, ob der externe
+# Taktgeber ankommt (src/data/taktgeber.ts), und in der Liste unter Actions sieht man es auf
+# einen Blick. Nicht umformulieren, ohne die Pruefung mitzuziehen; selfCheck passt darauf auf.
+run-name: Spielkontext (${{ inputs.grund || 'planmaessig' }})
+
 # Minuten 7, 22, 37, 52 statt */15 (seit 18.09.2026): GitHub nennt den Beginn jeder Stunde
 # ausdruecklich als Spitzenlast, in der geplante Laeufe verzoegert und bei genug Last
 # verworfen werden (Doku "Events that trigger workflows", Abschnitt schedule). */15 lag genau

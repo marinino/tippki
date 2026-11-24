@@ -186,6 +186,12 @@ import {
   researchTooLate,
 } from "../eval/forwardLogRules";
 import {
+  TAKTGEBER_TICKS_PRO_TAG,
+  isTaktgeberRun,
+  taktgeberBefund,
+  type WorkflowRunSummary,
+} from "../data/taktgeber";
+import {
   MIN_PASSWORD_LENGTH,
   MIN_TOKEN_SECRET_LENGTH,
   adminConfigProblem,
@@ -3684,6 +3690,82 @@ section("Vorwaerts-Log: Alarm und zu spaete Recherche", () => {
       zuSpaet.map((e) => `${e.matchday}|${e.kickoff}`),
       ["2|2026-09-04T20:30:00", "4|2026-09-18T20:30:00"]
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+// Lebt der Taktgeber? Die Pruefung sieht die Ursache statt des Schadens (src/data/taktgeber.ts).
+// Geprueft wird, woran ein Taktgeber-Lauf erkannt wird, wann sie anschlaegt, und dass
+// spielkontext.yml den Titel wirklich setzt -- fehlte er, waere die Pruefung fuer immer rot,
+// obwohl der Taktgeber laeuft.
+section("Taktgeber lebt", () => {
+  const lauf = (event: string, grund: string, created_at: string): WorkflowRunSummary => ({
+    event,
+    display_title: `Spielkontext (${grund})`,
+    created_at,
+  });
+  const jetzt = new Date("2026-11-26T12:00:00Z");
+  const vor = (stunden: number) => new Date(jetzt.getTime() - stunden * 3600000).toISOString();
+
+  check(() => assert.equal(isTaktgeberRun(lauf("workflow_dispatch", "taktgeber", vor(1))), true));
+  check(() => assert.equal(isTaktgeberRun(lauf("workflow_dispatch", "manuell", vor(1))), false, "der Knopf auf der Seite"));
+  check(() => assert.equal(isTaktgeberRun(lauf("schedule", "planmaessig", vor(1))), false, "GitHubs Zeitplan"));
+  check(() => assert.equal(isTaktgeberRun(lauf("schedule", "taktgeber", vor(1))), false, "nur workflow_dispatch zaehlt"));
+  check(() =>
+    assert.equal(
+      isTaktgeberRun({ event: "workflow_dispatch", display_title: "Spielkontext", created_at: vor(1) }),
+      false,
+      "Laeufe von vor dem run-name tragen keinen Grund im Titel"
+    )
+  );
+  check(() => assert.equal(TAKTGEBER_TICKS_PRO_TAG, 44, "viertelstuendlich von 8 bis 18 Uhr UTC"));
+
+  // Der Stand vom 24.11.2026: nur GitHubs Zeitplan und ein Knopfdruck, kein Taktgeber.
+  check(() => {
+    const b = taktgeberBefund(
+      [
+        lauf("schedule", "planmaessig", vor(3)),
+        lauf("schedule", "planmaessig", vor(9)),
+        lauf("workflow_dispatch", "manuell", vor(5)),
+      ],
+      jetzt
+    );
+    assert.equal(b.status, "stumm");
+    assert.equal(b.taktgeber, 0);
+    assert.equal(b.andereDispatch, 1);
+    assert.equal(b.juengster, null);
+  });
+  check(() => assert.equal(taktgeberBefund([], jetzt).status, "stumm"));
+
+  // Ein voller Tag lebt; die Grenze zu "duenn" liegt bei der Haelfte der erwarteten Ticks.
+  const ticks = (n: number) =>
+    Array.from({ length: n }, (_, i) => lauf("workflow_dispatch", "taktgeber", vor(0.25 + i * 0.25)));
+  check(() => assert.equal(taktgeberBefund(ticks(44), jetzt).status, "lebt"));
+  check(() => assert.equal(taktgeberBefund(ticks(22), jetzt).status, "lebt"));
+  check(() => assert.equal(taktgeberBefund(ticks(21), jetzt).status, "duenn"));
+  check(() => assert.equal(taktgeberBefund(ticks(1), jetzt).status, "duenn", "ein Lauf ist kein Alarm"));
+  check(() => assert.equal(taktgeberBefund(ticks(3), jetzt).juengster, vor(0.25)));
+
+  // Aelter als 24 Stunden zaehlt nicht, auch nicht knapp.
+  check(() =>
+    assert.equal(taktgeberBefund([lauf("workflow_dispatch", "taktgeber", vor(24.01))], jetzt).status, "stumm")
+  );
+  check(() =>
+    assert.equal(taktgeberBefund([lauf("workflow_dispatch", "taktgeber", vor(23.99))], jetzt).status, "duenn")
+  );
+
+  // Der Titel in spielkontext.yml: mit grund=taktgeber wird er als Taktgeber-Lauf erkannt,
+  // mit jedem anderen Grund nicht.
+  check(() => {
+    const yml = readFileSync(join(process.cwd(), ".github", "workflows", "spielkontext.yml"), "utf-8");
+    const m = yml.match(/^run-name:\s*(.+)$/m);
+    assert.ok(m, "spielkontext.yml setzt keinen run-name -- die Taktgeber-Pruefung waere fuer immer rot");
+    const ausdruck = "${{ inputs.grund || 'planmaessig' }}";
+    assert.ok(m[1].includes(ausdruck), `run-name ohne ${ausdruck}`);
+    const titel = (grund: string) => m[1].replace(ausdruck, grund).trim();
+    assert.equal(isTaktgeberRun({ event: "workflow_dispatch", display_title: titel("taktgeber"), created_at: vor(1) }), true);
+    assert.equal(isTaktgeberRun({ event: "workflow_dispatch", display_title: titel("manuell"), created_at: vor(1) }), false);
   });
 });
 
