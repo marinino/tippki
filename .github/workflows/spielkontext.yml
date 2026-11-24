@@ -20,11 +20,12 @@
 # `forward-log-check` im Ergebnis-Workflow Alarm, wenn nach Anpfiff Zeilen oder (seit
 # 18.11.2026) die Recherche eines Spieltags fehlen.
 #
-# DER EIGENTLICHE TAKT KOMMT SEIT DEM 18.11.2026 VON AUSSEN. Nachgesehen ueber die
-# Actions-API: GitHub hat den Zeitplan von Oktober bis Mitte November nur 2-3 Mal am Tag
-# gestartet, oft Stunden verspaetet (Laeufe um 20:05 und 23:55 UTC bei einem Plan bis
-# 18:59). Kein einziger lag in den Fenstern von Spieltag 5 bis 9, die Recherche fiel fuenf
-# Spieltage in Folge aus. Ein externer Taktgeber (cron-job.org) loest deshalb alle 15
+# DER EIGENTLICHE TAKT KOMMT SEIT DEM 24.11.2026 VON AUSSEN (im Repo vorbereitet am 18.11.,
+# der Job bei cron-job.org fehlte bis dahin). Nachgesehen ueber die Actions-API: GitHub
+# hat den Zeitplan von Oktober bis Mitte November nur 2-3 Mal am Tag gestartet, oft Stunden
+# verspaetet (Laeufe um 20:05 und 23:55 UTC bei einem Plan bis 18:59). Kein einziger lag
+# in den Fenstern von Spieltag 5 bis 9, die Recherche fiel fuenf Spieltage in Folge aus.
+# Ein externer Taktgeber (cron-job.org) loest deshalb alle 15
 # Minuten workflow_dispatch aus, mit grund=taktgeber; solche Laeufe startet GitHub sofort.
 # Einrichtung und Token: SAISONBETRIEB.md, Abschnitt "Taktgeber". Der Zeitplan unten bleibt
 # als zweite, unzuverlaessige Chance stehen -- ein doppelter Lauf ist harmlos, research-due

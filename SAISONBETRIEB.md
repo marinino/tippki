@@ -197,7 +197,8 @@ GitHub startet geplante Läufe nicht zuverlässig. Nachgesehen über die Actions
 Oktober bis Mitte November kamen statt gut 40 viertelstündlichen Läufen am Tag **2 bis 3**
 an, oft Stunden zu spät. Keiner lag in einem Recherchefenster von Spieltag 5 bis 9.
 Läufe über `workflow_dispatch` startet GitHub dagegen sofort. Deshalb gibt seit dem
-18.11.2026 ein externer Dienst den Takt vor: er ruft alle 15 Minuten die GitHub-API auf und
+24.11.2026 ein externer Dienst den Takt vor (im Repository vorbereitet am 18.11., der Job bei
+cron-job.org fehlte bis dahin): er ruft alle 15 Minuten die GitHub-API auf und
 startet `spielkontext.yml`. Ob recherchiert wird, entscheidet weiter allein
 `research-due`; Fenster, Untergrenze und Idempotenz bleiben unverändert.
 
@@ -236,14 +237,23 @@ früh“ o. ä. **Nicht** im Fenster testen — ein Lauf dort recherchiert wirkl
 dauerhaft ins Vorwärts-Log. Commits aus dem Taktgeber tragen „(taktgeber)“ in der
 Nachricht, so ist im Log sichtbar, woher eine Recherche kam.
 
+Der *Test run* verlangt bei cron-job.org eine Bot-Prüfung (Cloudflare Turnstile). Im
+Browser-Pane der Claude-Desktop-App scheitert sie mit „…konnten Ihre Testlauf-Anfrage nicht
+verifizieren“. Dann den Job ohne Testlauf speichern und den nächsten echten Takt abwarten
+(Minute 7, 22, 37 oder 52 UTC): danach zählt `npm run taktgeber-check` mindestens einen
+Lauf. Meldet der Verlauf des Jobs 401, steht im Authorization-Header nicht
+`Bearer github_pat_…`, sondern etwa noch ein Platzhalter.
+
 **4. Überwachen.** Jeder Spielkontext-Lauf trägt seinen Grund im Titel: „Spielkontext
 (taktgeber)“, „(manuell)“ oder „(planmaessig)“. `npm run taktgeber-check` zählt die
 Taktgeber-Läufe der letzten 24 Stunden und wird rot, wenn kein einziger ankam. Die
 Nachbereitung führt das montags, dienstags und donnerstags aus, also vor jedem
 Spielwochenende. Weniger als die Hälfte der erwarteten 44 Läufe ist ein Hinweis, kein
-Alarm. Lokal läuft die Prüfung ohne Token; nach dem *Test run* ist sie der schnellste Weg
-zu sehen, ob die Aufrufe ankommen. Bis zum 24.11.2026 gab es sie nicht: der Taktgeber kam
-vom 18.11. an nie an, und aufgefallen ist das erst nach Anpfiff von Spieltag 10.
+Alarm. Lokal läuft die Prüfung ohne Token; nach dem *Test run* oder dem ersten Takt ist sie
+der schnellste Weg zu sehen, ob die Aufrufe ankommen. Bis zum 24.11.2026 gab es sie nicht:
+der Taktgeber kam vom 18.11. an nie an, weil der Job bei cron-job.org nie angelegt worden
+war, und aufgefallen ist das erst nach Anpfiff von Spieltag 10. Seit dem 24.11.2026 läuft
+er; der erste angenommene Takt war Lauf #276 um 10:37 UTC.
 
 **Kosten.** 44 zusätzliche Läufe am Tag, je etwa eine Minute (überwiegend `npm ci`). Für
 ein öffentliches Repository kostenlos. Wäre das Repository privat, fräße das rund 1300 der

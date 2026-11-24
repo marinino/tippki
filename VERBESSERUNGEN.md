@@ -564,6 +564,13 @@ Grund in `KNOWN_SNAPSHOT_GAPS`. Offen: den Job bei cron-job.org prüfen (Verlauf
 Statuscode, siehe `SAISONBETRIEB.md`, „Taktgeber“) und mit einem *Test run* bestätigen,
 dass unter Actions ein Spielkontext-Lauf entsteht.
 
+**Eingerichtet am 24.11.2026.** Den Job bei cron-job.org gab es bis dahin gar nicht: dass er
+von Hand angelegt werden muss, stand nur in `SAISONBETRIEB.md`. Seit dem 24.11. läuft er
+(Job „tippki-taktgeber“), der erste angenommene Takt war Lauf #276 um 10:37 UTC, wie an
+einem Dienstag erwartet ohne fällige Recherche. Den *Test run* von cron-job.org ersetzte
+dabei der erste echte Takt, weil dessen Bot-Prüfung im Browser-Pane scheitert; Einzelheiten
+in `SAISONBETRIEB.md`, „Taktgeber“.
+
 Damit ein stummer Taktgeber nicht wieder erst nach Anpfiff auffällt, prüft die
 Nachbereitung seitdem mit `npm run taktgeber-check`, ob in den letzten 24 Stunden
 Taktgeber-Läufe ankamen (`src/data/taktgeber.ts`). Erkannt werden sie am Titel, den
