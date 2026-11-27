@@ -1,446 +1,981 @@
 {
   "version": 2,
   "season": "2026",
-  "matchday": 10,
-  "fetchedAt": "2026-11-20T16:56:29.207Z",
+  "matchday": 11,
+  "fetchedAt": "2026-11-27T16:24:28.282Z",
   "model": "claude-haiku-4-5",
   "contexts": {
-    "Bayern Munich|FC Koln": {
+    "Werder Bremen|M'gladbach": {
       "context": {
-        "homeTeam": "Bayern Munich",
-        "awayTeam": "FC Koln",
+        "homeTeam": "Werder Bremen",
+        "awayTeam": "M'gladbach",
         "foundAnything": true,
-        "summary": "Bayern Munich hat mehrere wichtige Ausfälle zu verkraften, insbesondere Torwart Manuel Neuer. Köln verliert ebenfalls Spieler durch Verletzungen und Sperrung.",
+        "summary": "Werder Bremen mit erheblichen Personalausfällen, Mönchengladbach mit Ausfällen und Sperrung durch rote Karte.",
         "keyFactors": [
           {
             "team": "home",
+            "category": "absence",
+            "subject": "Felix Agu",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Jens Stage",
+            "role": "midfielder",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Oberschenkelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Keke Topp",
+            "role": "forward",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzband- und Meniskusausriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Salim Musah",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Oberschenkelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Moussa N'Diaye",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Leistenprobleme",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Skelly Alvero",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Marco Grüll",
+            "role": "forward",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenprobleme",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Senne Lynen",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Krankheit, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Enzo Leopold",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Knieverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Jan Leszczyński",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Knieverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Hugo Bolin",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Tim Kleindienst",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Daiki Hashioka",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Unbekannte Verletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Lukas Ullrich",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Gebrochenes Schlüsselbein",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Ko Itakura",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Sperrung nach roter Karte",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          }
+        ]
+      },
+      "sources": [
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+      ],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
+    },
+    "Mainz|Union Berlin": {
+      "context": {
+        "homeTeam": "Mainz",
+        "awayTeam": "Union Berlin",
+        "foundAnything": true,
+        "summary": "Mainz mit einer Ausfallmeldung, Union Berlin mit erheblichen Personalausfällen.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Dominik Kohr",
+            "role": "midfielder",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Syndesmoseverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Andrik Markgraf",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Stanley Nsoki",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Robert Skov",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Unbekannte Verletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Livan Burcu",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Unbekannte Verletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Felix Uduokhai",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Oberschenkelprobleme",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Josip Juranovic",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Erkrankung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Rani Khedira",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Unbekannte Verletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          }
+        ]
+      },
+      "sources": [
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+      ],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
+    },
+    "Hamburg|Bayern Munich": {
+      "context": {
+        "homeTeam": "Hamburg",
+        "awayTeam": "Bayern Munich",
+        "foundAnything": true,
+        "summary": "Hamburg mit Wadenverletzung eines Stammspielers, Bayern Munich mit massiven Ausfällen mehrerer Leistungsträger.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Miro Muheim",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenverletzung beim Derby gegen Werder Bremen nach etwa 20 Minuten zugezogen",
+            "source": "https://ms-aktuell.de/welt/hsv-muheim-verletzung-23-11-2026/"
+          },
+          {
+            "team": "away",
             "category": "absence",
             "subject": "Manuel Neuer",
             "role": "goalkeeper",
             "importance": "key",
             "direction": "weakens",
             "certainty": "confirmed",
-            "note": "Sehnenteilabriss im rechten Fuß, voraussichtlich bis Jahresende aus",
-            "source": "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/"
+            "note": "Sehnenteilriss, Ausfallzeit etwa zwei Monate",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
           },
           {
-            "team": "home",
+            "team": "away",
             "category": "absence",
             "subject": "Ismael Saibari",
             "role": "midfielder",
             "importance": "regular",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Voraussichtlich bis Jahresende aus",
-            "source": "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Serge Gnabry",
-            "role": "forward",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Voraussichtlich bis Jahresende aus",
-            "source": "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Alphonso Davies",
-            "role": "defender",
-            "importance": "key",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Muskelfaserriss, vorerst ausfallend",
-            "source": "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/"
-          },
-          {
-            "team": "home",
-            "category": "return",
-            "subject": "Jamal Musiala",
-            "role": "midfielder",
-            "importance": "key",
-            "direction": "strengthens",
-            "certainty": "likely",
-            "note": "Wird nach Muskelfaserriss wahrscheinlich erstmals wieder im Kader stehen",
-            "source": "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-10-spieltag-ausfalle-verletzungen-sperren-40039"
+            "certainty": "confirmed",
+            "note": "Syndesmosebandriss, drei bis vier Monate Ausfallzeit",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
           },
           {
             "team": "away",
+            "category": "absence",
+            "subject": "Serge Gnabry",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung, ein bis zwei Monate Ausfallzeit",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Harry Kane",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Syndesmosebandriss, drei bis vier Monate Ausfallzeit",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Michael Olise",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Vorderfußprellung, 10 bis 14 Tage Ausfallzeit",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Jamal Musiala",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Erneute Oberschenkelverletzung beim 1:2 in Lille, fehlt bis auf Weiteres",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+          },
+          {
+            "team": "away",
+            "category": "return",
+            "subject": "Luis Díaz",
+            "role": "forward",
+            "importance": "regular",
+            "direction": "strengthens",
+            "certainty": "confirmed",
+            "note": "Rückkehr nach etwa fünfwöchiger Verletzungspause",
+            "source": "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+          }
+        ]
+      },
+      "sources": [
+        "https://ms-aktuell.de/welt/hsv-muheim-verletzung-23-11-2026/",
+        "https://www.spox.com/fussball/news/fc-bayern-alle-verletzte-welche-stars-fehlen-dem-fcb-heute-gegen-osc-lille/blt39a11aadfe7c1273"
+      ],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
+    },
+    "FC Koln|Elversberg": {
+      "context": {
+        "homeTeam": "FC Koln",
+        "awayTeam": "Elversberg",
+        "foundAnything": true,
+        "summary": "Köln ist stark personell geschwächt mit sechs Ausfällen in Abwehr und Mittelfeld. Elversberg hat zwei Ausfälle zu bewältigen.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Timo Hübers",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Knieverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Thijs Dallinga",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Rav van den Berg",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
             "category": "absence",
             "subject": "Ellyes Skhiri",
             "role": "midfielder",
             "importance": "key",
             "direction": "weakens",
             "certainty": "confirmed",
-            "note": "Verletzung",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "note": "Sprunggelenksverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Imad Rondic",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung Oberschenkel",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Alessio Castro-Montes",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelfaserriss Wade",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "away",
             "category": "absence",
-            "subject": "Thijs Dallinga",
+            "subject": "Luis Seifert",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Syndesmoseanriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Nicholas Mickelson",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Innenbandverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          }
+        ]
+      },
+      "sources": [
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+      ],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
+    },
+    "Paderborn|Schalke 04": {
+      "context": {
+        "homeTeam": "Paderborn",
+        "awayTeam": "Schalke 04",
+        "foundAnything": true,
+        "summary": "Paderborn hat drei fraglich einsetzbare Spieler. Schalke 04 ist mit sechs Ausfällen personell deutlich geschwächt.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Timur Gayret",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Aufbautraining nach Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Laurin Ulrich",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Magen-Darm-Probleme, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Tom Baack",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Erkältung, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Luca Vozar",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Oberschenkelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Emil Höjlund",
             "role": "forward",
             "importance": "regular",
             "direction": "weakens",
             "certainty": "confirmed",
-            "note": "Kreuzbandverletzung",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "note": "Achillessehnenverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "away",
             "category": "absence",
-            "subject": "Fayssal Harchaoui",
+            "subject": "Johannes Siebeking",
             "role": "midfielder",
             "importance": "regular",
             "direction": "weakens",
             "certainty": "confirmed",
-            "note": "Sperrung wegen Roter Karte",
-            "source": "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-10-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/ngjPe6Gj/"
-          }
-        ]
-      },
-      "sources": [
-        "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/",
-        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-10-spieltag-ausfalle-verletzungen-sperren-40039",
-        "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/",
-        "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-10-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/ngjPe6Gj/"
-      ],
-      "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-11-20T16:56:29.207Z"
-    },
-    "Union Berlin|RB Leipzig": {
-      "context": {
-        "homeTeam": "Union Berlin",
-        "awayTeam": "RB Leipzig",
-        "foundAnything": true,
-        "summary": "Union Berlin hat mit mehreren Ausfällen zu kämpfen, darunter vier Spieler (Markgraf, Skov, Nsoki, Juranović) sowie Ouédraogo bis zum Jahreswechsel. RB Leipzig hat Verletztenmeldungen zu Finkgräfe, Guiu und Ouédraogo.",
-        "keyFactors": [
+            "note": "Bauchmuskelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
           {
-            "team": "home",
+            "team": "away",
             "category": "absence",
-            "subject": "Andrik Markgraf",
+            "subject": "Maximilian Wöber",
             "role": "defender",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fehlt für Union Berlin",
-            "source": "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Robert Skov",
-            "role": "midfielder",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fehlt für Union Berlin",
-            "source": "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Stanley Nsoki",
-            "role": "defender",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fehlt für Union Berlin",
-            "source": "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Josip Juranović",
-            "role": "defender",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fehlt für Union Berlin",
-            "source": "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Assan Ouédraogo",
-            "role": "midfielder",
             "importance": "key",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Schulterverletzung, bis zum neuen Jahr ausfallend",
-            "source": "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html"
+            "certainty": "confirmed",
+            "note": "Oberschenkelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "away",
             "category": "absence",
-            "subject": "Max Finkgräfe",
-            "role": "defender",
-            "importance": "regular",
+            "subject": "Bryan Lasme",
+            "role": "forward",
+            "importance": "squad",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Thigh injury",
-            "source": "https://www.fotmob.com/matches/union-berlin-vs-rb-leipzig/80026ad"
+            "certainty": "confirmed",
+            "note": "Oberschenkelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Ron Schallenberg",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Beinverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           }
         ]
       },
       "sources": [
-        "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html",
-        "https://www.fotmob.com/matches/union-berlin-vs-rb-leipzig/80026ad"
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
       ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-11-20T16:56:29.207Z"
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
     },
-    "Schalke 04|Stuttgart": {
+    "Stuttgart|Ein Frankfurt": {
       "context": {
-        "homeTeam": "Schalke 04",
-        "awayTeam": "Stuttgart",
+        "homeTeam": "Stuttgart",
+        "awayTeam": "Ein Frankfurt",
         "foundAnything": true,
-        "summary": "Stuttgart hat mit Justin Diehl einen längerfristigen Ausfall zu beklagen. Schalke 04 hat nach den verfügbaren Informationen keine aktuellen Ausfälle.",
+        "summary": "Stuttgart hat keine gemeldeten Ausfälle. Frankfurt hat zwei Ausfälle/Fragebaumeldungen zu verzeichnen.",
         "keyFactors": [
           {
             "team": "away",
             "category": "absence",
-            "subject": "Justin Diehl",
-            "role": "defender",
+            "subject": "Jessic Ngankam",
+            "role": "forward",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Im Aufbautraining",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Can Uzun",
+            "role": "forward",
             "importance": "regular",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fällt längerfristig aus",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "certainty": "likely",
+            "note": "Nach Erkältung fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           }
         ]
       },
       "sources": [
-        "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
       ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-11-20T16:56:29.207Z"
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
     },
-    "Augsburg|Mainz": {
+    "Freiburg|RB Leipzig": {
       "context": {
-        "homeTeam": "Augsburg",
-        "awayTeam": "Mainz",
+        "homeTeam": "Freiburg",
+        "awayTeam": "RB Leipzig",
         "foundAnything": true,
-        "summary": "Augsburg hat mehrere Ausfälle zu bewältigen: Chrislain Matsima, Steve Mounié und Noahkai Banks stehen nicht zur Verfügung. Mainz hat nach den verfügbaren Informationen keine aktuellen schwerwiegenden Ausfälle.",
+        "summary": "Freiburg fehlt Florent Muslija verletzungsbedingt. Leipzig muss auf Assan Ouedraogo und Marc Guiu verzichten; Castello Lukeba ist fragwürdig.",
         "keyFactors": [
           {
             "team": "home",
             "category": "absence",
-            "subject": "Chrislain Matsima",
-            "role": "defender",
+            "subject": "Florent Muslija",
+            "role": "midfielder",
             "importance": "regular",
             "direction": "weakens",
-            "certainty": "reported",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Assan Ouedraogo",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Schulterverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Marc Guiu",
+            "role": "forward",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
             "note": "Muskelverletzung",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          }
+        ]
+      },
+      "sources": [
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+      ],
+      "model": "claude-haiku-4-5",
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
+    },
+    "Hoffenheim|Augsburg": {
+      "context": {
+        "homeTeam": "Hoffenheim",
+        "awayTeam": "Augsburg",
+        "foundAnything": true,
+        "summary": "Hoffenheim verliert Kabak durch vierwöchige Sperre und hat vier Verletzte in der Abwehr. Augsburg fehlen fünf Spieler und Trainer Baum ist gesperrt.",
+        "keyFactors": [
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Ozan Kabak",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Rote Karte gegen Frankfurt, vier Bundesligaspiele gesperrt",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "home",
+            "category": "absence",
+            "subject": "Albian Hajdari",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Meniskusverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Nathan De Cat",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Meniskusverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Valentin Gendrey",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Wadenbeinbruch",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Robin Hranáč",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Außenmeniskusverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
             "category": "absence",
             "subject": "Steve Mounié",
             "role": "forward",
-            "importance": "regular",
+            "importance": "key",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Verletzung",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "certainty": "confirmed",
+            "note": "Verletzung unbekannt",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
-            "team": "home",
+            "team": "away",
             "category": "absence",
             "subject": "Noahkai Banks",
             "role": "defender",
             "importance": "regular",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Knieverletzung",
-            "source": "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+            "certainty": "confirmed",
+            "note": "Außenbandverletzung Knie",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Chrislain Matsima",
+            "role": "defender",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Adduktorenprobleme",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Jeffrey Gouweleeuw",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelprobleme Oberschenkel",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "absence",
+            "subject": "Han-Noah Massengo",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelprobleme",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "manager",
+            "subject": "Manuel Baum",
+            "role": "coach",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Rote Verwarnung, gesperrt",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           }
         ]
       },
       "sources": [
-        "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/"
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
       ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-11-20T16:56:29.207Z"
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
     },
-    "Werder Bremen|Hamburg": {
+    "Dortmund|Leverkusen": {
       "context": {
-        "homeTeam": "Werder Bremen",
-        "awayTeam": "Hamburg",
+        "homeTeam": "Dortmund",
+        "awayTeam": "Leverkusen",
         "foundAnything": true,
-        "summary": "Beide Teams sind von erheblichen Ausfällen betroffen. Bremen fehlen Bilal Nadir und Nicolai Remberg, sowie Albert Sambi Lokonga mit Faszienverletzung. Hamburg verliert Fabio Vieira mit Muskelfaserriss, Bilal Nadir und Yussuf Poulsen.",
+        "summary": "Dortmund hat fünf Verletzte und drei Spieler mit fraglichem Status nach Nationalmannschaftseinsätzen. Leverkusen kehrt Kennet Eichhorn zurück, verliert aber Martin Terrier.",
         "keyFactors": [
           {
             "team": "home",
             "category": "absence",
-            "subject": "Bilal Nadir",
-            "role": "midfielder",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Oberschenkelverletzung, fällt längerfristig aus",
-            "source": "https://www.sport.de/news/ne17348609/hsv-personeller-tiefschlag-vor-nordderby/"
-          },
-          {
-            "team": "home",
-            "category": "absence",
-            "subject": "Nicolai Remberg",
+            "subject": "Samuele Inacio",
             "role": "defender",
             "importance": "regular",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Kreuzbandriss",
-            "source": "https://www.sport.de/news/ne17348609/hsv-personeller-tiefschlag-vor-nordderby/"
+            "certainty": "confirmed",
+            "note": "Meniskusverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "home",
             "category": "absence",
-            "subject": "Albert Sambi Lokonga",
-            "role": "midfielder",
-            "importance": "regular",
-            "direction": "weakens",
-            "certainty": "reported",
-            "note": "Faszienverletzung an der rechten Wade",
-            "source": "https://www.sport.de/news/ne17348609/hsv-personeller-tiefschlag-vor-nordderby/"
-          },
-          {
-            "team": "away",
-            "category": "absence",
-            "subject": "Fabio Vieira",
+            "subject": "Emre Can",
             "role": "midfielder",
             "importance": "key",
             "direction": "weakens",
             "certainty": "confirmed",
-            "note": "Muskelfaserriss im Oberschenkel, zugezogen beim 0:1 in Paderborn",
-            "source": "https://www.sportschau.de/regional/ndr/hsv-schock-vorm-frankfurt-doppelpack-vieira-und-nadir-fehlen-lange,hsv-2276.html"
+            "note": "Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Giannis Konstantelias",
+            "role": "midfielder",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Kreuzbandriss",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Justin Lerma",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Muskelverletzung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Mussa Kaba",
+            "role": "defender",
+            "importance": "squad",
+            "direction": "weakens",
+            "certainty": "confirmed",
+            "note": "Ausgerenkte Schulter",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Serhou Guirassy",
+            "role": "forward",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Muskelproblem nach Nationalmannschaftseinsatz, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Carney Chukwuemeka",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Muskelproblem nach Nationalmannschaftseinsatz, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "home",
+            "category": "absence",
+            "subject": "Waldemar Anton",
+            "role": "defender",
+            "importance": "key",
+            "direction": "weakens",
+            "certainty": "likely",
+            "note": "Muskelprobleme, fraglich",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
+          },
+          {
+            "team": "away",
+            "category": "return",
+            "subject": "Kennet Eichhorn",
+            "role": "midfielder",
+            "importance": "regular",
+            "direction": "strengthens",
+            "certainty": "confirmed",
+            "note": "Rückkehr nach Stoffwechselstörung",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           },
           {
             "team": "away",
             "category": "absence",
-            "subject": "Yussuf Poulsen",
+            "subject": "Martin Terrier",
             "role": "forward",
-            "importance": "regular",
+            "importance": "key",
             "direction": "weakens",
-            "certainty": "reported",
-            "note": "Fällt aus",
-            "source": "https://www.sportschau.de/regional/ndr/hsv-schock-vorm-frankfurt-doppelpack-vieira-und-nadir-fehlen-lange,hsv-2276.html"
+            "certainty": "confirmed",
+            "note": "Muskelverletzung Oberschenkel",
+            "source": "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
           }
         ]
       },
       "sources": [
-        "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-10-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/ngjPe6Gj/",
-        "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-34-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/ngjPe6Gj/",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_SV_Werder_Bremen_season",
-        "https://www.feverpitch.de/10-bundesliga-spieltag-2026-27/",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_SpVgg_Greuther_F%C3%BCrth_season",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_Bayer_04_Leverkusen_season",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_in_German_football",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_2._Bundesliga",
-        "https://en.wikipedia.org/wiki/2026_Franz_Beckenbauer_Supercup",
-        "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-31-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/h8aGdcNN/",
-        "https://en.wikipedia.org/wiki/Tarek_Buchmann",
-        "https://en.wikipedia.org/wiki/2026_DFB-Pokal_final",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_FC_Bayern_Munich_(women)_season",
-        "https://www.bavarianfootballworks.com/bayern-munich-injuries/279962/injury-update-bayern-munichs-walking-wounded-making-progress",
-        "https://www.t-online.de/sport/fussball/bundesliga/fc-bayern-muenchen/id_101509380/fc-bayern-max-eberl-gibt-update-zu-verletzten-monatelange-pause.html",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_in_German_football",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_1._FC_Union_Berlin_season",
-        "https://www.beinsports.com/en-us/soccer/bundesliga/articles/major-blow-for-bayern-munich-manuel-neuer-could-miss-the-rest-of-2026-2026-11-08",
-        "https://www.yardbarker.com/soccer/articles/bayern_munich_face_a_major_dilemma_as_a_pressing_question_resurfaces_over_alphonso_davies/s1_17790_44579705",
-        "https://fcbayern.com/en/news/2026/11/manuel-neuer-sidelined-for-time-being",
-        "https://www.flashscore.de/news/fu-ball-bundesliga-bundesliga-10-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/nVYTRQC5/",
-        "https://www.bundesliga.com/de/bundesliga/news/voraussichtliche-aufstellungen-10-spieltag-ausfalle-verletzungen-sperren-40039",
-        "https://www.flashscore.at/news/bundesliga-2024-25-aufstellungen-verletzungen-und-sperren-in-der-ubersicht/dvFFbKSh/",
-        "https://www.getfootballnewsgermany.com/2026/borussia-dortmund-bayer-leverkusen-team-news-predicted-line-ups/",
-        "https://www.tribalfootball.com/article/fu-ball-bundesliga-bundesliga-10-spieltag-aufstellungen-verletzungen-und-sperren-in-der-ubersicht-b993beae-9371-493b-bbb3-9cd5a92d1477",
-        "https://www.fotmob.com/matches/bayer-leverkusen-vs-borussia-dortmund/2o3wkl",
-        "https://de.headtopics.com/news/bundesliga-spieltag-10-kompany-zuruck-bayer-muss-punkten-90035963",
-        "https://www.fotmob.com/matches/union-berlin-vs-rb-leipzig/80026ad",
-        "https://www.sportsmole.co.uk/football/union-berlin/preview/union-berlin-vs-rb-leipzig-prediction-team-news-lineups_609454.html",
-        "https://en.wikipedia.org/wiki/Janis_Blaswich",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_Frauen-Bundesliga",
-        "https://www.sportskeeda.com/football/union-berlin-vs-rb-leipzig-prediction-betting-tips-november-21st-2026",
-        "https://sports.yahoo.com/articles/preview-1-fc-union-berlin-135000974.html",
-        "https://www.ligainsider.de/bundesliga/verletzte-und-gesperrte-spieler/",
-        "https://sports.yahoo.com/articles/union-berlin-vs-rb-leipzig-161300590.html",
-        "https://missesnextmatch.com/en/team/rb-leipzig",
-        "https://www.fotmob.com/en-GB/matches/paderborn-vs-eintracht-frankfurt/2rdkqr",
-        "https://www.whoscored.com/matches/1995440/preview/germany-bundesliga-2026-2027-paderborn-hoffenheim",
-        "https://www.fotmob.com/matches/hoffenheim-vs-eintracht-frankfurt/2ouj10",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_2._Bundesliga",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_Bundesliga",
-        "https://www.sport1.de/news/fussball/bundesliga/2026/11/fan-stuerzt-aus-gaesteblock-notfall-ueberschattet-paderborn-frankfurt",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_TSG_1899_Hoffenheim_season",
-        "https://www.nw.de/lokal/kreis_paderborn/paderborn/24457040_SC-Paderborn-kassiert-spaeten-Ausgleich-gegen-Frankfurt-Unfall-ueberschattet-das-Spiel.html",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_VfB_Stuttgart_season",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_SC_Freiburg_season",
-        "https://www.sportsmole.co.uk/football/elversberg/preview/elversberg-vs-freiburg-prediction-team-news-lineups_609436.html",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_Borussia_M%C3%B6nchengladbach_season",
-        "https://www.fotmob.com/matches/elversberg-vs-freiburg/29xwj3",
-        "https://www.ligainsider.de/sc-freiburg/18/",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_Bundesliga",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_1._FSV_Mainz_05_season",
-        "https://en.wikipedia.org/wiki/2026%E2%80%9327_FC_Schalke_04_season",
-        "https://www.fotmob.com/matches/augsburg-vs-mainz-05/2rtngt",
-        "https://magazin.comunio.de/verletzten-update-werder-bangt-um-star-bayern-duo-schwer-gebeutelt/",
-        "https://www.flashscore.de/news/bundesliga-10-spieltag-live-bei-flashscore/naHSKOFN/",
-        "https://www.werra-rundschau.de/sport/fussball/fc-bayern-gegen-den-fc-koeln-hier-im-liveticker-verfolgen-zr-94600742.html",
-        "https://www.leinetal24.de/sport/fussball/fc-bayern-gegen-den-fc-koeln-hier-im-liveticker-verfolgen-zr-94600742.html",
-        "https://www.echo24.de/sport/fussball/fc-bayern-gegen-den-fc-koeln-hier-im-liveticker-verfolgen-zr-94600742.html",
-        "https://www.fotmob.com/de/matches/fc-koln-vs-bayern-munchen/2ue2rs",
-        "https://www.fotmob.com/de/matches/koln-vs-rb-leipzig/81rtpmd",
-        "https://www.sportschau.de/regional/ndr/hsv-schock-vorm-frankfurt-doppelpack-vieira-und-nadir-fehlen-lange,hsv-2276.html",
-        "https://ms-aktuell.de/welt/hsv-verletztenmisere-02-11-2026/",
-        "https://en.wikipedia.org/wiki/2020%E2%80%9321_SSV_Jahn_Regensburg_season",
-        "https://www.sport.de/news/ne17229786/hamburger-sv-verletzungsschock-ueberschattet-last-minute-sieg-des-hsv/",
-        "https://en.wikipedia.org/wiki/Hamburger_SV_(women)",
-        "https://en.wikipedia.org/wiki/2025%E2%80%9326_Hamburger_SV_season",
-        "https://www.sport.de/news/ne17348609/hsv-personeller-tiefschlag-vor-nordderby/",
-        "https://missesnextmatch.com/en/team/hamburger-sv",
-        "https://ran.joyn.de/sports/teams/te253-bor-moenchengladbach",
-        "https://www.fotmob.com/matches/borussia-monchengladbach-vs-borussia-dortmund/363pci",
-        "https://www.ligainsider.de/borussia-moenchengladbach/5/",
-        "https://www.wettbasis.com/sportwetten-news/top-gladbach-dortmund-quoten-boost-neo-bet-pusht-sieg-bvb-auf-14-40",
-        "https://sports.yahoo.com/articles/borussia-m-nchengladbach-vs-borussia-155000062.html",
-        "https://www.bundesliga.com/en/bundesliga/clubs/borussia-moenchengladbach",
-        "https://bmg-news.de/gladbach-7-ausfaelle-dortmund/",
-        "https://www.borussia.de/news/itakura-und-kleindienst-ruecken-in-die-startelf",
-        "https://www.fotmob.com/ko/players/1398483/lukas-ullrich"
+        "https://www.flashscore.de/news/fussball-bundesliga-11-spieltag-aufstellungen-verletzungen-und-sperren/ngjPe6Gj/"
       ],
       "model": "claude-haiku-4-5",
-      "fetchedAt": "2026-11-20T16:56:29.207Z"
+      "fetchedAt": "2026-11-27T16:24:28.282Z"
     }
   },
-  "failures": {
-    "Leverkusen|Paderborn": "Antwort kam zurueck, war aber keiner Partie zuzuordnen -- das Modell nannte \"Leverkusen vs SC Paderborn\", \"Eintracht Frankfurt vs TSG Hoffenheim\". Block 1: 3 Antworten auf 3 Partien, 1 zugeordnet. Verdacht: Namensnormalisierung, nicht die Recherche.",
-    "Ein Frankfurt|Hoffenheim": "Antwort kam zurueck, war aber keiner Partie zuzuordnen -- das Modell nannte \"Leverkusen vs SC Paderborn\", \"Eintracht Frankfurt vs TSG Hoffenheim\". Block 1: 3 Antworten auf 3 Partien, 1 zugeordnet. Verdacht: Namensnormalisierung, nicht die Recherche.",
-    "M'gladbach|Dortmund": "Antwort kam zurueck, war aber keiner Partie zuzuordnen -- das Modell nannte \"Borussia Mönchengladbach vs Borussia Dortmund\", \"SV Elversberg vs SC Freiburg\". Block 2: 3 Antworten auf 3 Partien, 1 zugeordnet. Verdacht: Namensnormalisierung, nicht die Recherche.",
-    "Elversberg|Freiburg": "Antwort kam zurueck, war aber keiner Partie zuzuordnen -- das Modell nannte \"Borussia Mönchengladbach vs Borussia Dortmund\", \"SV Elversberg vs SC Freiburg\". Block 2: 3 Antworten auf 3 Partien, 1 zugeordnet. Verdacht: Namensnormalisierung, nicht die Recherche."
-  },
   "usage": {
-    "inputTokens": 195259,
-    "outputTokens": 8979,
-    "webSearches": 10,
-    "costUsd": 0.34015399999999996,
+    "inputTokens": 250005,
+    "outputTokens": 12392,
+    "webSearches": 12,
+    "costUsd": 0.431965,
     "searchErrors": [],
-    "researchChars": 6055,
+    "researchChars": 7733,
     "matching": {
       "blocks": [
         {
           "block": 1,
           "requested": 3,
           "returned": 3,
-          "matched": 1
+          "matched": 3
         },
         {
           "block": 2,
           "requested": 3,
           "returned": 3,
-          "matched": 1
+          "matched": 3
         },
         {
           "block": 3,
@@ -449,32 +984,7 @@
           "matched": 3
         }
       ],
-      "unmatched": [
-        {
-          "block": 1,
-          "homeTeam": "Leverkusen",
-          "awayTeam": "SC Paderborn",
-          "keyFactorCount": 11
-        },
-        {
-          "block": 1,
-          "homeTeam": "Eintracht Frankfurt",
-          "awayTeam": "TSG Hoffenheim",
-          "keyFactorCount": 9
-        },
-        {
-          "block": 2,
-          "homeTeam": "Borussia Mönchengladbach",
-          "awayTeam": "Borussia Dortmund",
-          "keyFactorCount": 4
-        },
-        {
-          "block": 2,
-          "homeTeam": "SV Elversberg",
-          "awayTeam": "SC Freiburg",
-          "keyFactorCount": 7
-        }
-      ]
+      "unmatched": []
     }
   },
   "research": {
